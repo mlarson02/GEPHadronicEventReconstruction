@@ -128,6 +128,11 @@ algorithm/emulation/jetTaggerConfigLocal.sh
 
 10. condor: whether to run on condor, currently unsupported and
     unnecessary since emulation runs very quickly.
+11. subjetEtThreshold: minimum E_T for small-R jets to be considered as subjet candidates, is controlled separately in this script for gFEX, jFEX and WTA-cone jets.
+    
+12. enableEtWeightedMidpoints: whether the midpoint computation used for seed optimization is weighted by the E_T of each proto-seed used in the midpoint computation.
+    
+13. minEtSeedPosOptimizations and minEtSeedPosOptimizationsCuts: whether (and the value of) there is a minimum E_T threshold for small-R jets to be considered as proto-seeds for seed         position optimization (nominally is 25 GeV targetted for WTA-cone jets). 
 
 ------------------------------------------------------------------------
 
