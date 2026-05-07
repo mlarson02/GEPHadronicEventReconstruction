@@ -177,33 +177,6 @@ const std::string fileName_ =
     (jzSlice_ == 4)    ? "mc21_14TeV_jj_JZ4" :
                          "unknown_sample";
 
-
-
-void sortByEt(input seedValues[nTotalSeeds_], input sortedSeedValues[nSeedsInput_]) {
-    //std::cout << "SORTING BY ET!" << std::endl;
-    /*for (int i = 0; i < nTotalSeeds_ - 1; ++i) {
-        //std::cout << "i: " << i << std::endl;
-        for (int j = 0; j < nTotalSeeds_ - i - 1; ++j) {
-            ap_uint<et_bit_length_> et1 = seedValues[j].range(et_high_, et_low_);
-            ap_uint<et_bit_length_> et2 = seedValues[j + 1].range(et_high_, et_low_);
-            if (et1 < et2) { // Descending sort
-                input temp = seedValues[j];
-                seedValues[j] = seedValues[j + 1];
-                seedValues[j + 1] = temp;
-            }
-        }
-    }*/
-    for (int j = 0; j < nSeedsInput_; ++j){
-        //std::cout << "seedValues[j]: " << std::hex << seedValues[j] << std::endl;
-        //std::cout << "after sort j: " << std::dec << j << std::endl;
-        sortedSeedValues[j] = seedValues[j];
-        //std::cout << "sortedSeedValues[j] : " << std::hex << sortedSeedValues[j] << std::endl;
-        //std::cout << "AFTER ASSIGNING VALUES j: " << std::dec << j << std::endl;
-    }
-    //std::cout << "exiting???? " << std::endl;
-    return;
-}
-
 // read values from .dat files for a provided event
 template <unsigned int arraySize >
 inline void extract_values_from_file(const std::string& fileName, input (&values)[arraySize], unsigned int eventToProcess) {
@@ -508,7 +481,7 @@ if __name__ == "__main__":
                                             f"maxObj{maxObjectsConsidered}_"
                                             f"{rMergeCut_str}"
                                             f"{signal_str}"
-                                            "_WTAConeJetsCellsTowers_ValidateEmulation"
+                                            "_WTAConeJetsCellsTowers_ValidateEmulation_FINAL"
                                             #f"{energyCutBool_str}_"
                                             #f"ecutVal{energyCut_str}"
                                         )

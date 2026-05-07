@@ -48,45 +48,16 @@ void jet_tag(input inputObjectValues[maxObjectsConsidered_], output (&outputJetV
 
         for (unsigned int iInput = nSeedsOutput_; iInput < maxObjectsConsidered_; ++iInput){ // loop through input objects to consider merging
             #pragma HLS unroll
-            std::cout << "iInput: " << iInput << "\n";
-            
+            //std::cout << "iInput: " << iInput << "\n";
+
             ap_uint<eta_bit_length_ > inputEta = inputObjectValues[iInput].range(eta_high_, eta_low_);
             ap_uint<phi_bit_length_ > inputPhi = inputObjectValues[iInput].range(phi_high_, phi_low_);
             ap_uint<et_bit_length_ > inputEt = inputObjectValues[iInput].range(et_high_, et_low_);
             //std::cout << "inputEta : " << inputEta << "\n";
             //std::cout << "inputPhi: " << inputPhi << "\n";
             //std::cout << "inputEt: "  << inputEt << "\n";
-            // Calculate signed differences (deltaEta and deltaPhi)
-            // +1 bit to hold full signed range (ap_uint<N> - ap_uint<N> needs N+1 signed bits)
-            // and to make the sign-bit access [eta_bit_length_] valid on ap_int<eta_bit_length_+1>
-            ap_int<eta_bit_length_ + 1> deltaEta = seedEta - inputEta;
-            ap_int<phi_bit_length_ + 1> deltaPhi = seedPhi - inputPhi;
 
-            //std::cout << "deltaEta : " << deltaEta << "\n";
-            //std::cout << "deltaPhi: " << deltaPhi << "\n";
-            //#pragma HLS ARRAY_PARTITION variable=inputEta complete //dim=0
-            //#pragma HLS ARRAY_PARTITION variable=inputPhi complete //dim=0
-            //#pragma HLS ARRAY_PARTITION variable=inputEt complete //dim=0
-            //#pragma HLS ARRAY_PARTITION variable=deltaEta complete //dim=0
-            //#pragma HLS ARRAY_PARTITION variable=deltaPhi complete //dim=0
-
-            // Use unsigned type for absolute values, and ensure both operands are of the same type
-            ap_uint<eta_bit_length_> uDeltaEta = deltaEta[eta_bit_length_] ? static_cast<ap_uint<eta_bit_length_>>( -deltaEta ) : static_cast<ap_uint<eta_bit_length_>>( deltaEta );
-            ap_uint<phi_bit_length_> uDeltaPhi = deltaPhi[phi_bit_length_] ? static_cast<ap_uint<phi_bit_length_>>( -deltaPhi ) : static_cast<ap_uint<phi_bit_length_>>( deltaPhi );
-            //#pragma HLS ARRAY_PARTITION variable=uDeltaEta complete //dim=0
-            //#pragma HLS ARRAY_PARTITION variable=uDeltaPhi complete //dim=0
-
-            
-            //#pragma HLS ARRAY_PARTITION variable=corrDeltaPhi complete //dim=0
-            if (uDeltaPhi >= pi_digitized_in_phi_) uDeltaPhi = 2 * pi_digitized_in_phi_ - uDeltaPhi;
-            ap_uint<phi_bit_length_ - 1> corrDeltaPhi = uDeltaPhi; // using corr delta phi saves 1 bit, unsure if necessary?
-            ap_uint<2 * (eta_bit_length_ + phi_bit_length_) > deltaR2 =  uDeltaEta * uDeltaEta + corrDeltaPhi * corrDeltaPhi;
-            #pragma HLS bind_op variable=deltaR2 op=mul impl=dsp
-            //ap_uint<eta_bit_length_ + phi_bit_length_ + 2 > lut_index = deltaEta * (1 << (phi_bit_length_) ) + deltaPhi; // Calculate LUT index corresponding to whether input object passes R^2 cut
-            //std::cout << "lut_index: " << lut_index << "\n";
-            //std::cout << "max_R2lut_size_ : " << max_R2lut_size_ << "\n";
-            //#pragma HLS ARRAY_PARTITION variable=lut_index complete //dim=0, FIXME map pairs of just deltaEta, deltaPhi --> 0, 1
-            //if (!(lut_index >= max_R2lut_size_) && lut_[lut_index]){ // only consider if lut index is smaller than max size (past max size, all values are False) // FIXME will throw an error for deltaR!=1.0
+            ap_uint<2*(eta_bit_length_ + phi_bit_length_)> deltaR2 = calcDeltaR2(seedEta, seedPhi, inputEta, inputPhi);
             //std::cout << "deltaR2 : " << deltaR2 << " , digitized_delta_R2_: " << digitized_delta_R2_ << "\n";
             if(deltaR2 <= digitized_delta_R2_){ // 7688 comes from 62^2 + 62^2 which using granularity of 0.0125 for eta and phi passes R^2 < 1.21 
                 

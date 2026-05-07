@@ -1,11 +1,10 @@
-#ifndef HELPER_FUNCTIONS_ADV_H  // Check if the macro is defined
-#define HELPER_FUNCTIONS_ADV_H  // Define the macro
+#ifndef HELPER_FUNCTIONS_ADV_H
+#define HELPER_FUNCTIONS_ADV_H
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <bitset>
 #include <array>
-#include <ap_int.h>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -13,46 +12,27 @@
 #include "ap_int.h"
 #include "constants_adv.h"
 
-// INTEGER VERSION, to be used by FW
-// FIXME return 
-
-
-
-static inline ap_uint<2> index_of_min(ap_uint<2 * (eta_bit_length_ + phi_bit_length_)> (&in)[nSeedsDeltaR_]) {
-//#pragma HLS pipeline II=1
-//#pragma HLS inline on
-
-    ap_uint<deltaRBits_> min_val = in[0];
-    ap_uint<2> min_idx = 0;
-
-    if (in[1] < min_val) {
-        min_val = in[1];
-        min_idx = 1;
-    }
-    if (in[2] < min_val) {
-        min_val = in[2];
-        min_idx = 2;
-    }
-    if (in[3] < min_val) {
-        min_val = in[3];
-        min_idx = 3;
-    }
-
-    return min_idx;
+// Compute saturated digitized deltaR^2 between two (eta, phi) points.
+// Applies shortest-arc phi wrapping and saturates the result to deltaR2_bits_ width.
+inline ap_uint<deltaR2_bits_> calcDeltaR2(
+    ap_uint<eta_bit_length_> eta1, ap_uint<phi_bit_length_> phi1,
+    ap_uint<eta_bit_length_> eta2, ap_uint<phi_bit_length_> phi2
+) {
+    #pragma HLS INLINE
+    ap_int<eta_bit_length_ + 1> dEta = eta1 - eta2;
+    ap_int<phi_bit_length_ + 1> dPhi = phi1 - phi2;
+    ap_uint<eta_bit_length_> uDEta = dEta[eta_bit_length_] ? static_cast<ap_uint<eta_bit_length_>>(-dEta) : static_cast<ap_uint<eta_bit_length_>>(dEta);
+    ap_uint<phi_bit_length_> uDPhi = dPhi[phi_bit_length_] ? static_cast<ap_uint<phi_bit_length_>>(-dPhi) : static_cast<ap_uint<phi_bit_length_>>(dPhi);
+    if (uDPhi >= pi_digitized_in_phi_) uDPhi = 2 * pi_digitized_in_phi_ - uDPhi;
+    ap_uint<phi_bit_length_ - 1>   corrDPhi = uDPhi;
+    ap_uint<2*eta_bit_length_>     etaSq    = uDEta * uDEta;
+    #pragma HLS bind_op variable=etaSq op=mul impl=dsp
+    ap_uint<2*(phi_bit_length_-1)> phiSq    = corrDPhi * corrDPhi;
+    #pragma HLS bind_op variable=phiSq op=mul impl=dsp
+    ap_uint<2*eta_bit_length_+1>   rawSum   = ap_uint<2*eta_bit_length_+1>(etaSq) + phiSq;
+    return rawSum > ap_uint<deltaR2_bits_>((1 << deltaR2_bits_) - 1)
+           ? ap_uint<deltaR2_bits_>((1 << deltaR2_bits_) - 1)
+           : ap_uint<deltaR2_bits_>(rawSum);
 }
 
-/*
-inline ap_uint <eta_bit_length_ * 2 + 1 > calcDeltaR2(ap_uint<eta_bit_length_ > eta1, ap_uint<phi_bit_length_ >  phi1, ap_uint<eta_bit_length_ >  eta2, ap_uint<phi_bit_length_ >  phi2) {
-    
-    // FIXME need to load in LUT, likely in testbench? 
-    
-    //std::cout << "eta1: " << eta1 << " eta2: " << eta2 << " phi1: " << phi1 << " phi2: " << phi2 << "\n";
-    ap_uint<eta_bit_length_ > dEta = ((eta1 - eta2) < 0) ? - (eta2 - eta1) : eta1 - eta2;
-    ap_uint<phi_bit_length_ > dPhi = ((phi1 - phi2) < 0) ? - (phi2 - phi1) : phi1 - phi2;
-    ap_uint<eta_bit_length_ + phi_bit_length_ > lutIndex = (dEta) * (dPhi); //FIXME add calculation of lutIndex to simplify deltaR^2 calculation (or just do this in top function)
-    //std::cout << "dr2: " << dEta * dEta + dPhi * dPhi << "\n";
-    return dEta * dEta + dPhi * dPhi;
-    //return lut[lutIndex]
-}
-*/
 #endif

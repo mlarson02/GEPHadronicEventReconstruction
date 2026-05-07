@@ -83,33 +83,6 @@ const std::string fileName_ =
     (jzSlice_ == 4)    ? "mc21_14TeV_jj_JZ4" :
                          "unknown_sample";
 
-
-
-void sortByEt(input seedValues[nTotalSeeds_], input sortedSeedValues[nTotalSeeds_]) {
-    //std::cout << "SORTING BY ET!" << std::endl;
-    /*for (int i = 0; i < nTotalSeeds_ - 1; ++i) {
-        //std::cout << "i: " << i << std::endl;
-        for (int j = 0; j < nTotalSeeds_ - i - 1; ++j) {
-            ap_uint<et_bit_length_> et1 = seedValues[j].range(et_high_, et_low_);
-            ap_uint<et_bit_length_> et2 = seedValues[j + 1].range(et_high_, et_low_);
-            if (et1 < et2) { // Descending sort
-                input temp = seedValues[j];
-                seedValues[j] = seedValues[j + 1];
-                seedValues[j + 1] = temp;
-            }
-        }
-    }*/
-    for (int j = 0; j < nTotalSeeds_; ++j){
-        //std::cout << "seedValues[j]: " << std::hex << seedValues[j] << std::endl;
-        //std::cout << "after sort j: " << std::dec << j << std::endl;
-        sortedSeedValues[j] = seedValues[j];
-        //std::cout << "sortedSeedValues[j] : " << std::hex << sortedSeedValues[j] << std::endl;
-        //std::cout << "AFTER ASSIGNING VALUES j: " << std::dec << j << std::endl;
-    }
-    //std::cout << "exiting???? " << std::endl;
-    return;
-}
-
 // read values from .dat files for a provided event
 template <unsigned int arraySize >
 inline void extract_values_from_file(const std::string& fileName, input (&values)[arraySize], unsigned int eventToProcess) {
@@ -358,7 +331,7 @@ if __name__ == "__main__":
                                 f"maxObj{maxObjectsConsidered}_"
                                 f"rMerge{rMergeCut_str}_"
                                 f"{signal_str}"
-                                "_WTAConeJetsCellsTowers_Adv_ValidateEmulation"
+                                "_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL"
                             )
                             print(f"Launching HLS with project name: {file_suffix}")
 
@@ -374,7 +347,7 @@ if __name__ == "__main__":
                             print(f" Wrote {constsFilename}")
                             #run_lut_generator_via_root("/home/larsonma/LargeRadiusJets/algorithm/writeDeltaR2LUT_adv.cc")
 
-                            subprocess.run(["vitis", "-s", "jet_tagger_hls_adv.py", file_suffix, "0"], check=True)
+                            subprocess.run(["vitis", "-s", "jet_tagger_hls_adv.py", file_suffix, "1"], check=True)
                             xml_report_path = os.path.join('w', file_suffix, file_suffix, 'syn', 'report', 'jet_tagger_top_csynth.xml')
                             print("xml_report_path,", xml_report_path)
                             #resources, latency = extract_hls_report(xml_report_path)

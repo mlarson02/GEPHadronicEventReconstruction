@@ -14,7 +14,7 @@
 // Define constants used by testbench
 const std::string memPrintsPath_ = "/home/larsonma/LargeRadiusJets/data/MemPrints_v3/";
 static inline uint32_t maskN(unsigned n) { return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }
-const std::string kFileSuffix = "nSeeds2_r2Cut1p21_maxObj128_rMerge2p0_sig_WTAConeJetsCellsTowers_Adv_ValidateEmulation";
+const std::string kFileSuffix = "nSeeds2_r2Cut1p21_maxObj128_rMerge2p0_sig_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL";
 constexpr bool signalBool_ = true;
 constexpr unsigned int jzSlice_ = 3;
 
@@ -25,33 +25,6 @@ const std::string fileName_ =
     (jzSlice_ == 3)    ? "mc21_14TeV_jj_JZ3" :
     (jzSlice_ == 4)    ? "mc21_14TeV_jj_JZ4" :
                          "unknown_sample";
-
-
-
-void sortByEt(input seedValues[nTotalSeeds_], input sortedSeedValues[nTotalSeeds_]) {
-    //std::cout << "SORTING BY ET!" << std::endl;
-    /*for (int i = 0; i < nTotalSeeds_ - 1; ++i) {
-        //std::cout << "i: " << i << std::endl;
-        for (int j = 0; j < nTotalSeeds_ - i - 1; ++j) {
-            ap_uint<et_bit_length_> et1 = seedValues[j].range(et_high_, et_low_);
-            ap_uint<et_bit_length_> et2 = seedValues[j + 1].range(et_high_, et_low_);
-            if (et1 < et2) { // Descending sort
-                input temp = seedValues[j];
-                seedValues[j] = seedValues[j + 1];
-                seedValues[j + 1] = temp;
-            }
-        }
-    }*/
-    for (int j = 0; j < nTotalSeeds_; ++j){
-        //std::cout << "seedValues[j]: " << std::hex << seedValues[j] << std::endl;
-        //std::cout << "after sort j: " << std::dec << j << std::endl;
-        sortedSeedValues[j] = seedValues[j];
-        //std::cout << "sortedSeedValues[j] : " << std::hex << sortedSeedValues[j] << std::endl;
-        //std::cout << "AFTER ASSIGNING VALUES j: " << std::dec << j << std::endl;
-    }
-    //std::cout << "exiting???? " << std::endl;
-    return;
-}
 
 // read values from .dat files for a provided event
 template <unsigned int arraySize >

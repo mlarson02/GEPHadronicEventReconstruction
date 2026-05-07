@@ -28,8 +28,6 @@ int main() {
         std::cout << "----------------------------------" << "\n";
         std::cout << "iEvt: " << iEvt << "\n";
         outFile << "Event : " << std::dec << iEvt << std::endl;
-        //std::cout << " ---------------------------------- " << "\n";
-        //std::cout << "processing event: " << std::dec << iEvt << "\n";
 
         extract_values_from_file<maxObjectsConsidered_ >(inputObjectFile, inputObjectValues, iEvt);
 
@@ -55,22 +53,16 @@ int main() {
             std::cout << "eta 64: " << eta_value << "\n";*/
             //std::cout << "et_value : " << et_value << "\n";
      
-            // Convert to ap_uint
+            // Convert to std::bitset
             std::bitset<et_bit_length_ > et_bitset(et_value);
             std::bitset<eta_bit_length_ > eta_bitset(eta_value);
             std::bitset<phi_bit_length_ > phi_bitset(phi_value);
-            //ap_uint<diam_bit_length_> diam_apuint(diam_value);
-            //ap_uint<et_bit_length_> et_apuint(et_value);
-            //std::cout << "et_apuint : " << et_apuint << "\n";
-            //ap_uint<eta_bit_length_> eta_apuint(eta_value);
-            //ap_uint<phi_bit_length_> phi_apuint(phi_value);
+
             uint64_t combined_value =
                 ((et_value   & maskN(et_bit_length_  )) << (eta_bit_length_ + phi_bit_length_)) |
                 ((eta_value  & maskN(eta_bit_length_ )) <<  phi_bit_length_) |
                 ( phi_value  & maskN(phi_bit_length_ ));
-            //ap_uint<total_bits_> combined_value = (ap_uint<total_bits_>(diam_apuint) << (et_bit_length_ + eta_bit_length_ + phi_bit_length_ ) | ap_uint<et_bit_length_ + eta_bit_length_ + phi_bit_length_ >(et_apuint) << (eta_bit_length_ + phi_bit_length_)) | (ap_uint<et_bit_length_ + eta_bit_length_ + phi_bit_length_ >(eta_apuint) << phi_bit_length_) | phi_apuint;
-            //std::cout << "total_bits_: " << std::dec << total_bits_ << "\n";
-            //std::cout << "combined_value : " << std::hex << combined_value << "\n";
+
             // Convert to hexadecimal (for the last field)
             std::stringstream hex_stream;
             hex_stream << std::hex << std::nouppercase << std::setfill('0') << std::setw(total_bits_output_ / 4) << combined_value;
@@ -90,11 +82,6 @@ int main() {
         }
     }   
 
-    //std::cout << "average merged IO for leading seed: " << float(totalOutputJetMergedIO[0] / maxEvent_) << " and for sub-leading seed: " << float(totalOutputJetMergedIO[1] / maxEvent_) << "\n";
-    //unsigned int maxValueLeading = *std::max_element(allOutputJetMergedIOLeading.begin(), allOutputJetMergedIOLeading.end());
-    //unsigned int maxValueSubLeading = *std::max_element(allOutputJetMergedIOSubLeading.begin(), allOutputJetMergedIOSubLeading.end());
-    //std::cout << "max number of merged input objects (leading): " << maxValueLeading << " and for sub-leading: " << maxValueSubLeading << " for n input objects: " << maxObjectsConsidered_ << "\n";
-    
-    //std::cout << "Test bench completed." << std::endl;
+    std::cout << "Test bench completed." << std::endl;
     return 0;
 }
