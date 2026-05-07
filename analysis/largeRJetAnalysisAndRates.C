@@ -354,14 +354,12 @@ vector<double > fprMinMaxCut(backgroundRootFileNames.size());
 std::cout << "Processing : " << backgroundRootFileNames.size() << " files. " << "\n";
 std::vector<std::string > algorithmConfigurations;
 
-
-
-
-
-
-
 std::vector<double > jetTagger_10kHz_Threshold_Leading_vec;
 std::vector<double > jetTagger_10kHz_Threshold_Subleading_vec;
+std::vector<TH1F*> eff_ET_mass_10kHz_vec;
+std::vector<TH1F*> sig_h_ConstituentMass_vec;
+std::vector<TH1F*> back_h_ConstituentMass_vec;
+std::vector<unsigned int> nInputObjects_vec;
 for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt){
     double sumOfBackgroundEventWeight = 0;
     // Parse file info (input object type & seed object type from ntuple file name)
@@ -2368,18 +2366,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TH1F* back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet = new TH1F("back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 16 GeV", 32, 0, 512);
     TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox = new TH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox", "Leading LRJ;Mass Approx [Emulation] [GeV];% of Events / 16 GeV", 32, 0, 512);
     TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox = new TH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox", "Leading LRJ;Mass Approx [Emulation] [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* sig_h_LeadingJetTaggerLRJ_ConstituentMass = new TH1F("sig_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* back_h_LeadingJetTaggerLRJ_ConstituentMass = new TH1F("back_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* sig_h_SubleadingJetTaggerLRJ_ConstituentMass = new TH1F("sig_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* back_h_SubleadingJetTaggerLRJ_ConstituentMass = new TH1F("back_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 16 GeV", 32, 0, 512);
+    TH1F* sig_h_LeadingJetTaggerLRJ_ConstituentMass = new TH1F("sig_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
+    TH1F* back_h_LeadingJetTaggerLRJ_ConstituentMass = new TH1F("back_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_ConstituentMass = new TH1F("sig_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
+    TH1F* back_h_SubleadingJetTaggerLRJ_ConstituentMass = new TH1F("back_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
     TH2F* sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = new TH2F("sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Signal;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 32, 0, 512, 32, 0, 512);
     TH2F* back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = new TH2F("back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Background;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 32, 0, 512, 32, 0, 512);
     TH2F* sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass = new TH2F("sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass", "Signal;Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
                         52, 0, 1040, // x axis
-                        32, 0, 512); // y axis
+                        40, 0, 400); // y axis
     TH2F* back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass = new TH2F("back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass", "Background;Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
                         52, 0, 1040, // x axis
-                        32, 0, 512); // y axis
+                        40, 0, 400); // y axis
     TH1F* sig_h_JetTaggerLRJ_ConstituentMass_Product = new TH1F("sig_h_JetTaggerLRJ_ConstituentMass_Product", "Leading #times Subleading LRJ;m_{lead} #times m_{subl} [GeV^{2}];% of Events / 2000 GeV^{2}", 50, 0, 100000);
     TH1F* back_h_JetTaggerLRJ_ConstituentMass_Product = new TH1F("back_h_JetTaggerLRJ_ConstituentMass_Product", "Leading #times Subleading LRJ;m_{lead} #times m_{subl} [GeV^{2}];% of Events / 2000 GeV^{2}", 50, 0, 100000);
     TH1F* sig_h_JetTaggerLRJ_ConstituentMass_Average = new TH1F("sig_h_JetTaggerLRJ_ConstituentMass_Average", "Leading #times Subleading LRJ;(m_{lead} + m_{subl}) / 2 [GeV];% of Events / 16 GeV", 32, 0, 512);
@@ -8734,6 +8732,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     out.gRate_vsEff->Draw("P SAME");
 
     // 10 kHz reference line + threshold annotations
+    double bestEt_thr = -1.0, bestEt_eff = -1.0;
     {
         double xmin = gPad->GetUxmin();
         double xmax = gPad->GetUxmax();
@@ -8743,6 +8742,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
         // Find best (ET_thr, mass_min) for the 2D scan by searching the rate surface
         double best2D_ET = -1.0, best2D_mass = -1.0, best2D_eff = -1.0;
+        
         {
             TH2* hRate2D = out2D_leading_ConstituentMass.hRate_vsThr_vsR;
             TH2* hEff2D  = out2D_leading_ConstituentMass.hEff_vsThr_vsR;
@@ -8760,7 +8760,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         }
 
         // Find best ET threshold for ET-only scan
-        double bestEt_thr = -1.0, bestEt_eff = -1.0;
+        
         {
             for(int ix = 1; ix <= out.hRate_vsThr->GetNbinsX(); ++ix){
                 double rate = out.hRate_vsThr->GetBinContent(ix);
@@ -9333,11 +9333,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         
         // ============================
         // Persistent turn-on pointers (assigned below, used at end of leadingLRJSubjetScan block)
-        TH1F* sig_eff_offlineLRJ10kHz_SubjetBased_35kHz = nullptr;
+        TH1F* sig_eff_offlineLRJ_SubjetBased_35kHz = nullptr;
         TH1F* eff_ET_only_10kHz = nullptr;
         TH1F* eff_ET_mass_10kHz = nullptr;
         TH1F* eff_ET_only_35kHz = nullptr;
         TH1F* eff_ET_mass_35kHz = nullptr;
+        double thr_ET_only_10kHz_p = -1.0, thr_ET_mass_10kHz_p = -1.0, thr_mass_min_10kHz_p = -1.0;
+        double thr_ET_only_35kHz_p = -1.0, thr_ET_mass_35kHz_p = -1.0, thr_mass_min_35kHz_p = -1.0;
 
         // 2D (ET + constituent mass) scans for cats A, B, C
         // ============================
@@ -9402,13 +9404,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         // 10 kHz efficiency turn-on: ET+mass vs ET-only (both from all-event 2D/1D scans)
         {
             // Find best ET-only threshold at <= 10 kHz
-            double thr_ET_only = -1.0;
-            for(int ix = out.hRate_vsThr->GetNbinsX(); ix >= 1; --ix){
-                if(out.hRate_vsThr->GetBinContent(ix) <= 1e4){
-                    thr_ET_only = out.hRate_vsThr->GetXaxis()->GetBinLowEdge(ix);
-                    break;
-                }
-            }
+            double thr_ET_only = bestEt_thr;
 
             // Find best (ET_thr, mass_min) from 2D scan at <= 10 kHz
             double thr_ET_mass = -1.0, thr_mass_min = -1.0;
@@ -9428,6 +9424,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             }
             std::cout << "Turn-on @ 10 kHz: ET-only thr = " << thr_ET_only << " GeV\n";
             std::cout << "Turn-on @ 10 kHz: ET+mass thr: ET > " << thr_ET_mass << " GeV, mass > " << thr_mass_min << " GeV\n";
+            thr_ET_only_10kHz_p = thr_ET_only;
+            thr_ET_mass_10kHz_p = thr_ET_mass;
+            thr_mass_min_10kHz_p = thr_mass_min;
 
             TH1F* h_num_Et   = new TH1F("h_num_Et_tOn",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_num_mass = new TH1F("h_num_mass_tOn",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
@@ -9471,6 +9470,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             leg_tOn->Draw();
             c_turnOn_mass.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_Et_plus_ConstituentMass_overlay.pdf");
         }
+        eff_ET_mass_10kHz_vec.push_back(eff_ET_mass_10kHz);
+        nInputObjects_vec.push_back(nInputObjectsAlgorithmConfiguration);
 
         // ======= 35 kHz versions: subjet-based, ET-only, ET+mass =======
         auto global5_35kHz = MakeCombinedRateVsEff_AllFive_EtOnly(
@@ -9487,7 +9488,21 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             5.0e4,
             3.5e4  // 35 kHz best-point
         );
-        std::cout << "35 kHz subjet-based: eff = " << global5_35kHz.bestEff << ", rate = " << global5_35kHz.bestRate << " Hz\n";
+        std::cout << "Best combined point with total rate <= 35 kHz:\n" << 
+            " Global eff = " << global5_35kHz.bestEff << "\n" << 
+            " Total rate = " << global5_35kHz.bestRate << " Hz\n" 
+            << " Selections (E_T only):\n" << " (0) cat0: E_{T} > " << global5_35kHz.bestEtCut[0] << " GeV\n" 
+            << " (1) 1 subjet lead&subl: E_{T} > " << global5_35kHz.bestEtCut[1] << " GeV\n" 
+            << " (2) cat2: E_{T} > " << global5_35kHz.bestEtCut[2] << " GeV\n" 
+            << " (3) cat3: E_{T} > " << global5_35kHz.bestEtCut[3] << " GeV\n" 
+            << " (4) cat4: E_{T} > " << global5_35kHz.bestEtCut[4] << " GeV\n" 
+            << " Per-category at best point (cat, eff_cat, eff_tot, rate [Hz]):\n";
+        for (int c = 0; c < 5; ++c) { 
+            std::cout << " cat " << c 
+                << ": eff_cat = " << global5_35kHz.bestEff_cat[c] <<
+                ", eff_tot = " << global5_35kHz.bestEff_tot[c] <<
+                ", rate = " << global5_35kHz.bestRate_cat[c] << " Hz\n"; 
+        }
 
         {
             // Find best ET-only threshold at <= 35 kHz
@@ -9516,6 +9531,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             }
             std::cout << "35 kHz ET-only thr = " << thr_ET_only_35 << " GeV\n";
             std::cout << "35 kHz ET+mass: ET > " << thr_ET_mass_35 << " GeV, mass > " << thr_mass_min_35 << " GeV\n";
+            thr_ET_only_35kHz_p = thr_ET_only_35;
+            thr_ET_mass_35kHz_p = thr_ET_mass_35;
+            thr_mass_min_35kHz_p = thr_mass_min_35;
 
             // Turn-on event loop for 35 kHz subjet-based, ET-only, ET+mass
             TH1F* h_num_Et_35   = new TH1F("h_num_Et_35",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
@@ -9559,8 +9577,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             eff_ET_only_35kHz->Divide(h_num_Et_35, h_den_35, 1.0, 1.0, "B");
             eff_ET_mass_35kHz = (TH1F*)h_num_mass_35->Clone("eff_ET_mass_35kHz");
             eff_ET_mass_35kHz->Divide(h_num_mass_35, h_den_35, 1.0, 1.0, "B");
-            sig_eff_offlineLRJ10kHz_SubjetBased_35kHz = (TH1F*)h_num_sub_35->Clone("eff_subjet_35kHz");
-            sig_eff_offlineLRJ10kHz_SubjetBased_35kHz->Divide(h_num_sub_35, h_den_35, 1.0, 1.0, "B");
+            sig_eff_offlineLRJ_SubjetBased_35kHz = (TH1F*)h_num_sub_35->Clone("eff_subjet_35kHz");
+            sig_eff_offlineLRJ_SubjetBased_35kHz->Divide(h_num_sub_35, h_den_35, 1.0, 1.0, "B");
         }
 
         // Et-only combined scan (5 categories)
@@ -18339,6 +18357,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
     // ======= 3-way overlay: subjet-based vs ET+mass vs ET-only =======
     auto make3wayOverlay = [&](TH1F* hSubjet, TH1F* hEtMass, TH1F* hEtOnly,
+                                double etMassThresh, double massMinThresh, double etOnlyThresh,
                                 const char* title, const char* fname, const char* rateLabel){
         if(!hSubjet || !hEtMass || !hEtOnly) return;
         hSubjet->SetLineColor(kBlack);   hSubjet->SetMarkerColor(kBlack);   hSubjet->SetMarkerStyle(20); hSubjet->SetMarkerSize(1.0);
@@ -18356,21 +18375,53 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         legOv->SetBorderSize(0); legOv->SetFillStyle(0); legOv->SetTextSize(0.028);
         legOv->SetHeader(Form("Cuts tuned to %s background", rateLabel), "C");
         legOv->AddEntry(hSubjet, "5-cat subjet-based E_{T} thresholds", "lp");
-        legOv->AddEntry(hEtMass, "Leading LRJ E_{T} + constituent mass", "lp");
-        legOv->AddEntry(hEtOnly, "Leading LRJ E_{T} only",               "lp");
+        legOv->AddEntry(hEtMass, Form("Leading LRJ E_{T} > %.0f GeV + m > %.0f GeV", etMassThresh, massMinThresh), "lp");
+        legOv->AddEntry(hEtOnly, Form("Leading LRJ E_{T} > %.0f GeV only", etOnlyThresh), "lp");
+        legOv->Draw();
+        cOv.SaveAs(rateVsEffFileDir + fname);
+    };
+
+    // ======= 2-way overlay =======
+    auto make2wayOverlay = [&](TH1F* hA, TH1F* hB,
+                                const char* labelA, const char* labelB,
+                                const char* title, const char* fname, const char* rateLabel){
+        if(!hA || !hB) return;
+        hA->SetLineColor(kBlack);  hA->SetMarkerColor(kBlack);  hA->SetMarkerStyle(20); hA->SetMarkerSize(1.0);
+        hB->SetLineColor(kRed+1);  hB->SetMarkerColor(kRed+1);  hB->SetMarkerStyle(22); hB->SetMarkerSize(1.0);
+        hA->SetAxisRange(0.0, 1.1, "Y");
+        hA->GetXaxis()->SetTitleOffset(1.1);
+        hA->GetYaxis()->SetTitleOffset(1.2);
+        TCanvas cOv(Form("c2way_%s", fname), title, 900, 700);
+        hA->Draw("P");
+        hB->Draw("P SAME");
+        sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+        TLegend *legOv = new TLegend(0.35, 0.18, 0.88, 0.35);
+        legOv->SetBorderSize(0); legOv->SetFillStyle(0); legOv->SetTextSize(0.028);
+        legOv->SetHeader(Form("Cuts tuned to %s background", rateLabel), "C");
+        legOv->AddEntry(hA, labelA, "lp");
+        legOv->AddEntry(hB, labelB, "lp");
         legOv->Draw();
         cOv.SaveAs(rateVsEffFileDir + fname);
     };
 
     make3wayOverlay(sig_eff_offlineLRJ10kHz_SubjetBased, eff_ET_mass_10kHz, eff_ET_only_10kHz,
+                    thr_ET_mass_10kHz_p, thr_mass_min_10kHz_p, thr_ET_only_10kHz_p,
                     "3-way turn-on @ 10 kHz",
                     "sig_eff_3way_overlay_10kHz.pdf",
                     "10 kHz");
 
-    make3wayOverlay(sig_eff_offlineLRJ10kHz_SubjetBased_35kHz, eff_ET_mass_35kHz, eff_ET_only_35kHz,
+    make3wayOverlay(sig_eff_offlineLRJ_SubjetBased_35kHz, eff_ET_mass_35kHz, eff_ET_only_35kHz,
+                    thr_ET_mass_35kHz_p, thr_mass_min_35kHz_p, thr_ET_only_35kHz_p,
                     "3-way turn-on @ 35 kHz",
                     "sig_eff_3way_overlay_35kHz.pdf",
                     "35 kHz");
+
+    make2wayOverlay(sig_eff_offlineLRJ10kHz_SubjetBased, sig_eff_offlineLRJ_SubjetBased_35kHz,
+                    "Subjet-based E_{T} Thresholds at 10 kHz",
+                    "Subjet-based E_{T} Thresholds at 35 kHz",
+                    "2-way subjet turn-on: 10 kHz vs 35 kHz",
+                    "sig_eff_2way_overlay_subjet_10vs35kHz.pdf",
+                    "10 kHz vs 35 kHz");
 
     // For mass window applied
     sig_eff_offlineLRJ10kHz_HiggsMassWindow->SetLineColor(kBlack);
@@ -18667,6 +18718,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     // --- Save overlay ---
     c_effLRJ10kHz_Subjet_Subleading.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets_Subleading.pdf");
 
+    sig_h_ConstituentMass_vec.push_back(sig_h_LeadingJetTaggerLRJ_ConstituentMass);
+    back_h_ConstituentMass_vec.push_back(back_h_LeadingJetTaggerLRJ_ConstituentMass);
+
     } // End of original loop through files
 
     // Do overlay plots for multiple files here
@@ -18715,6 +18769,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     cROC_ET_mass.SetLeftMargin(0.16); cROC_ET_mass.SetBottomMargin(0.16); cROC_ET_mass.SetTicks(1, 1);
     cROC_ET_mass.SetLogy();
 
+    TCanvas cConsMass = new TCanvas("cConsMass", "Leading LRJ Constituent Mass", 900, 700);
     TCanvas c1 = new TCanvas("c1", "Overlays (non-log)", 800, 600);
     TCanvas c2 = new TCanvas("c2", "Overlays (non-log)", 800, 600);
     TCanvas c3 = new TCanvas("c3", "Overlays (non-log)", 800, 600);
@@ -19808,6 +19863,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         }
         
 
+        // Leading LRJ constituent mass overlay (signal=solid, background=dashed, same color per file)
+        if (fileIt < sig_h_ConstituentMass_vec.size() && sig_h_ConstituentMass_vec[fileIt] && back_h_ConstituentMass_vec[fileIt]) {
+            cConsMass.cd();
+            TH1F* hSigMass  = sig_h_ConstituentMass_vec[fileIt];
+            TH1F* hBackMass = back_h_ConstituentMass_vec[fileIt];
+            if (hSigMass->Integral()  > 0.0) hSigMass->Scale(1.0  / hSigMass->Integral());
+            if (hBackMass->Integral() > 0.0) hBackMass->Scale(1.0 / hBackMass->Integral());
+            hSigMass->SetLineColor(color);  hSigMass->SetLineStyle(1);  hSigMass->SetLineWidth(2);
+            hBackMass->SetLineColor(color); hBackMass->SetLineStyle(2); hBackMass->SetLineWidth(2);
+            if (fileIt == 0) {
+                hBackMass->Draw("HIST");
+                hSigMass->Draw("HIST SAME");
+            } else {
+                hBackMass->Draw("HIST SAME");
+                hSigMass->Draw("HIST SAME");
+            }
+            if (fileIt == backgroundRootFileNames.size() - 1) {
+                leg->Draw();
+                cConsMass.SaveAs(overlayOutputFileDir + "leading_LRJ_ConstituentMass_overlay.pdf");
+            }
+        }
+
         // ET + constituent mass ROC overlay
         cROC_ET_mass.cd();
         if (fileIt < roc_ET_mass_AllEvents_vec.size() && roc_ET_mass_AllEvents_vec[fileIt]) {
@@ -19830,9 +19907,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             }
             {
                 auto* e = legROC_ET_mass->AddEntry((TObject*)nullptr,
-                    Form("N_{IO}=%u, ewm=%s, mep=%s, mec=%s",
-                         nInputObjectsAlgorithmConfiguration,
-                         ewm_str.c_str(), mep_str.c_str(), mec_str.c_str()), "lp");
+                    Form("N_{IO}=%u",
+                         nInputObjectsAlgorithmConfiguration), "lp");
                 e->SetMarkerStyle(20);
                 e->SetMarkerSize(1.4);
                 e->SetMarkerColor(rocColor);
@@ -19851,6 +19927,30 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         }
 
     } // Loop to overlay plots after having already filled vectors through main file loop
+
+    // ======= Multi-file overlay: ET+mass 10 kHz turn-on, one curve per N_IO =======
+    if (!eff_ET_mass_10kHz_vec.empty()) {
+        TCanvas cEtMassIO("cEtMassIO", "ET+mass 10 kHz turn-on vs N_{IO}", 900, 700);
+        TLegend *legIO = new TLegend(0.35, 0.18, 0.88, 0.42);
+        legIO->SetBorderSize(0); legIO->SetFillStyle(0); legIO->SetTextSize(0.028);
+        legIO->SetHeader("E_{T} + constituent mass, cuts tuned to 10 kHz", "C");
+        for (unsigned int i = 0; i < eff_ET_mass_10kHz_vec.size(); ++i) {
+            TH1F* h = eff_ET_mass_10kHz_vec[i];
+            if (!h) continue;
+            int col = colors[i % 10];
+            int mstyle = (i == 0) ? 20 : (i == 1) ? 21 : (i == 2) ? 22 : (i == 3) ? 23 : 24 + (int)i;
+            h->SetLineColor(col); h->SetMarkerColor(col);
+            h->SetMarkerStyle(mstyle); h->SetMarkerSize(1.0);
+            h->SetAxisRange(0.0, 1.1, "Y");
+            h->GetXaxis()->SetTitleOffset(1.1);
+            h->GetYaxis()->SetTitleOffset(1.2);
+            if (i == 0) h->Draw("P");
+            else        h->Draw("P SAME");
+            legIO->AddEntry(h, Form("N_{IO} = %u", nInputObjects_vec[i]), "lp");
+        }
+        legIO->Draw();
+        cEtMassIO.SaveAs(overlayOutputFileDir + "sig_eff_ET_mass_10kHz_overlay.pdf");
+    }
 
 TString outputFileDir = "overlayLargeRJetHistograms/"; // FIXME all the following code should now be deprecated
 
@@ -20161,13 +20261,23 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MinEtSeedOpt20/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
 
 
-                                                    // ggF hh->4b
+                                                    // ggF hh->4b mass test num IOs
+                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_32_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_64_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+
+                                                    // ggF hh->4b weighted midpoint
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec20GeV_v3.root",
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep0_mec20GeV_v3.root",
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep1_mec25GeV_v3.root",
 
-                                                    // ttbar all-hadronic
+                                                    // ttbar all-hadronic mass test num IOs
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_32_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_64_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+
+                                                    // ttbar all-hadronic weighted midpoint
                                                     /*"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec20GeV_v3.root",
                                                     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
                                                     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep0_mec20GeV_v3.root",
@@ -20259,15 +20369,20 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MinEtSeedOpt20/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MinEtSeedOpt20/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
 
+                                                        // JZ (dijet) mass test num ios
+                                                        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_32_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_64_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec20GeV_v3.root",
+
                                                         // JZ (dijet)
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec20GeV_v3.root",
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep0_mec20GeV_v3.root",
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep1_mec25GeV_v3.root",
                                                         };
-    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_ggF_MinEtSeedPosOpt_Mass/";
+    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_ggF_VaryNumIOs/";
     gSystem->mkdir(overlayOutputFileDir);
-    //gSystem->RedirectOutput("debug.log", "w");
+    gSystem->RedirectOutput("debug.log", "w");
     gErrorIgnoreLevel = kError;
     std::cout << "number of signal files: " << signalRootFileNames.size() << " number of background files: " << backgroundRootFileNames.size() << "\n";
     bool categorySubjetEtScan_8 = false;
