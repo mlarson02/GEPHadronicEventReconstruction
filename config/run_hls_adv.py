@@ -60,7 +60,7 @@ def write_file_read_header(file_path, file_suffix, signal_bool, jzSlice):
 #include <cmath>
 
 // Define constants used by testbench
-const std::string memPrintsPath_ = "/home/larsonma/LargeRadiusJets/data/MemPrints_v3/";
+const std::string memPrintsPath_ = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints_v3/";
 static inline uint32_t maskN(unsigned n) { return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }
 """
 
@@ -341,11 +341,11 @@ if __name__ == "__main__":
 
                             # Write to file
                             write_constants_h(constants, constsFilename, unroll, ii)
-                            fileReadPath = "/home/larsonma/LargeRadiusJets/algorithm/fileRead.h"  # Path to save the file
+                            fileReadPath = "/home/larsonma/GEPHadronicEventReconstruction/algorithm/fileRead.h"  # Path to save the file
                             write_file_read_header(fileReadPath, file_suffix, signalBool, jzSlice)
 
                             print(f" Wrote {constsFilename}")
-                            #run_lut_generator_via_root("/home/larsonma/LargeRadiusJets/algorithm/writeDeltaR2LUT_adv.cc")
+                            #run_lut_generator_via_root("/home/larsonma/GEPHadronicEventReconstruction/algorithm/writeDeltaR2LUT_adv.cc")
 
                             subprocess.run(["vitis", "-s", "jet_tagger_hls_adv.py", file_suffix, "1"], check=True)
                             xml_report_path = os.path.join('w', file_suffix, file_suffix, 'syn', 'report', 'jet_tagger_top_csynth.xml')

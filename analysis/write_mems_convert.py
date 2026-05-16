@@ -251,9 +251,9 @@ if signalBool:
         output_file_gfex = "/data/larsonma/LargeRadiusJets/MemPrints/gFex/mc21_14TeV_hh_bbbb_vbf_novhh_gfex_smallrj.dat"
         #output_file_jfex = "/data/larsonma/LargeRadiusJets/MemPrints/jFex/mc21_14TeV_hh_bbbb_vbf_novhh_jfex_smallrj.dat"
     else:
-        output_file_topo422 = "/home/larsonma/LargeRadiusJets/data/MemPrints/CaloTopo_422/mc21_14TeV_hh_bbbb_vbf_novhh_topo422.dat"
-        output_file_gfex = "/home/larsonma/LargeRadiusJets/data/MemPrints/gFex/mc21_14TeV_hh_bbbb_vbf_novhh_gfex_smallrj.dat"
-        #output_file_jfex = "/home/larsonma/LargeRadiusJets/data/MemPrints/jFex/mc21_14TeV_hh_bbbb_vbf_novhh_jfex_smallrj.dat"
+        output_file_topo422 = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/CaloTopo_422/mc21_14TeV_hh_bbbb_vbf_novhh_topo422.dat"
+        output_file_gfex = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/gFex/mc21_14TeV_hh_bbbb_vbf_novhh_gfex_smallrj.dat"
+        #output_file_jfex = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/jFex/mc21_14TeV_hh_bbbb_vbf_novhh_jfex_smallrj.dat"
     
 else:
     if lxplusBool:
@@ -261,9 +261,9 @@ else:
         output_file_gfex = "/data/larsonma/LargeRadiusJets/MemPrints/gFex/mc21_14TeV_jj_JZ3_gfex_smallrj.dat"
         #output_file_jfex = "/data/larsonma/LargeRadiusJets/MemPrints/jFex/mc21_14TeV_jj_JZ3_jfex_smallrj.dat"
     else:
-        output_file_topo422 = "/home/larsonma/LargeRadiusJets/data/MemPrints/CaloTopo_422/mc21_14TeV_jj_JZ3_topo422.dat"
-        output_file_gfex = "/home/larsonma/LargeRadiusJets/data/MemPrints/gFex/mc21_14TeV_jj_JZ3_gfex_smallrj.dat"
-        #output_file_jfex = "/home/larsonma/LargeRadiusJets/data/MemPrints/jFex/mc21_14TeV_jj_JZ3_jfex_smallrj.dat"
+        output_file_topo422 = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/CaloTopo_422/mc21_14TeV_jj_JZ3_topo422.dat"
+        output_file_gfex = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/gFex/mc21_14TeV_jj_JZ3_gfex_smallrj.dat"
+        #output_file_jfex = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/jFex/mc21_14TeV_jj_JZ3_jfex_smallrj.dat"
     
 
 # Function to scale and digitize a value

@@ -275,8 +275,18 @@ std::vector<TH1F* > back_h_leading_offline_LRJ_Et_vec;
 std::vector<TH1F* > back_h_subleading_offline_LRJ_Et_vec;
 std::vector<TH1F* > sig_h_leading_offline_LRJ_Mass_vec; 
 std::vector<TH1F* > sig_h_subleading_offline_LRJ_Mass_vec;
-std::vector<TH1F* > back_h_leading_offline_LRJ_Mass_vec; 
+std::vector<TH1F* > back_h_leading_offline_LRJ_Mass_vec;
 std::vector<TH1F* > back_h_subleading_offline_LRJ_Mass_vec;
+// Unique (not covered by baseline cone-jet triggers) offline LRJ distributions
+std::vector<TH1F*> sig_h_leading_offlineLRJ_Et_unique_vec;
+std::vector<TH1F*> sig_h_leading_offlineLRJ_Mass_unique_vec;
+std::vector<TH1F*> back_h_leading_offlineLRJ_Et_unique_vec;
+std::vector<TH1F*> back_h_leading_offlineLRJ_Mass_unique_vec;
+// Before any selection — same binning as unique, for before/after overlay
+std::vector<TH1F*> sig_h_leading_offlineLRJ_Et_before_vec;
+std::vector<TH1F*> sig_h_leading_offlineLRJ_Mass_before_vec;
+std::vector<TH1F*> back_h_leading_offlineLRJ_Et_before_vec;
+std::vector<TH1F*> back_h_leading_offlineLRJ_Mass_before_vec;
 std::vector<TH1F* > back_h_leading_LRJ_Et_vec;
 std::vector<TH1F* > back_h_subleading_LRJ_Et_vec;
 std::vector<TH1F* > sig_h_leading_LRJ_psi_R_vec;
@@ -310,6 +320,33 @@ std::vector<TH1F* > sig_eff_offlineLRJ10kHz_SubjetBased_vec;
 std::vector<TH1F* > sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet_vec;
 std::vector<TH1F* > sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec;
 
+// Mass selection threshold for offline leading LRJ (controllable)
+const double offlineLRJMassSel_threshold = 50.0; // [GeV]
+
+// Efficiency histograms split by offline leading LRJ mass selection
+std::vector<TH1F*> sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec;
+std::vector<TH1F*> sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel_vec;
+std::vector<TH1F*> sig_eff_ETonly_10kHz_MassSel_vec;
+std::vector<TH1F*> sig_eff_ETonly_10kHz_NoMassSel_vec;
+std::vector<TH1F*> sig_eff_ETmass_10kHz_MassSel_vec;
+std::vector<TH1F*> sig_eff_ETmass_10kHz_NoMassSel_vec;
+std::vector<TH1F*> sig_eff_offlineLRJ35kHz_SubjetBased_vec;
+std::vector<TH1F*> sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec;
+std::vector<TH1F*> sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec;
+std::vector<TH1F*> sig_eff_ETonly_35kHz_vec;
+std::vector<TH1F*> sig_eff_ETonly_35kHz_MassSel_vec;
+std::vector<TH1F*> sig_eff_ETonly_35kHz_NoMassSel_vec;
+std::vector<TH1F*> sig_eff_ETmass_35kHz_vec;
+std::vector<TH1F*> sig_eff_ETmass_35kHz_MassSel_vec;
+std::vector<TH1F*> sig_eff_ETmass_35kHz_NoMassSel_vec;
+// Integrated efficiencies per file (for legend in multi-file overlay)
+std::vector<double> intEff_SubjetBased_10kHz_all_vec, intEff_SubjetBased_10kHz_massSel_vec, intEff_SubjetBased_10kHz_noMassSel_vec;
+std::vector<double> intEff_ETonly_10kHz_all_vec, intEff_ETonly_10kHz_massSel_vec, intEff_ETonly_10kHz_noMassSel_vec;
+std::vector<double> intEff_ETmass_10kHz_all_vec, intEff_ETmass_10kHz_massSel_vec, intEff_ETmass_10kHz_noMassSel_vec;
+std::vector<double> intEff_SubjetBased_35kHz_all_vec, intEff_SubjetBased_35kHz_massSel_vec, intEff_SubjetBased_35kHz_noMassSel_vec;
+std::vector<double> intEff_ETonly_35kHz_all_vec, intEff_ETonly_35kHz_massSel_vec, intEff_ETonly_35kHz_noMassSel_vec;
+std::vector<double> intEff_ETmass_35kHz_all_vec, intEff_ETmass_35kHz_massSel_vec, intEff_ETmass_35kHz_noMassSel_vec;
+
 std::vector<TH1F* > sig_h_leadSubjet_matchFrac_vec;
 std::vector<TH1F* > sig_h_subSubjet_matchFrac_vec;
 std::vector<TH1F* > back_h_leadSubjet_matchFrac_vec;
@@ -327,13 +364,15 @@ std::vector<TH1* > sublead_ET_Scan_RateVsThresh_vec;
 std::vector<TGraphErrors* > subjetBased_ET_Scan_RatesVsEff_vec;
 // for subjet-based selection OR'd with 4th leading cone jet
 std::vector<TGraphErrors* > subjetBased_ET_OR_4thLeadConeJet_Scan_RatesVsEff_vec;
+// unique rate vs. efficiency for leading LRJ E_T (events not covered by baseline cone-jet triggers)
+std::vector<TGraph*> unique_lead_LRJ_ET_Scan_RatesVsEff_vec;
 // for ET + constituent mass 2D scan ROC
 std::vector<TGraphErrors* > roc_ET_mass_AllEvents_vec;
 
 
 
-TH1F* sig_h_leading_offlineLRJ_Et = new TH1F("sig_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading Offline LRJs / 50 GeV", 16, 0, 800); // moved outside scope of file loop for use afterwards
-TH1F* sig_h_subleading_offlineLRJ_Et = new TH1F("sig_h_subleading_offlineLRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading Offline LRJs / 50 GeV", 16, 0, 800); // now will only fill for first file as is same for each
+TH1F* sig_h_leading_offlineLRJ_Et = new TH1F("sig_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading Offline LRJs / 20 GeV", 40, 0, 800); // moved outside scope of file loop for use afterwards
+TH1F* sig_h_subleading_offlineLRJ_Et = new TH1F("sig_h_subleading_offlineLRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading Offline LRJs / 20 GeV", 40, 0, 800); // now will only fill for first file as is same for each
 
 // ROC and efficiency curve declarations
 vector<vector<double> > roc_curve_points_x(backgroundRootFileNames.size());
@@ -356,7 +395,16 @@ std::vector<std::string > algorithmConfigurations;
 
 std::vector<double > jetTagger_10kHz_Threshold_Leading_vec;
 std::vector<double > jetTagger_10kHz_Threshold_Subleading_vec;
+
+// Thresholds for baseline cone-jet triggers (used in unique-rate ROC)
+std::vector<double> cone_singleJet_25kHz_threshold_vec;   // leading cone jet @ 25 kHz
+std::vector<double> cone_multiJet_100kHz_threshold_vec;   // 4th leading cone jet @ 100 kHz
+std::vector<double> cone_HT_50kHz_threshold_vec;          // H_T @ 50 kHz
 std::vector<TH1F*> eff_ET_mass_10kHz_vec;
+std::vector<double> thr_ET_mass_10kHz_vec;
+std::vector<double> thr_mass_min_10kHz_vec;
+std::vector<double> thr_ET_mass_35kHz_vec;
+std::vector<double> thr_mass_min_35kHz_vec;
 std::vector<TH1F*> sig_h_ConstituentMass_vec;
 std::vector<TH1F*> back_h_ConstituentMass_vec;
 std::vector<unsigned int> nInputObjects_vec;
@@ -437,6 +485,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TTree* recoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("recoAntiKt10UFOCSSKJets");
     TTree* leadingRecoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("leadingRecoAntiKt10UFOCSSKJets");
     TTree* subleadingRecoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("subleadingRecoAntiKt10UFOCSSKJets");
+    TTree* recoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("recoAntiKt10UFOCSSKSoftDropJets");
+    TTree* leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("leadingRecoAntiKt10UFOCSSKSoftDropJets");
+    TTree* subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("subleadingRecoAntiKt10UFOCSSKSoftDropJets");
+    TTree* antiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("antiKt10TruthJetsTree");
+    TTree* leadingAntiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("leadingAntiKt10TruthJetsTree");
+    TTree* subleadingAntiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingAntiKt10TruthJetsTree");
+    TTree* antiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("antiKt10TruthSoftDropJetsTree");
+    TTree* leadingAntiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("leadingAntiKt10TruthSoftDropJetsTree");
+    TTree* subleadingAntiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingAntiKt10TruthSoftDropJetsTree");
     TTree* truthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("truthAntiKt4TruthDressedWZJets");
     TTree* leadingTruthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("leadingTruthAntiKt4TruthDressedWZJets");
     TTree* subleadingTruthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("subleadingTruthAntiKt4TruthDressedWZJets");
@@ -484,6 +541,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TTree* recoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("recoAntiKt10UFOCSSKJets");
     TTree* leadingRecoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("leadingRecoAntiKt10UFOCSSKJets");
     TTree* subleadingRecoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("subleadingRecoAntiKt10UFOCSSKJets");
+    TTree* recoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("recoAntiKt10UFOCSSKSoftDropJets");
+    TTree* leadingRecoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("leadingRecoAntiKt10UFOCSSKSoftDropJets");
+    TTree* subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("subleadingRecoAntiKt10UFOCSSKSoftDropJets");
+    TTree* antiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("antiKt10TruthJetsTree");
+    TTree* leadingAntiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingAntiKt10TruthJetsTree");
+    TTree* subleadingAntiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingAntiKt10TruthJetsTree");
+    TTree* antiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("antiKt10TruthSoftDropJetsTree");
+    TTree* leadingAntiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingAntiKt10TruthSoftDropJetsTree");
+    TTree* subleadingAntiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingAntiKt10TruthSoftDropJetsTree");
     TTree* truthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("truthAntiKt4TruthDressedWZJets");
     TTree* leadingTruthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("leadingTruthAntiKt4TruthDressedWZJets");
     TTree* subleadingTruthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("subleadingTruthAntiKt4TruthDressedWZJets");
@@ -678,6 +744,45 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     std::vector<double>* recoAntiKt10LRJSubleadingEtaValuesSignal = nullptr;
     std::vector<double>* recoAntiKt10LRJSubleadingPhiValuesSignal = nullptr;
     std::vector<double>* recoAntiKt10LRJSubleadingMassValuesSignal = nullptr;
+    std::vector<unsigned int>* recoAntiKt10UFOCSSKSDEtIndexValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDEtValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDEtaValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDPhiValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDMassValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDLeadingEtValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDLeadingEtaValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDLeadingPhiValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDLeadingMassValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDSubleadingEtValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDSubleadingEtaValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDSubleadingPhiValuesSignal = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDSubleadingMassValuesSignal = nullptr;
+    std::vector<unsigned int>* antiKt10TruthEtIndexValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthEtValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthEtaValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthPhiValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthMassValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthLeadingEtValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthLeadingEtaValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthLeadingPhiValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthLeadingMassValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSubleadingEtValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSubleadingEtaValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSubleadingPhiValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSubleadingMassValuesSignal = nullptr;
+    std::vector<unsigned int>* antiKt10TruthSDEtIndexValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDEtValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDEtaValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDPhiValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDMassValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDLeadingEtValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDLeadingEtaValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDLeadingPhiValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDLeadingMassValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDSubleadingEtValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDSubleadingEtaValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDSubleadingPhiValuesSignal = nullptr;
+    std::vector<double>* antiKt10TruthSDSubleadingMassValuesSignal = nullptr;
     std::vector<unsigned int>* truthAntiKt4WZSRJEtIndexValuesSignal = nullptr;
     std::vector<double>* truthAntiKt4WZSRJEtValuesSignal = nullptr;
     std::vector<double>* truthAntiKt4WZSRJEtaValuesSignal = nullptr;
@@ -892,6 +997,45 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     std::vector<double>* recoAntiKt10LRJSubleadingEtaValuesBack = nullptr;
     std::vector<double>* recoAntiKt10LRJSubleadingPhiValuesBack = nullptr;
     std::vector<double>* recoAntiKt10LRJSubleadingMassValuesBack = nullptr;
+    std::vector<unsigned int>* recoAntiKt10UFOCSSKSDEtIndexValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDEtValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDEtaValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDPhiValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDMassValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDLeadingEtValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDLeadingEtaValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDLeadingPhiValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDLeadingMassValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDSubleadingEtValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDSubleadingEtaValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDSubleadingPhiValuesBack = nullptr;
+    std::vector<double>* recoAntiKt10UFOCSSKSDSubleadingMassValuesBack = nullptr;
+    std::vector<unsigned int>* antiKt10TruthEtIndexValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthEtValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthEtaValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthPhiValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthMassValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthLeadingEtValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthLeadingEtaValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthLeadingPhiValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthLeadingMassValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSubleadingEtValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSubleadingEtaValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSubleadingPhiValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSubleadingMassValuesBack = nullptr;
+    std::vector<unsigned int>* antiKt10TruthSDEtIndexValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDEtValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDEtaValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDPhiValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDMassValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDLeadingEtValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDLeadingEtaValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDLeadingPhiValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDLeadingMassValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDSubleadingEtValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDSubleadingEtaValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDSubleadingPhiValuesBack = nullptr;
+    std::vector<double>* antiKt10TruthSDSubleadingMassValuesBack = nullptr;
     std::vector<unsigned int>* truthAntiKt4WZSRJEtIndexValuesBack = nullptr;
     std::vector<double>* truthAntiKt4WZSRJEtValuesBack = nullptr;
     std::vector<double>* truthAntiKt4WZSRJEtaValuesBack = nullptr;
@@ -1188,6 +1332,63 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     subleadingRecoAntiKt10UFOCSSKJetsSignal->SetBranchAddress("Phi", &recoAntiKt10LRJSubleadingPhiValuesSignal);
     subleadingRecoAntiKt10UFOCSSKJetsSignal->SetBranchAddress("Mass", &recoAntiKt10LRJSubleadingMassValuesSignal);
 
+    // === recoAntiKt10UFOCSSKSoftDropJetsSignal ===
+    recoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("EtIndex", &recoAntiKt10UFOCSSKSDEtIndexValuesSignal);
+    recoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Et", &recoAntiKt10UFOCSSKSDEtValuesSignal);
+    recoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Eta", &recoAntiKt10UFOCSSKSDEtaValuesSignal);
+    recoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Phi", &recoAntiKt10UFOCSSKSDPhiValuesSignal);
+    recoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Mass", &recoAntiKt10UFOCSSKSDMassValuesSignal);
+
+    // === leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal ===
+    leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Et", &recoAntiKt10UFOCSSKSDLeadingEtValuesSignal);
+    leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Eta", &recoAntiKt10UFOCSSKSDLeadingEtaValuesSignal);
+    leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Phi", &recoAntiKt10UFOCSSKSDLeadingPhiValuesSignal);
+    leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Mass", &recoAntiKt10UFOCSSKSDLeadingMassValuesSignal);
+
+    // === subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal ===
+    subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Et", &recoAntiKt10UFOCSSKSDSubleadingEtValuesSignal);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Eta", &recoAntiKt10UFOCSSKSDSubleadingEtaValuesSignal);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Phi", &recoAntiKt10UFOCSSKSDSubleadingPhiValuesSignal);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetBranchAddress("Mass", &recoAntiKt10UFOCSSKSDSubleadingMassValuesSignal);
+
+    // === antiKt10TruthJetsTreeSignal ===
+    antiKt10TruthJetsTreeSignal->SetBranchAddress("EtIndex", &antiKt10TruthEtIndexValuesSignal);
+    antiKt10TruthJetsTreeSignal->SetBranchAddress("Et", &antiKt10TruthEtValuesSignal);
+    antiKt10TruthJetsTreeSignal->SetBranchAddress("Eta", &antiKt10TruthEtaValuesSignal);
+    antiKt10TruthJetsTreeSignal->SetBranchAddress("Phi", &antiKt10TruthPhiValuesSignal);
+    antiKt10TruthJetsTreeSignal->SetBranchAddress("Mass", &antiKt10TruthMassValuesSignal);
+
+    // === leadingAntiKt10TruthJetsTreeSignal ===
+    leadingAntiKt10TruthJetsTreeSignal->SetBranchAddress("Et", &antiKt10TruthLeadingEtValuesSignal);
+    leadingAntiKt10TruthJetsTreeSignal->SetBranchAddress("Eta", &antiKt10TruthLeadingEtaValuesSignal);
+    leadingAntiKt10TruthJetsTreeSignal->SetBranchAddress("Phi", &antiKt10TruthLeadingPhiValuesSignal);
+    leadingAntiKt10TruthJetsTreeSignal->SetBranchAddress("Mass", &antiKt10TruthLeadingMassValuesSignal);
+
+    // === subleadingAntiKt10TruthJetsTreeSignal ===
+    subleadingAntiKt10TruthJetsTreeSignal->SetBranchAddress("Et", &antiKt10TruthSubleadingEtValuesSignal);
+    subleadingAntiKt10TruthJetsTreeSignal->SetBranchAddress("Eta", &antiKt10TruthSubleadingEtaValuesSignal);
+    subleadingAntiKt10TruthJetsTreeSignal->SetBranchAddress("Phi", &antiKt10TruthSubleadingPhiValuesSignal);
+    subleadingAntiKt10TruthJetsTreeSignal->SetBranchAddress("Mass", &antiKt10TruthSubleadingMassValuesSignal);
+
+    // === antiKt10TruthSoftDropJetsTreeSignal ===
+    antiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("EtIndex", &antiKt10TruthSDEtIndexValuesSignal);
+    antiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Et", &antiKt10TruthSDEtValuesSignal);
+    antiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Eta", &antiKt10TruthSDEtaValuesSignal);
+    antiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Phi", &antiKt10TruthSDPhiValuesSignal);
+    antiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Mass", &antiKt10TruthSDMassValuesSignal);
+
+    // === leadingAntiKt10TruthSoftDropJetsTreeSignal ===
+    leadingAntiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Et", &antiKt10TruthSDLeadingEtValuesSignal);
+    leadingAntiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Eta", &antiKt10TruthSDLeadingEtaValuesSignal);
+    leadingAntiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Phi", &antiKt10TruthSDLeadingPhiValuesSignal);
+    leadingAntiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Mass", &antiKt10TruthSDLeadingMassValuesSignal);
+
+    // === subleadingAntiKt10TruthSoftDropJetsTreeSignal ===
+    subleadingAntiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Et", &antiKt10TruthSDSubleadingEtValuesSignal);
+    subleadingAntiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Eta", &antiKt10TruthSDSubleadingEtaValuesSignal);
+    subleadingAntiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Phi", &antiKt10TruthSDSubleadingPhiValuesSignal);
+    subleadingAntiKt10TruthSoftDropJetsTreeSignal->SetBranchAddress("Mass", &antiKt10TruthSDSubleadingMassValuesSignal);
+
     // === truthAntiKt4TruthDressedWZJetsSignal ===
     truthAntiKt4TruthDressedWZJetsSignal->SetBranchAddress("EtIndex", &truthAntiKt4WZSRJEtIndexValuesSignal);
     truthAntiKt4TruthDressedWZJetsSignal->SetBranchAddress("Et", &truthAntiKt4WZSRJEtValuesSignal);
@@ -1475,6 +1676,63 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     subleadingRecoAntiKt10UFOCSSKJetsBack->SetBranchAddress("Phi", &recoAntiKt10LRJSubleadingPhiValuesBack);
     subleadingRecoAntiKt10UFOCSSKJetsBack->SetBranchAddress("Mass", &recoAntiKt10LRJSubleadingMassValuesBack);
 
+    // === recoAntiKt10UFOCSSKSoftDropJetsBack ===
+    recoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("EtIndex", &recoAntiKt10UFOCSSKSDEtIndexValuesBack);
+    recoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Et", &recoAntiKt10UFOCSSKSDEtValuesBack);
+    recoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Eta", &recoAntiKt10UFOCSSKSDEtaValuesBack);
+    recoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Phi", &recoAntiKt10UFOCSSKSDPhiValuesBack);
+    recoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Mass", &recoAntiKt10UFOCSSKSDMassValuesBack);
+
+    // === leadingRecoAntiKt10UFOCSSKSoftDropJetsBack ===
+    leadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Et", &recoAntiKt10UFOCSSKSDLeadingEtValuesBack);
+    leadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Eta", &recoAntiKt10UFOCSSKSDLeadingEtaValuesBack);
+    leadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Phi", &recoAntiKt10UFOCSSKSDLeadingPhiValuesBack);
+    leadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Mass", &recoAntiKt10UFOCSSKSDLeadingMassValuesBack);
+
+    // === subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack ===
+    subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Et", &recoAntiKt10UFOCSSKSDSubleadingEtValuesBack);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Eta", &recoAntiKt10UFOCSSKSDSubleadingEtaValuesBack);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Phi", &recoAntiKt10UFOCSSKSDSubleadingPhiValuesBack);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetBranchAddress("Mass", &recoAntiKt10UFOCSSKSDSubleadingMassValuesBack);
+
+    // === antiKt10TruthJetsTreeBack ===
+    antiKt10TruthJetsTreeBack->SetBranchAddress("EtIndex", &antiKt10TruthEtIndexValuesBack);
+    antiKt10TruthJetsTreeBack->SetBranchAddress("Et", &antiKt10TruthEtValuesBack);
+    antiKt10TruthJetsTreeBack->SetBranchAddress("Eta", &antiKt10TruthEtaValuesBack);
+    antiKt10TruthJetsTreeBack->SetBranchAddress("Phi", &antiKt10TruthPhiValuesBack);
+    antiKt10TruthJetsTreeBack->SetBranchAddress("Mass", &antiKt10TruthMassValuesBack);
+
+    // === leadingAntiKt10TruthJetsTreeBack ===
+    leadingAntiKt10TruthJetsTreeBack->SetBranchAddress("Et", &antiKt10TruthLeadingEtValuesBack);
+    leadingAntiKt10TruthJetsTreeBack->SetBranchAddress("Eta", &antiKt10TruthLeadingEtaValuesBack);
+    leadingAntiKt10TruthJetsTreeBack->SetBranchAddress("Phi", &antiKt10TruthLeadingPhiValuesBack);
+    leadingAntiKt10TruthJetsTreeBack->SetBranchAddress("Mass", &antiKt10TruthLeadingMassValuesBack);
+
+    // === subleadingAntiKt10TruthJetsTreeBack ===
+    subleadingAntiKt10TruthJetsTreeBack->SetBranchAddress("Et", &antiKt10TruthSubleadingEtValuesBack);
+    subleadingAntiKt10TruthJetsTreeBack->SetBranchAddress("Eta", &antiKt10TruthSubleadingEtaValuesBack);
+    subleadingAntiKt10TruthJetsTreeBack->SetBranchAddress("Phi", &antiKt10TruthSubleadingPhiValuesBack);
+    subleadingAntiKt10TruthJetsTreeBack->SetBranchAddress("Mass", &antiKt10TruthSubleadingMassValuesBack);
+
+    // === antiKt10TruthSoftDropJetsTreeBack ===
+    antiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("EtIndex", &antiKt10TruthSDEtIndexValuesBack);
+    antiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Et", &antiKt10TruthSDEtValuesBack);
+    antiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Eta", &antiKt10TruthSDEtaValuesBack);
+    antiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Phi", &antiKt10TruthSDPhiValuesBack);
+    antiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Mass", &antiKt10TruthSDMassValuesBack);
+
+    // === leadingAntiKt10TruthSoftDropJetsTreeBack ===
+    leadingAntiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Et", &antiKt10TruthSDLeadingEtValuesBack);
+    leadingAntiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Eta", &antiKt10TruthSDLeadingEtaValuesBack);
+    leadingAntiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Phi", &antiKt10TruthSDLeadingPhiValuesBack);
+    leadingAntiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Mass", &antiKt10TruthSDLeadingMassValuesBack);
+
+    // === subleadingAntiKt10TruthSoftDropJetsTreeBack ===
+    subleadingAntiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Et", &antiKt10TruthSDSubleadingEtValuesBack);
+    subleadingAntiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Eta", &antiKt10TruthSDSubleadingEtaValuesBack);
+    subleadingAntiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Phi", &antiKt10TruthSDSubleadingPhiValuesBack);
+    subleadingAntiKt10TruthSoftDropJetsTreeBack->SetBranchAddress("Mass", &antiKt10TruthSDSubleadingMassValuesBack);
+
     // === truthAntiKt4TruthDressedWZJetsBack ===
     truthAntiKt4TruthDressedWZJetsBack->SetBranchAddress("EtIndex", &truthAntiKt4WZSRJEtIndexValuesBack);
     truthAntiKt4TruthDressedWZJetsBack->SetBranchAddress("Et", &truthAntiKt4WZSRJEtValuesBack);
@@ -1737,14 +1995,26 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             120, 0, 3000);
     }
 
+    // Minimum cone-jet E_T for H_T sum (configurable)
+    const double ht_jet_min_et = 25.0; // [GeV]
+
     // Variable binning: 0–400 GeV in 10 GeV steps, 400–800 GeV in 25 GeV steps
     std::vector<Double_t> rateVsEffBins;
     std::vector<Double_t> rateVsEffBins_Cone4thLead;
+    // Leading single cone jet: same fine bins as rateVsEffBins (filled after)
+    std::vector<Double_t> rateVsEffBins_ConeLeadSingle;
+    // H_T: 0→600 in 25 GeV steps, 600→3000 in 100 GeV steps
+    std::vector<Double_t> rateVsEffBins_HT;
 
     // 0 → 400 GeV in 10 GeV steps
     for (int i = 0; i <= 40; ++i) rateVsEffBins.push_back(i * 10.0);
     // 0 → 100 GeV in 1.0 GeV steps
     for (int i = 0; i <= 100; ++i) rateVsEffBins_Cone4thLead.push_back(i * 1.0);
+    // Leading single cone jet: 0→400 in 10 GeV steps (share with rateVsEffBins below)
+    for (int i = 0; i <= 40; ++i) rateVsEffBins_ConeLeadSingle.push_back(i * 10.0);
+    // H_T: 0→600 in 25 GeV steps, then 700→3000 in 100 GeV steps
+    for (int i = 0; i <= 24; ++i) rateVsEffBins_HT.push_back(i * 25.0);
+    for (int i = 1; i <= 24; ++i) rateVsEffBins_HT.push_back(600.0 + i * 100.0);
 
     // 425 → 800 GeV in 25 GeV steps
     //for (int i = 17; i <= 32; ++i) rateVsEffBins.push_back(400.0 + (i - 16) * 50.0);
@@ -1757,7 +2027,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
     // 100 -> 500 GeV in 50 GeV steps
     for (int i = 1; i <= 8; ++i)
-        rateVsEffBins_Cone4thLead.push_back(100.0 + i * 50.0);  // 450, 500, ..., 800
+        rateVsEffBins_Cone4thLead.push_back(100.0 + i * 50.0);
+
+    // Leading single cone jet: 400 → 1050 GeV in 50 GeV steps (same extension as rateVsEffBins)
+    for (int i = 1; i <= 13; ++i)
+        rateVsEffBins_ConeLeadSingle.push_back(400.0 + i * 50.0);
 
     // ---------------- Histograms / Profiles ----------------
     const double ptMin = 25., ptMax = 500.;
@@ -1780,7 +2054,44 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     prof_AvgDR_vs_HpT->SetLineColor(kBlack);
     prof_AvgDR_vs_HpT->SetMarkerColor(kBlack);
 
-    TH1F* sig_h_leading_offlineLRJ_Et_byfile = new TH1F("sig_h_leading_offlineLRJ_Et_byfile", "Leading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000); // moved outside scope of file loop for use afterwards
+    TH1F* sig_h_leading_offlineLRJ_Et_byfile = new TH1F("sig_h_leading_offlineLRJ_Et_byfile", "Leading Offline LRJ E_{T};Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000);
+    // Variable binning for unique offline LRJ distributions:
+    // 0-200 in 10 GeV steps, 200-500 in 25 GeV steps, 500-1500 in 100 GeV steps
+    std::vector<Double_t> offlineLRJEtBins_unique;
+    for (int i = 0;  i <= 20; ++i) offlineLRJEtBins_unique.push_back(i * 10.0);        // 0-200, 10 GeV
+    for (int i = 1;  i <= 12; ++i) offlineLRJEtBins_unique.push_back(200.0 + i * 25.0); // 200-500, 25 GeV
+    for (int i = 1;  i <= 5; ++i) offlineLRJEtBins_unique.push_back(500.0 + i * 100.0); // 500-1000, 100 GeV
+    // Mass: 0-300 in 10 GeV steps
+    std::vector<Double_t> offlineLRJMassBins_unique;
+    for (int i = 0; i <= 30; ++i) offlineLRJMassBins_unique.push_back(i * 10.0);
+
+    // All events (before any baseline selection) — same binning as unique for overlay
+    TH1F* sig_h_leading_offlineLRJ_Et_before  = new TH1F("sig_h_leading_offlineLRJ_Et_before",
+        "Leading Offline LRJ E_{T} (All);Leading Offline LRJ E_{T} [GeV];Fraction of Events",
+        offlineLRJEtBins_unique.size()-1, offlineLRJEtBins_unique.data());
+    TH1F* sig_h_leading_offlineLRJ_Mass_before = new TH1F("sig_h_leading_offlineLRJ_Mass_before",
+        "Leading Offline LRJ Mass (All);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV",
+        offlineLRJMassBins_unique.size()-1, offlineLRJMassBins_unique.data());
+    TH1F* back_h_leading_offlineLRJ_Et_before  = new TH1F("back_h_leading_offlineLRJ_Et_before",
+        "Leading Offline LRJ E_{T} (All);Leading Offline LRJ E_{T} [GeV];Fraction of Events",
+        offlineLRJEtBins_unique.size()-1, offlineLRJEtBins_unique.data());
+    TH1F* back_h_leading_offlineLRJ_Mass_before = new TH1F("back_h_leading_offlineLRJ_Mass_before",
+        "Leading Offline LRJ Mass (All);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV",
+        offlineLRJMassBins_unique.size()-1, offlineLRJMassBins_unique.data());
+
+    // Events uniquely selected (failing all 3 baseline cone-jet triggers)
+    TH1F* sig_h_leading_offlineLRJ_Et_unique  = new TH1F("sig_h_leading_offlineLRJ_Et_unique",
+        "Leading Offline LRJ E_{T} (Unique);Leading Offline LRJ E_{T} [GeV];Fraction of Events",
+        offlineLRJEtBins_unique.size()-1, offlineLRJEtBins_unique.data());
+    TH1F* sig_h_leading_offlineLRJ_Mass_unique = new TH1F("sig_h_leading_offlineLRJ_Mass_unique",
+        "Leading Offline LRJ Mass (Unique);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV",
+        offlineLRJMassBins_unique.size()-1, offlineLRJMassBins_unique.data());
+    TH1F* back_h_leading_offlineLRJ_Et_unique  = new TH1F("back_h_leading_offlineLRJ_Et_unique",
+        "Leading Offline LRJ E_{T} (Unique);Leading Offline LRJ E_{T} [GeV];Fraction of Events",
+        offlineLRJEtBins_unique.size()-1, offlineLRJEtBins_unique.data());
+    TH1F* back_h_leading_offlineLRJ_Mass_unique = new TH1F("back_h_leading_offlineLRJ_Mass_unique",
+        "Leading Offline LRJ Mass (Unique);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV",
+        offlineLRJMassBins_unique.size()-1, offlineLRJMassBins_unique.data());
     TH1F* sig_h_subleading_offlineLRJ_Et_byfile = new TH1F("sig_h_subleading_offlineLRJ_Et_byfile", "Subleading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000); // now will only fill for first file as is same for each
 
     TH1F* sig_h_leading_offlineLRJ_Mass_byfile = new TH1F("sig_h_leading_offlineLRJ_Mass_byfile", "Leading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // moved outside scope of file loop for use afterwards
@@ -1829,11 +2140,95 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                         60, 0, 1200,   
                         25, 0, 250);  
     
-    TH2F *backOfflineSubleadingLRJMassvsLeadingLRJMass = new TH2F("backOfflineSubleadingLRJMassvsLeadingLRJMass", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ Mass [GeV];Offline Subleading LRJ Mass [GeV]", 
-                        25, 0, 250,   
-                        25, 0, 250);  
+    TH2F *backOfflineSubleadingLRJMassvsLeadingLRJMass = new TH2F("backOfflineSubleadingLRJMassvsLeadingLRJMass", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ Mass [GeV];Offline Subleading LRJ Mass [GeV]",
+                        25, 0, 250,
+                        25, 0, 250);
 
-    TH2F *sigOfflineLeadingLRJMassvsSubjetMult = new TH2F("sigOfflineLeadingLRJMassvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Number of Subjets; Offline Leading LRJ Mass [GeV]", 
+    // === Jet-type comparison TH2Fs (0–600 GeV, 60 bins) ===
+    // Pair 1: Offline Large-R Jet vs. Offline SoftDrop Large-R Jet
+    TH2F *sig_h2_recoVsRecoSD_leading_Et   = new TH2F("sig_h2_recoVsRecoSD_leading_Et",   "Signal Leading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",   60,0,600, 60,0,600);
+    TH2F *sig_h2_recoVsRecoSD_subleading_Et= new TH2F("sig_h2_recoVsRecoSD_subleading_Et","Signal Subleading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *sig_h2_recoVsRecoSD_leading_Mass = new TH2F("sig_h2_recoVsRecoSD_leading_Mass",  "Signal Leading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",       40,0,400, 40,0,400);
+    TH2F *sig_h2_recoVsRecoSD_subleading_Mass=new TH2F("sig_h2_recoVsRecoSD_subleading_Mass","Signal Subleading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
+    TH2F *back_h2_recoVsRecoSD_leading_Et  = new TH2F("back_h2_recoVsRecoSD_leading_Et",  "Background Leading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_recoVsRecoSD_subleading_Et=new TH2F("back_h2_recoVsRecoSD_subleading_Et","Background Subleading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_recoVsRecoSD_leading_Mass = new TH2F("back_h2_recoVsRecoSD_leading_Mass", "Background Leading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
+    TH2F *back_h2_recoVsRecoSD_subleading_Mass=new TH2F("back_h2_recoVsRecoSD_subleading_Mass","Background Subleading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
+
+    // Pair 2: Offline Large-R Jet vs. Truth Large-R Jet
+    TH2F *sig_h2_recoVsTruth_leading_Et    = new TH2F("sig_h2_recoVsTruth_leading_Et",    "Signal Leading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",         60,0,600, 60,0,600);
+    TH2F *sig_h2_recoVsTruth_subleading_Et = new TH2F("sig_h2_recoVsTruth_subleading_Et", "Signal Subleading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",     60,0,600, 60,0,600);
+    TH2F *sig_h2_recoVsTruth_leading_Mass  = new TH2F("sig_h2_recoVsTruth_leading_Mass",   "Signal Leading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",           40,0,400, 40,0,400);
+    TH2F *sig_h2_recoVsTruth_subleading_Mass=new TH2F("sig_h2_recoVsTruth_subleading_Mass","Signal Subleading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",       40,0,400, 40,0,400);
+    TH2F *back_h2_recoVsTruth_leading_Et   = new TH2F("back_h2_recoVsTruth_leading_Et",   "Background Leading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",   60,0,600, 60,0,600);
+    TH2F *back_h2_recoVsTruth_subleading_Et= new TH2F("back_h2_recoVsTruth_subleading_Et","Background Subleading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_recoVsTruth_leading_Mass  = new TH2F("back_h2_recoVsTruth_leading_Mass",  "Background Leading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",     40,0,400, 40,0,400);
+    TH2F *back_h2_recoVsTruth_subleading_Mass=new TH2F("back_h2_recoVsTruth_subleading_Mass","Background Subleading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
+
+    // Pair 3: Truth Large-R Jet vs. Truth SoftDrop Large-R Jet
+    TH2F *sig_h2_truthVsTruthSD_leading_Et    = new TH2F("sig_h2_truthVsTruthSD_leading_Et",    "Signal Leading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",    60,0,600, 60,0,600);
+    TH2F *sig_h2_truthVsTruthSD_subleading_Et = new TH2F("sig_h2_truthVsTruthSD_subleading_Et", "Signal Subleading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *sig_h2_truthVsTruthSD_leading_Mass  = new TH2F("sig_h2_truthVsTruthSD_leading_Mass",   "Signal Leading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",      40,0,400, 40,0,400);
+    TH2F *sig_h2_truthVsTruthSD_subleading_Mass=new TH2F("sig_h2_truthVsTruthSD_subleading_Mass","Signal Subleading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",  40,0,400, 40,0,400);
+    TH2F *back_h2_truthVsTruthSD_leading_Et   = new TH2F("back_h2_truthVsTruthSD_leading_Et",   "Background Leading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_truthVsTruthSD_subleading_Et= new TH2F("back_h2_truthVsTruthSD_subleading_Et","Background Subleading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_truthVsTruthSD_leading_Mass  = new TH2F("back_h2_truthVsTruthSD_leading_Mass",  "Background Leading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
+    TH2F *back_h2_truthVsTruthSD_subleading_Mass=new TH2F("back_h2_truthVsTruthSD_subleading_Mass","Background Subleading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
+
+    // === E_T vs. Mass TH2Fs per collection (60 Et bins 0–600, 40 Mass bins 0–400) ===
+    TH2F *sig_h2_reco_leading_EtVsMass      = new TH2F("sig_h2_reco_leading_EtVsMass",      "Signal Leading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                           60,0,600, 40,0,400);
+    TH2F *sig_h2_reco_subleading_EtVsMass   = new TH2F("sig_h2_reco_subleading_EtVsMass",   "Signal Subleading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                        60,0,600, 40,0,400);
+    TH2F *sig_h2_recoSD_leading_EtVsMass    = new TH2F("sig_h2_recoSD_leading_EtVsMass",    "Signal Leading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *sig_h2_recoSD_subleading_EtVsMass = new TH2F("sig_h2_recoSD_subleading_EtVsMass", "Signal Subleading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *sig_h2_truth_leading_EtVsMass     = new TH2F("sig_h2_truth_leading_EtVsMass",     "Signal Leading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                                 60,0,600, 40,0,400);
+    TH2F *sig_h2_truth_subleading_EtVsMass  = new TH2F("sig_h2_truth_subleading_EtVsMass",  "Signal Subleading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                              60,0,600, 40,0,400);
+    TH2F *sig_h2_truthSD_leading_EtVsMass   = new TH2F("sig_h2_truthSD_leading_EtVsMass",   "Signal Leading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",      60,0,600, 40,0,400);
+    TH2F *sig_h2_truthSD_subleading_EtVsMass= new TH2F("sig_h2_truthSD_subleading_EtVsMass","Signal Subleading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",   60,0,600, 40,0,400);
+    TH2F *back_h2_reco_leading_EtVsMass     = new TH2F("back_h2_reco_leading_EtVsMass",     "Background Leading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                       60,0,600, 40,0,400);
+    TH2F *back_h2_reco_subleading_EtVsMass  = new TH2F("back_h2_reco_subleading_EtVsMass",  "Background Subleading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                    60,0,600, 40,0,400);
+    TH2F *back_h2_recoSD_leading_EtVsMass   = new TH2F("back_h2_recoSD_leading_EtVsMass",   "Background Leading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *back_h2_recoSD_subleading_EtVsMass= new TH2F("back_h2_recoSD_subleading_EtVsMass","Background Subleading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *back_h2_truth_leading_EtVsMass    = new TH2F("back_h2_truth_leading_EtVsMass",    "Background Leading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                              60,0,600, 40,0,400);
+    TH2F *back_h2_truth_subleading_EtVsMass = new TH2F("back_h2_truth_subleading_EtVsMass", "Background Subleading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                           60,0,600, 40,0,400);
+    TH2F *back_h2_truthSD_leading_EtVsMass  = new TH2F("back_h2_truthSD_leading_EtVsMass",  "Background Leading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",  60,0,600, 40,0,400);
+    TH2F *back_h2_truthSD_subleading_EtVsMass=new TH2F("back_h2_truthSD_subleading_EtVsMass","Background Subleading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+
+    // === TH1Fs for 4-collection overlay (60 Et bins 0–600, 40 Mass bins 0–400) ===
+    // Axis labels use the observable name; the legend (set at draw time) identifies the collection.
+    TH1F *sig_h1_reco_leading_Et       = new TH1F("sig_h1_reco_leading_Et",       "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *sig_h1_recoSD_leading_Et     = new TH1F("sig_h1_recoSD_leading_Et",     "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *sig_h1_truth_leading_Et      = new TH1F("sig_h1_truth_leading_Et",      "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *sig_h1_truthSD_leading_Et    = new TH1F("sig_h1_truthSD_leading_Et",    "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *sig_h1_reco_subleading_Et    = new TH1F("sig_h1_reco_subleading_Et",    "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *sig_h1_recoSD_subleading_Et  = new TH1F("sig_h1_recoSD_subleading_Et",  "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *sig_h1_truth_subleading_Et   = new TH1F("sig_h1_truth_subleading_Et",   "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *sig_h1_truthSD_subleading_Et = new TH1F("sig_h1_truthSD_subleading_Et", "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *sig_h1_reco_leading_Mass     = new TH1F("sig_h1_reco_leading_Mass",     "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *sig_h1_recoSD_leading_Mass   = new TH1F("sig_h1_recoSD_leading_Mass",   "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *sig_h1_truth_leading_Mass    = new TH1F("sig_h1_truth_leading_Mass",    "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *sig_h1_truthSD_leading_Mass  = new TH1F("sig_h1_truthSD_leading_Mass",  "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *sig_h1_reco_subleading_Mass  = new TH1F("sig_h1_reco_subleading_Mass",  "Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *sig_h1_recoSD_subleading_Mass= new TH1F("sig_h1_recoSD_subleading_Mass","Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *sig_h1_truth_subleading_Mass = new TH1F("sig_h1_truth_subleading_Mass", "Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *sig_h1_truthSD_subleading_Mass=new TH1F("sig_h1_truthSD_subleading_Mass","Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *back_h1_reco_leading_Et      = new TH1F("back_h1_reco_leading_Et",      "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *back_h1_recoSD_leading_Et    = new TH1F("back_h1_recoSD_leading_Et",    "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *back_h1_truth_leading_Et     = new TH1F("back_h1_truth_leading_Et",     "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *back_h1_truthSD_leading_Et   = new TH1F("back_h1_truthSD_leading_Et",   "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *back_h1_reco_subleading_Et   = new TH1F("back_h1_reco_subleading_Et",   "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *back_h1_recoSD_subleading_Et = new TH1F("back_h1_recoSD_subleading_Et", "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *back_h1_truth_subleading_Et  = new TH1F("back_h1_truth_subleading_Et",  "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *back_h1_truthSD_subleading_Et= new TH1F("back_h1_truthSD_subleading_Et","Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *back_h1_reco_leading_Mass    = new TH1F("back_h1_reco_leading_Mass",    "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *back_h1_recoSD_leading_Mass  = new TH1F("back_h1_recoSD_leading_Mass",  "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *back_h1_truth_leading_Mass   = new TH1F("back_h1_truth_leading_Mass",   "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *back_h1_truthSD_leading_Mass = new TH1F("back_h1_truthSD_leading_Mass", "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *back_h1_reco_subleading_Mass = new TH1F("back_h1_reco_subleading_Mass", "Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *back_h1_recoSD_subleading_Mass=new TH1F("back_h1_recoSD_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *back_h1_truth_subleading_Mass= new TH1F("back_h1_truth_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *back_h1_truthSD_subleading_Mass=new TH1F("back_h1_truthSD_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+
+    TH2F *sigOfflineLeadingLRJMassvsSubjetMult = new TH2F("sigOfflineLeadingLRJMassvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Number of Subjets; Offline Leading LRJ Mass [GeV]",
                         4, 0, 4, // x axis
                         25, 0, 250 ); //y axis
     TH2F *backOfflineLeadingLRJMassvsSubjetMult = new TH2F("backOfflineLeadingLRJMassvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Number of Subjets; Offline Leading LRJ Mass [GeV]", 
@@ -1846,6 +2241,41 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TH2F *backOfflineLeadingLRJEtvsSubjetMult = new TH2F("backOfflineLeadingLRJEtvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV]; Number of Subjets", 
                         40, 0, 800,// x axis
                         4, 0, 4 ); //y axis
+
+    // TOB E_T vs. Offline LRJ E_T — resolution / calibration view
+    // x: offline LRJ E_T, y: TOB E_T (both 0–1000 GeV, 50×50 bins of 20 GeV)
+    TH2F *sig_h2_JetTagger_lead_TOBEt_vs_offlineEt = new TH2F(
+        "sig_h2_JetTagger_lead_TOBEt_vs_offlineEt",
+        "Signal;Offline Leading LRJ E_{T} [GeV];JetTagger Leading LRJ E_{T} [GeV]",
+        40, 0, 800, 40, 0, 800);
+    TH2F *sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt = new TH2F(
+        "sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt",
+        "Signal;Offline Subleading LRJ E_{T} [GeV];JetTagger Subleading LRJ E_{T} [GeV]",
+        40, 0, 800, 40, 0, 800);
+    TH2F *sig_h2_gFEX_lead_TOBEt_vs_offlineEt = new TH2F(
+        "sig_h2_gFEX_lead_TOBEt_vs_offlineEt",
+        "Signal;Offline Leading LRJ E_{T} [GeV];gFEX Leading LRJ E_{T} [GeV]",
+        40, 0, 800, 40, 0, 800);
+    TH2F *sig_h2_gFEX_sublead_TOBEt_vs_offlineEt = new TH2F(
+        "sig_h2_gFEX_sublead_TOBEt_vs_offlineEt",
+        "Signal;Offline Subleading LRJ E_{T} [GeV];gFEX Subleading LRJ E_{T} [GeV]",
+        40, 0, 800, 40, 0, 800);
+    TH2F *back_h2_JetTagger_lead_TOBEt_vs_offlineEt = new TH2F(
+        "back_h2_JetTagger_lead_TOBEt_vs_offlineEt",
+        "Background;Offline Leading LRJ E_{T} [GeV];JetTagger Leading LRJ E_{T} [GeV]",
+        40, 0, 800, 40, 0, 800);
+    TH2F *back_h2_JetTagger_sublead_TOBEt_vs_offlineEt = new TH2F(
+        "back_h2_JetTagger_sublead_TOBEt_vs_offlineEt",
+        "Background;Offline Subleading LRJ E_{T} [GeV];JetTagger Subleading LRJ E_{T} [GeV]",
+        40, 0, 800, 40, 0, 800);
+    TH2F *back_h2_gFEX_lead_TOBEt_vs_offlineEt = new TH2F(
+        "back_h2_gFEX_lead_TOBEt_vs_offlineEt",
+        "Background;Offline Leading LRJ E_{T} [GeV];gFEX Leading LRJ E_{T} [GeV]",
+        40, 0, 800, 40, 0, 800);
+    TH2F *back_h2_gFEX_sublead_TOBEt_vs_offlineEt = new TH2F(
+        "back_h2_gFEX_sublead_TOBEt_vs_offlineEt",
+        "Background;Offline Subleading LRJ E_{T} [GeV];gFEX Subleading LRJ E_{T} [GeV]",
+        40, 0, 800, 40, 0, 800);
 
     TH2F *sigJetTaggerLeadingLRJEtvsSubleadingLRJEt = new TH2F("sigJetTaggerLeadingLRJEtvsSubleadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; JetTagger Subleading LRJ E_{T} [GeV]", 
                         52, 0, 1040,  //x axis
@@ -2078,7 +2508,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TH1F* sig_h_SubleadingOfflineLRJ_SubjetEt = new TH1F("sig_h_SubleadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Subleading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
     TH1F* back_h_SubleadingOfflineLRJ_SubjetEt = new TH1F("back_h_SubleadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Subleading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
 
-    TH1F* sig_h_LRJ_Et = new TH1F("sig_h_LRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of LRJs / 50 GeV", 16, 0, 800);
+    TH1F* sig_h_LRJ_Et = new TH1F("sig_h_LRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of LRJs / 20 GeV", 40, 0, 800);
     TH1F* sig_h_leading_LRJ_Et = new TH1F("sig_h_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* sig_h_subleading_LRJ_Et = new TH1F("sig_h_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* sig_h_leading_LRJ_Eta = new TH1F("sig_h_leading_LRJ_Eta", "Leading LRJ #eta Distribution;#eta;% of Leading LRJs", 98, -4.9, 4.9);
@@ -2101,6 +2531,22 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
     TH1F* sig_h_4th_leading_WtaCone_Et = new TH1F("sig_h_4th_leading_WtaCone_Et", "Leading LRJ Et Distribution;4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
     TH1F* back_h_4th_leading_WtaCone_Et = new TH1F("back_h_4th_leading_WtaCone_Et", "Leading LRJ Et Distribution;4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
+
+    // Leading WTA cone jet E_T (single-jet trigger baseline)
+    TH1F* sig_h_leading_WtaCone_Et = new TH1F("sig_h_leading_WtaCone_Et",
+        "Leading WTA Cone Jet E_{T};Leading WTA Cone Jet E_{T} [GeV];Fraction of Events",
+        rateVsEffBins_ConeLeadSingle.size() - 1, rateVsEffBins_ConeLeadSingle.data());
+    TH1F* back_h_leading_WtaCone_Et = new TH1F("back_h_leading_WtaCone_Et",
+        "Leading WTA Cone Jet E_{T};Leading WTA Cone Jet E_{T} [GeV];Fraction of Events",
+        rateVsEffBins_ConeLeadSingle.size() - 1, rateVsEffBins_ConeLeadSingle.data());
+
+    // H_T (sum of WTA cone jet E_T for jets above ht_jet_min_et)
+    TH1F* sig_h_HT_WtaCone = new TH1F("sig_h_HT_WtaCone",
+        Form("H_{T} (cone jets E_{T} > %.0f GeV);H_{T} [GeV];Fraction of Events", ht_jet_min_et),
+        rateVsEffBins_HT.size() - 1, rateVsEffBins_HT.data());
+    TH1F* back_h_HT_WtaCone = new TH1F("back_h_HT_WtaCone",
+        Form("H_{T} (cone jets E_{T} > %.0f GeV);H_{T} [GeV];Fraction of Events", ht_jet_min_et),
+        rateVsEffBins_HT.size() - 1, rateVsEffBins_HT.data());
 
     TH1F* sig_h_leading_LRJ_Et_normalbinning = new TH1F("sig_h_leading_LRJ_Et_normalbinning", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", 41, 0, 1025);
     TH1F* sig_h_subleading_LRJ_Et_normalbinning = new TH1F("sig_h_subleading_LRJ_Et_normalbinning", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", 41, 0, 1025);
@@ -2370,8 +2816,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TH1F* back_h_LeadingJetTaggerLRJ_ConstituentMass = new TH1F("back_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
     TH1F* sig_h_SubleadingJetTaggerLRJ_ConstituentMass = new TH1F("sig_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
     TH1F* back_h_SubleadingJetTaggerLRJ_ConstituentMass = new TH1F("back_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
-    TH2F* sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = new TH2F("sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Signal;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 32, 0, 512, 32, 0, 512);
-    TH2F* back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = new TH2F("back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Background;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 32, 0, 512, 32, 0, 512);
+    TH2F* sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = new TH2F("sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Signal;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 40, 0, 400, 40, 0, 400);
+    TH2F* back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = new TH2F("back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Background;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 40, 0, 400, 40, 0, 400);
     TH2F* sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass = new TH2F("sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass", "Signal;Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
                         52, 0, 1040, // x axis
                         40, 0, 400); // y axis
@@ -2486,10 +2932,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                         103, 0, 2060); //y axis
     TH2F *sigJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents = new TH2F("sigJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents", "Signal; Leading JetTagger LRJ E_{T} [GeV]; Leading LRJ Constituent Mass [GeV]",
                         25, 0, 500, // x: ET, 20 GeV/bin, overflow -> last bin
-                        30, 0, 300); // y: constituent mass, 10 GeV/bin, overflow -> last bin
+                        60, 0, 300); // y: constituent mass, 10 GeV/bin, overflow -> last bin
     TH2F *backJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents = new TH2F("backJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents", "Background; Leading JetTagger LRJ E_{T} [GeV]; Leading LRJ Constituent Mass [GeV]",
                         25, 0, 500, // x: ET, 20 GeV/bin, overflow -> last bin
-                        30, 0, 300); // y: constituent mass, 10 GeV/bin, overflow -> last bin
+                        60, 0, 300); // y: constituent mass, 10 GeV/bin, overflow -> last bin
     TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, subjets}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
@@ -2649,6 +3095,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TH1F* back_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead = new TH1F("back_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
 
     // 2D (ET, constituent mass) scan histograms for cats A, B, C
+    TH2F* sig_h2_cat0_Et_vs_ConstituentMass = new TH2F("sig_h2_cat0_Et_vs_ConstituentMass",
+        "Signal Cat 0 (1 lead & 1 subl subjet);Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
+        25, 0, 500, 30, 0, 300);
+    TH2F* back_h2_cat0_Et_vs_ConstituentMass = new TH2F("back_h2_cat0_Et_vs_ConstituentMass",
+        "Background Cat 0 (1 lead & 1 subl subjet);Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
+        25, 0, 500, 30, 0, 300);
     TH2F* sig_h2_catA_Et_vs_ConstituentMass = new TH2F("sig_h2_catA_Et_vs_ConstituentMass",
         "Signal Cat A (Lead #geq2, Subl <2);Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300); // 20 GeV/bin ET, 10 GeV/bin mass
@@ -3681,7 +4133,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TH2F *backDiamvsEt = new TH2F("backDiamvsEt", "Sum of Topo422 E_{T} in Each Bin; LRJ E_{T} [GeV];LRJ 'Diameter'", 
                         20, 0, 800,   
                         32, 0, 1.0);  
-    TH1F* back_h_LRJ_Et = new TH1F("back_h_LRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of LRJs / 50 GeV", 16, 0, 800);
+    TH1F* back_h_LRJ_Et = new TH1F("back_h_LRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of LRJs / 20 GeV", 40, 0, 800);
     TH1F* back_h_leading_LRJ_Et = new TH1F("back_h_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* back_h_subleading_LRJ_Et = new TH1F("back_h_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* back_h_leading_LRJ_Eta = new TH1F("back_h_leading_LRJ_Eta", "Leading LRJ #eta Distribution;#eta;% of Leading LRJs", 98, -4.9, 4.9);
@@ -3711,9 +4163,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TH1F* back_h_jFEX_leading_LRJ_Et = new TH1F("back_h_jFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* back_h_jFEX_subleading_LRJ_Et = new TH1F("back_h_jFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
 
-    TH1F* back_h_offlineLRJ_Et = new TH1F("back_h_offlineLRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of Offline LRJs / 50 GeV", 16, 0, 800);
-    TH1F* back_h_leading_offlineLRJ_Et = new TH1F("back_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];% of Leading Offline LRJs / 50 GeV", 16, 0, 800);
-    TH1F* back_h_subleading_offlineLRJ_Et = new TH1F("back_h_subleading_offlineLRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading Offline LRJs / 50 GeV", 16, 0, 800);
+    TH1F* back_h_offlineLRJ_Et = new TH1F("back_h_offlineLRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of Offline LRJs / 20 GeV", 40, 0, 800);
+    TH1F* back_h_leading_offlineLRJ_Et = new TH1F("back_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];% of Leading Offline LRJs / 20 GeV", 40, 0, 800);
+    TH1F* back_h_subleading_offlineLRJ_Et = new TH1F("back_h_subleading_offlineLRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading Offline LRJs / 20 GeV", 40, 0, 800);
 
     TH1F* back_h_leading_WTA_conecellstowers_pT = new TH1F("back_h_leading_WTA_conecellstowers_pT", "Leading LRJ pT Distribution;Lead. WTA Cone CellsTowers Jet p_{T} [GeV];% of Leading WTA Cone CellsTowers Jets / 25 GeV", 32, 0, 800);
     TH1F* back_h_subleading_WTA_conecellstowers_pT = new TH1F("back_h_subleading_WTA_conecellstowers_pT", "Subleading LRJ pT Distribution;Sublead. Cone CellsTowers Jet p_{T} [GeV];% of Subleading WTACone CellsTowers Jets / 25 GeV", 32, 0, 800);
@@ -3818,6 +4270,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
     vector<vector<double> > sig_LRJ_Phi(num_processed_events_signal);
     vector<vector<double> > back_LRJ_Phi(num_processed_events_background);
+
+    // Per-event scalars for unique-rate computation (filled in event loops below)
+    std::vector<double> sig_leadLRJEt_perEvt(num_processed_events_signal, 0.0);
+    std::vector<double> sig_leadConeEt_perEvt(num_processed_events_signal, 0.0);
+    std::vector<double> sig_4thConeEt_perEvt(num_processed_events_signal, 0.0);
+    std::vector<double> sig_HT_perEvt(num_processed_events_signal, 0.0);
+
+    std::vector<double> back_leadLRJEt_perEvt(num_processed_events_background, 0.0);
+    std::vector<double> back_leadConeEt_perEvt(num_processed_events_background, 0.0);
+    std::vector<double> back_4thConeEt_perEvt(num_processed_events_background, 0.0);
+    std::vector<double> back_HT_perEvt(num_processed_events_background, 0.0);
+    std::vector<double> back_weight_perEvt(num_processed_events_background, 0.0);
     //std::cout << "fileIt : " << fileIt << "\n";
     // Find position of "largeR"
     std::string key = "14TeV_";
@@ -3873,6 +4337,27 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         else{
             sig_h_4th_leading_WtaCone_Et->Fill(0.0);
         }
+        // Leading cone jet (single-jet trigger)
+        {
+            double et_leadCone = (gepWTAConeCellsTowersJetspTValuesSignal->size() >= 1)
+                ? gepWTAConeCellsTowersJetspTValuesSignal->at(0) : 0.0;
+            sig_h_leading_WtaCone_Et->Fill(et_leadCone);
+            sig_leadConeEt_perEvt[iEvt] = et_leadCone;
+        }
+        // 4th leading cone jet – cache for unique-rate use
+        sig_4thConeEt_perEvt[iEvt] = (gepWTAConeCellsTowersJetspTValuesSignal->size() >= 4)
+            ? gepWTAConeCellsTowersJetspTValuesSignal->at(3) : 0.0;
+        // H_T: sum of all cone jets above ht_jet_min_et
+        {
+            double ht_sig = 0.0;
+            for(unsigned int iJ = 0; iJ < gepWTAConeCellsTowersJetspTValuesSignal->size(); ++iJ){
+                if(gepWTAConeCellsTowersJetspTValuesSignal->at(iJ) > ht_jet_min_et)
+                    ht_sig += gepWTAConeCellsTowersJetspTValuesSignal->at(iJ);
+            }
+            sig_h_HT_WtaCone->Fill(ht_sig);
+            sig_HT_perEvt[iEvt] = ht_sig;
+        }
+        sig_leadLRJEt_perEvt[iEvt] = jetTaggerLeadingLRJEtValuesSignal->at(0);
         sig_h_leading_LRJ_Et->Fill(jetTaggerLeadingLRJEtValuesSignal->at(0));
         sig_h_leading_LRJ_Eta->Fill(jetTaggerLeadingLRJEtaValuesSignal->at(0));
         sig_h_subleading_LRJ_Et->Fill(jetTaggerSubleadingLRJEtValuesSignal->at(0));
@@ -3928,6 +4413,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         else{
             back_h_4th_leading_WtaCone_Et->Fill(0.0, eventWeightsValuesBack->at(0));
         }
+        // Leading cone jet (single-jet trigger)
+        {
+            double et_leadCone = (gepWTAConeCellsTowersJetspTValuesBack->size() >= 1)
+                ? gepWTAConeCellsTowersJetspTValuesBack->at(0) : 0.0;
+            back_h_leading_WtaCone_Et->Fill(et_leadCone, backgroundEventWeight);
+            back_leadConeEt_perEvt[iEvt] = et_leadCone;
+        }
+        // 4th leading cone jet – cache for unique-rate use
+        back_4thConeEt_perEvt[iEvt] = (gepWTAConeCellsTowersJetspTValuesBack->size() >= 4)
+            ? gepWTAConeCellsTowersJetspTValuesBack->at(3) : 0.0;
+        // H_T: sum of all cone jets above ht_jet_min_et
+        {
+            double ht_back = 0.0;
+            for(unsigned int iJ = 0; iJ < gepWTAConeCellsTowersJetspTValuesBack->size(); ++iJ){
+                if(gepWTAConeCellsTowersJetspTValuesBack->at(iJ) > ht_jet_min_et)
+                    ht_back += gepWTAConeCellsTowersJetspTValuesBack->at(iJ);
+            }
+            back_h_HT_WtaCone->Fill(ht_back, backgroundEventWeight);
+            back_HT_perEvt[iEvt] = ht_back;
+        }
+        back_leadLRJEt_perEvt[iEvt] = jetTaggerLeadingLRJEtValuesBack->at(0);
+        back_weight_perEvt[iEvt]    = backgroundEventWeight;
 
         sumOfBackgroundEventWeight += backgroundEventWeight;
 
@@ -4010,6 +4517,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_4thleadcone->Divide(2,1);
     c1_4thleadcone->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_4thLeadCone.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_4thleadcone->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -4063,6 +4571,131 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     double cone_4th_lead_threshold = FindThrForRate(out_4thLeadCone.hRate_vsThr, 10000.0);
     std::cout << "cone jet 4th leading E_{T} threshold: " << cone_4th_lead_threshold << "\n";
 
+    // Derive 100 kHz threshold for 4th leading cone jet (multi-jet baseline trigger)
+    double cone_multiJet_100kHz_threshold = FindThrForRate(out_4thLeadCone.hRate_vsThr, 100000.0);
+    cone_multiJet_100kHz_threshold_vec.push_back(cone_multiJet_100kHz_threshold);
+    std::cout << "4th leading cone jet E_{T} threshold @ 100 kHz: " << cone_multiJet_100kHz_threshold << " GeV\n";
+
+    // ---- LEADING WTA CONE JET (single-jet trigger baseline) --------------------------------
+    auto out_leading_cone = MakeRateVsEff(sig_h_leading_WtaCone_Et, back_h_leading_WtaCone_Et);
+
+    SetAxes(out_leading_cone.hEff_vsThr ->GetXaxis(), "Leading WTA Cone Jet E_{T} threshold [GeV]");
+    SetAxes(out_leading_cone.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
+    SetAxes(out_leading_cone.hRate_vsThr->GetXaxis(), "Leading WTA Cone Jet E_{T} threshold [GeV]");
+    SetAxes(out_leading_cone.hRate_vsThr->GetYaxis(), "Estimated Background Rate [Hz]");
+    SetAxes(out_leading_cone.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_leading_cone.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
+
+    {
+        auto c1_leadcone = new TCanvas("c1_leadcone", "vs threshold", 1200, 500);
+        c1_leadcone->Divide(2, 1);
+        c1_leadcone->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_leading_cone.hEff_vsThr->Draw("HIST");
+        c1_leadcone->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_leading_cone.hRate_vsThr->Draw("HIST");
+        c1_leadcone->SaveAs(rateVsEffFileDir + "threshold_views_leading_conejets.pdf");
+
+        auto c2_leadcone = new TCanvas("c2_leadcone", "Rate vs Eff", 700, 600);
+        c2_leadcone->SetLeftMargin(0.16); c2_leadcone->SetBottomMargin(0.16); c2_leadcone->SetTicks(1,1);
+        c2_leadcone->SetLogy();
+        out_leading_cone.gRate_vsEff->Draw("AP");
+        c2_leadcone->SaveAs(rateVsEffFileDir + "rate_vs_eff_leading_conejets.pdf");
+    }
+
+    double cone_singleJet_25kHz_threshold = FindThrForRate(out_leading_cone.hRate_vsThr, 25000.0);
+    cone_singleJet_25kHz_threshold_vec.push_back(cone_singleJet_25kHz_threshold);
+    std::cout << "Leading cone jet E_{T} threshold @ 25 kHz: " << cone_singleJet_25kHz_threshold << " GeV\n";
+
+    // ---- H_T (all cone jets above ht_jet_min_et) ----------------------------------------
+    auto out_HT_cone = MakeRateVsEff(sig_h_HT_WtaCone, back_h_HT_WtaCone);
+
+    SetAxes(out_HT_cone.hEff_vsThr ->GetXaxis(), Form("H_{T} threshold (cone jets > %.0f GeV) [GeV]", ht_jet_min_et));
+    SetAxes(out_HT_cone.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
+    SetAxes(out_HT_cone.hRate_vsThr->GetXaxis(), Form("H_{T} threshold (cone jets > %.0f GeV) [GeV]", ht_jet_min_et));
+    SetAxes(out_HT_cone.hRate_vsThr->GetYaxis(), "Estimated Background Rate [Hz]");
+    SetAxes(out_HT_cone.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_HT_cone.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
+
+    {
+        auto c1_HT = new TCanvas("c1_HT", "vs threshold", 1200, 500);
+        c1_HT->Divide(2, 1);
+        c1_HT->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_HT_cone.hEff_vsThr->Draw("HIST");
+        c1_HT->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_HT_cone.hRate_vsThr->Draw("HIST");
+        c1_HT->SaveAs(rateVsEffFileDir + "threshold_views_HT_conejets.pdf");
+
+        auto c2_HT = new TCanvas("c2_HT", "Rate vs Eff", 700, 600);
+        c2_HT->SetLeftMargin(0.16); c2_HT->SetBottomMargin(0.16); c2_HT->SetTicks(1,1);
+        c2_HT->SetLogy();
+        out_HT_cone.gRate_vsEff->Draw("AP");
+        c2_HT->SaveAs(rateVsEffFileDir + "rate_vs_eff_HT_conejets.pdf");
+    }
+
+    double cone_HT_50kHz_threshold = FindThrForRate(out_HT_cone.hRate_vsThr, 50000.0);
+    cone_HT_50kHz_threshold_vec.push_back(cone_HT_50kHz_threshold);
+    std::cout << "H_{T} threshold @ 50 kHz: " << cone_HT_50kHz_threshold << " GeV\n";
+
+    // ---- UNIQUE RATE: Leading LRJ E_T (events not covered by any baseline trigger) ----
+    // Baseline triggers: single-jet @ 25 kHz, multi-jet @ 100 kHz, H_T @ 50 kHz
+    auto out_unique_leading = MakeUniqueRateVsEff(
+        back_leadLRJEt_perEvt, back_leadConeEt_perEvt, back_4thConeEt_perEvt,
+        back_HT_perEvt, back_weight_perEvt,
+        sig_leadLRJEt_perEvt, sig_leadConeEt_perEvt, sig_4thConeEt_perEvt,
+        sig_HT_perEvt,
+        rateVsEffBins,
+        cone_singleJet_25kHz_threshold,
+        cone_multiJet_100kHz_threshold,
+        cone_HT_50kHz_threshold);
+
+    SetAxes(out_unique_leading.hEff_vsThr ->GetXaxis(), "Leading JetTagger LRJ E_{T} threshold [GeV]");
+    SetAxes(out_unique_leading.hEff_vsThr ->GetYaxis(), "Unique Signal Efficiency");
+    SetAxes(out_unique_leading.hRate_vsThr->GetXaxis(), "Leading JetTagger LRJ E_{T} threshold [GeV]");
+    SetAxes(out_unique_leading.hRate_vsThr->GetYaxis(), "Unique Background Rate [Hz]");
+    SetAxes(out_unique_leading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_unique_leading.gRate_vsEff->GetYaxis(), "Unique Background Rate [Hz]");
+
+    {
+        auto c1_unique_lead = new TCanvas("c1_unique_lead", "Unique rate vs threshold", 1200, 500);
+        c1_unique_lead->Divide(2, 1);
+        c1_unique_lead->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_unique_leading.hEff_vsThr->Draw("HIST");
+        c1_unique_lead->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_unique_leading.hRate_vsThr->Draw("HIST");
+        c1_unique_lead->SaveAs(rateVsEffFileDir + "threshold_views_unique_leading_LRJ.pdf");
+
+        auto c2_unique_lead = new TCanvas("c2_unique_lead", "Unique rate vs eff", 700, 600);
+        c2_unique_lead->SetLeftMargin(0.16); c2_unique_lead->SetBottomMargin(0.16); c2_unique_lead->SetTicks(1,1);
+        c2_unique_lead->SetLogy();
+        out_unique_leading.gRate_vsEff->Draw("AP");
+        c2_unique_lead->SaveAs(rateVsEffFileDir + "rate_vs_eff_unique_leading_LRJ.pdf");
+    }
+
+    double uniqueLead_10kHz_thr = FindThrForRate(out_unique_leading.hRate_vsThr, 10000.0);
+    double uniqueLead_20kHz_thr = FindThrForRate(out_unique_leading.hRate_vsThr, 20000.0);
+    double uniqueLead_40kHz_thr = FindThrForRate(out_unique_leading.hRate_vsThr, 40000.0);
+    std::cout << "Unique leading LRJ E_{T} threshold @ 10 kHz unique rate: " << uniqueLead_10kHz_thr << " GeV\n";
+    std::cout << "Unique leading LRJ E_{T} threshold @ 20 kHz unique rate: " << uniqueLead_20kHz_thr << " GeV\n";
+    std::cout << "Unique leading LRJ E_{T} threshold @ 40 kHz unique rate: " << uniqueLead_40kHz_thr << " GeV\n";
+
+    unique_lead_LRJ_ET_Scan_RatesVsEff_vec.push_back(
+        (TGraph*) out_unique_leading.gRate_vsEff->Clone(
+            Form("%s_clone_%u", out_unique_leading.gRate_vsEff->GetName(), fileIt)
+        )
+    );
+
     // ---- LEADING --------------------------------------------------------------
     auto out = MakeRateVsEff(sig_h_leading_LRJ_Et, back_h_leading_LRJ_Et);
 
@@ -4090,6 +4723,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1->Divide(2,1);
     c1->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -4138,6 +4772,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_subleading->Divide(2,1);
     c1_subleading->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_subleading.hEff_vsThr->Draw("HIST");
     c1_subleading->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -4172,6 +4807,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_gFEX_leading->Divide(2,1);
     c1_gFEX_leading->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_gFEX_leading.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_gFEX_leading->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -4208,6 +4844,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_jFEX_leading->Divide(2,1);
     c1_jFEX_leading->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_jFEX_leading.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_jFEX_leading->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -4245,6 +4882,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_gFEX_subleading->Divide(2,1);
     c1_gFEX_subleading->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_gFEX_subleading.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_gFEX_subleading->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -4277,6 +4915,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_jFEX_subleading->Divide(2,1);
     c1_jFEX_subleading->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_jFEX_subleading.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_jFEX_subleading->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -4616,6 +5255,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
         subleadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(i);
         leadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(i);
+        leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(i);
+        subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(i);
+        leadingAntiKt10TruthJetsTreeSignal->GetEntry(i);
+        subleadingAntiKt10TruthJetsTreeSignal->GetEntry(i);
+        leadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(i);
+        subleadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(i);
         truthAntiKt4TruthDressedWZJetsSignal->GetEntry(i);
         leadingTruthAntiKt4TruthDressedWZJetsSignal->GetEntry(i);
         subleadingTruthAntiKt4TruthDressedWZJetsSignal->GetEntry(i);
@@ -5091,7 +5736,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             //std::cout << "jet tagger lead lrj et values: " << jetTaggerLeadingLRJEtValuesSignal->at(0) << "\n";
             if(jetTaggerLeadingLRJEtValuesSignal->at(0) < 500.0) sig_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead->Fill(jetTaggerLeadingLRJEtValuesSignal->at(0)); // Clamp to 500 GeV max to reduce combinatorics
             else sig_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead->Fill(499.9);
-            
+            sig_h2_cat0_Et_vs_ConstituentMass->Fill(
+                std::min(jetTaggerLeadingLRJEtValuesSignal->at(0), 499.99),
+                std::min(sig_lead_constituent_mass, 299.99));
         }
 
         if((nSubjetEmuLeading < 1 && nSubjetEmuSubleading < 1) || (nSubjetEmuLeading == 0 && nSubjetEmuSubleading == 1) || (nSubjetEmuLeading == 1 && nSubjetEmuSubleading == 0)){
@@ -5784,6 +6431,25 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         // Mass vs. Et for Leading Offline LRJ 
         sigOfflineLeadingLRJMassvsEt->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0), recoAntiKt10LRJLeadingMassValuesSignal->at(0));
         sigOfflineLeadingLRJMass->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+        // TOB E_T vs. offline LRJ E_T — leading (clamp to 799.9 so overflow fills last bin)
+        {
+            auto clamp800 = [](double v){ return std::min(v, 799.9); };
+            sig_h2_JetTagger_lead_TOBEt_vs_offlineEt->Fill(
+                clamp800(recoAntiKt10LRJLeadingEtValuesSignal->at(0)),
+                clamp800(jetTaggerLeadingLRJEtValuesSignal->at(0)));
+            sig_h2_gFEX_lead_TOBEt_vs_offlineEt->Fill(
+                clamp800(recoAntiKt10LRJLeadingEtValuesSignal->at(0)),
+                clamp800(gFexLRJLeadingEtValuesSignal->at(0)));
+            if (recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0) {
+                sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt->Fill(
+                    clamp800(recoAntiKt10LRJSubleadingEtValuesSignal->at(0)),
+                    clamp800(jetTaggerSubleadingLRJEtValuesSignal->at(0)));
+                if (gFexLRJSubleadingEtValuesSignal->size() > 0)
+                    sig_h2_gFEX_sublead_TOBEt_vs_offlineEt->Fill(
+                        clamp800(recoAntiKt10LRJSubleadingEtValuesSignal->at(0)),
+                        clamp800(gFexLRJSubleadingEtValuesSignal->at(0)));
+            }
+        }
         if(recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0){
             sigOfflineSubleadingLRJMassvsEt->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0), recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
             sigOfflineSubleadingLRJMassvsLeadingLRJMass->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0), recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
@@ -5791,9 +6457,90 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             sig_h_subleading_offlineLRJ_Et_byfile->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
         }
 
+        // === Jet-type comparison fills (signal) ===
+        // Pair 1: Reco vs. Reco+SD
+        if (recoAntiKt10UFOCSSKSDLeadingEtValuesSignal->size() > 0) {
+            sig_h2_recoVsRecoSD_leading_Et->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0), recoAntiKt10UFOCSSKSDLeadingEtValuesSignal->at(0));
+            sig_h2_recoVsRecoSD_leading_Mass->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0), recoAntiKt10UFOCSSKSDLeadingMassValuesSignal->at(0));
+        }
+        if (recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0 && recoAntiKt10UFOCSSKSDSubleadingEtValuesSignal->size() > 0) {
+            sig_h2_recoVsRecoSD_subleading_Et->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0), recoAntiKt10UFOCSSKSDSubleadingEtValuesSignal->at(0));
+            sig_h2_recoVsRecoSD_subleading_Mass->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0), recoAntiKt10UFOCSSKSDSubleadingMassValuesSignal->at(0));
+        }
+        // Pair 2: Reco vs. Truth
+        if (antiKt10TruthLeadingEtValuesSignal->size() > 0) {
+            sig_h2_recoVsTruth_leading_Et->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0), antiKt10TruthLeadingEtValuesSignal->at(0));
+            sig_h2_recoVsTruth_leading_Mass->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0), antiKt10TruthLeadingMassValuesSignal->at(0));
+        }
+        if (recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0 && antiKt10TruthSubleadingEtValuesSignal->size() > 0) {
+            sig_h2_recoVsTruth_subleading_Et->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0), antiKt10TruthSubleadingEtValuesSignal->at(0));
+            sig_h2_recoVsTruth_subleading_Mass->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0), antiKt10TruthSubleadingMassValuesSignal->at(0));
+        }
+        // Pair 3: Truth vs. Truth+SD
+        if (antiKt10TruthLeadingEtValuesSignal->size() > 0 && antiKt10TruthSDLeadingEtValuesSignal->size() > 0) {
+            sig_h2_truthVsTruthSD_leading_Et->Fill(antiKt10TruthLeadingEtValuesSignal->at(0), antiKt10TruthSDLeadingEtValuesSignal->at(0));
+            sig_h2_truthVsTruthSD_leading_Mass->Fill(antiKt10TruthLeadingMassValuesSignal->at(0), antiKt10TruthSDLeadingMassValuesSignal->at(0));
+        }
+        if (antiKt10TruthSubleadingEtValuesSignal->size() > 0 && antiKt10TruthSDSubleadingEtValuesSignal->size() > 0) {
+            sig_h2_truthVsTruthSD_subleading_Et->Fill(antiKt10TruthSubleadingEtValuesSignal->at(0), antiKt10TruthSDSubleadingEtValuesSignal->at(0));
+            sig_h2_truthVsTruthSD_subleading_Mass->Fill(antiKt10TruthSubleadingMassValuesSignal->at(0), antiKt10TruthSDSubleadingMassValuesSignal->at(0));
+        }
+
+        // === E_T vs. Mass TH2F and TH1F overlay fills (signal) ===
+        // Reco (leading always available here)
+        sig_h2_reco_leading_EtVsMass->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0), recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+        sig_h1_reco_leading_Et->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+        sig_h1_reco_leading_Mass->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+        if (recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0) {
+            sig_h2_reco_subleading_EtVsMass->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0), recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
+            sig_h1_reco_subleading_Et->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
+            sig_h1_reco_subleading_Mass->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
+        }
+        // RecoSD
+        if (recoAntiKt10UFOCSSKSDLeadingEtValuesSignal->size() > 0) {
+            sig_h2_recoSD_leading_EtVsMass->Fill(recoAntiKt10UFOCSSKSDLeadingEtValuesSignal->at(0), recoAntiKt10UFOCSSKSDLeadingMassValuesSignal->at(0));
+            sig_h1_recoSD_leading_Et->Fill(recoAntiKt10UFOCSSKSDLeadingEtValuesSignal->at(0));
+            sig_h1_recoSD_leading_Mass->Fill(recoAntiKt10UFOCSSKSDLeadingMassValuesSignal->at(0));
+        }
+        if (recoAntiKt10UFOCSSKSDSubleadingEtValuesSignal->size() > 0) {
+            sig_h2_recoSD_subleading_EtVsMass->Fill(recoAntiKt10UFOCSSKSDSubleadingEtValuesSignal->at(0), recoAntiKt10UFOCSSKSDSubleadingMassValuesSignal->at(0));
+            sig_h1_recoSD_subleading_Et->Fill(recoAntiKt10UFOCSSKSDSubleadingEtValuesSignal->at(0));
+            sig_h1_recoSD_subleading_Mass->Fill(recoAntiKt10UFOCSSKSDSubleadingMassValuesSignal->at(0));
+        }
+        // Truth
+        if (antiKt10TruthLeadingEtValuesSignal->size() > 0) {
+            sig_h2_truth_leading_EtVsMass->Fill(antiKt10TruthLeadingEtValuesSignal->at(0), antiKt10TruthLeadingMassValuesSignal->at(0));
+            sig_h1_truth_leading_Et->Fill(antiKt10TruthLeadingEtValuesSignal->at(0));
+            sig_h1_truth_leading_Mass->Fill(antiKt10TruthLeadingMassValuesSignal->at(0));
+        }
+        if (antiKt10TruthSubleadingEtValuesSignal->size() > 0) {
+            sig_h2_truth_subleading_EtVsMass->Fill(antiKt10TruthSubleadingEtValuesSignal->at(0), antiKt10TruthSubleadingMassValuesSignal->at(0));
+            sig_h1_truth_subleading_Et->Fill(antiKt10TruthSubleadingEtValuesSignal->at(0));
+            sig_h1_truth_subleading_Mass->Fill(antiKt10TruthSubleadingMassValuesSignal->at(0));
+        }
+        // TruthSD
+        if (antiKt10TruthSDLeadingEtValuesSignal->size() > 0) {
+            sig_h2_truthSD_leading_EtVsMass->Fill(antiKt10TruthSDLeadingEtValuesSignal->at(0), antiKt10TruthSDLeadingMassValuesSignal->at(0));
+            sig_h1_truthSD_leading_Et->Fill(antiKt10TruthSDLeadingEtValuesSignal->at(0));
+            sig_h1_truthSD_leading_Mass->Fill(antiKt10TruthSDLeadingMassValuesSignal->at(0));
+        }
+        if (antiKt10TruthSDSubleadingEtValuesSignal->size() > 0) {
+            sig_h2_truthSD_subleading_EtVsMass->Fill(antiKt10TruthSDSubleadingEtValuesSignal->at(0), antiKt10TruthSDSubleadingMassValuesSignal->at(0));
+            sig_h1_truthSD_subleading_Et->Fill(antiKt10TruthSDSubleadingEtValuesSignal->at(0));
+            sig_h1_truthSD_subleading_Mass->Fill(antiKt10TruthSDSubleadingMassValuesSignal->at(0));
+        }
+
         sig_h_leading_offlineLRJ_Et->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
         sig_h_leading_offlineLRJ_Et_byfile->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
         sig_h_leading_offlineLRJ_Mass_byfile->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+        sig_h_leading_offlineLRJ_Et_before->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+        sig_h_leading_offlineLRJ_Mass_before->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+        if (sig_leadConeEt_perEvt[i] < cone_singleJet_25kHz_threshold &&
+            sig_4thConeEt_perEvt[i]  < cone_multiJet_100kHz_threshold  &&
+            sig_HT_perEvt[i]         < cone_HT_50kHz_threshold) {
+            sig_h_leading_offlineLRJ_Et_unique->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+            sig_h_leading_offlineLRJ_Mass_unique->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+        }
 
         // ------------------- SIGNAL -------------------
         // Subjet plots 
@@ -6833,6 +7580,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     std::vector<unsigned int> nOfflineSubjetsLeadingLRJBack(
         num_processed_events_background, 0);
 
+    std::vector<double> back_lead_constituent_mass_vec(num_processed_events_background, 0.0);
+
     for (unsigned int i = 0; i < num_processed_events_background; i++) {
         //std::cout << "i:  "<< i << "\n";
         jetTaggerLRJsBack->GetEntry(i);
@@ -6844,6 +7593,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         subleadingTruthAntiKt4TruthDressedWZJetsBack->GetEntry(i);
         leadingRecoAntiKt10UFOCSSKJetsBack->GetEntry(i);
         subleadingRecoAntiKt10UFOCSSKJetsBack->GetEntry(i);
+        leadingRecoAntiKt10UFOCSSKSoftDropJetsBack->GetEntry(i);
+        subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack->GetEntry(i);
+        leadingAntiKt10TruthJetsTreeBack->GetEntry(i);
+        subleadingAntiKt10TruthJetsTreeBack->GetEntry(i);
+        leadingAntiKt10TruthSoftDropJetsTreeBack->GetEntry(i);
+        subleadingAntiKt10TruthSoftDropJetsTreeBack->GetEntry(i);
         jFexLeadingLRJTreeBack->GetEntry(i);
         gFexLeadingLRJTreeBack->GetEntry(i);
         gFexSRJTreeBack->GetEntry(i);
@@ -7173,6 +7928,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             double back_subl_mass = (m2_subl >= 0.0) ? std::sqrt(m2_subl) : 0.0;
             back_lead_constituent_mass = back_lead_mass;
             back_subl_constituent_mass = back_subl_mass;
+            back_lead_constituent_mass_vec[i] = back_lead_mass;
             if(back_lead_mass > 0.0) back_h_LeadingJetTaggerLRJ_ConstituentMass->Fill(back_lead_mass, backgroundEventWeight);
             backJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents->Fill(
                 std::min(jetTaggerLeadingLRJEtValuesBack->at(0), 499.99),
@@ -7296,10 +8052,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             else{
                 if (compute4thConeOR) back_h2_overlap_cat0->Fill(499.9, et4thCone_overlap, backgroundEventWeight);
                 back_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead->Fill(499.9, backgroundEventWeight);
-            } 
-            
-            
-            
+            }
+            back_h2_cat0_Et_vs_ConstituentMass->Fill(
+                std::min(jetTaggerLeadingLRJEtValuesBack->at(0), 499.99),
+                std::min(back_lead_constituent_mass, 299.99),
+                backgroundEventWeight);
         }
 
         if((nSubjetEmuLeading < 1 && nSubjetEmuSubleading < 1) || (nSubjetEmuLeading == 0 && nSubjetEmuSubleading == 1) || (nSubjetEmuLeading == 1 && nSubjetEmuSubleading == 0)){
@@ -7881,6 +8638,25 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         if(recoAntiKt10LRJLeadingEtValuesBack->size() == 0) continue;
         // Mass vs. Et for Leading Offline LRJ 
         backOfflineLeadingLRJMassvsEt->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+        // TOB E_T vs. offline LRJ E_T — leading (clamp to 799.9 so overflow fills last bin)
+        {
+            auto clamp800 = [](double v){ return std::min(v, 799.9); };
+            back_h2_JetTagger_lead_TOBEt_vs_offlineEt->Fill(
+                clamp800(recoAntiKt10LRJLeadingEtValuesBack->at(0)),
+                clamp800(jetTaggerLeadingLRJEtValuesBack->at(0)), backgroundEventWeight);
+            back_h2_gFEX_lead_TOBEt_vs_offlineEt->Fill(
+                clamp800(recoAntiKt10LRJLeadingEtValuesBack->at(0)),
+                clamp800(gFexLRJLeadingEtValuesBack->at(0)), backgroundEventWeight);
+            if (recoAntiKt10LRJSubleadingEtValuesBack->size() > 0) {
+                back_h2_JetTagger_sublead_TOBEt_vs_offlineEt->Fill(
+                    clamp800(recoAntiKt10LRJSubleadingEtValuesBack->at(0)),
+                    clamp800(jetTaggerSubleadingLRJEtValuesBack->at(0)), backgroundEventWeight);
+                if (gFexLRJSubleadingEtValuesBack->size() > 0)
+                    back_h2_gFEX_sublead_TOBEt_vs_offlineEt->Fill(
+                        clamp800(recoAntiKt10LRJSubleadingEtValuesBack->at(0)),
+                        clamp800(gFexLRJSubleadingEtValuesBack->at(0)), backgroundEventWeight);
+            }
+        }
         
         backOfflineLeadingLRJMass->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
         if(recoAntiKt10LRJSubleadingEtValuesBack->size() > 0){
@@ -7889,10 +8665,91 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             backOfflineSubleadingLRJMass->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
             back_h_subleading_offlineLRJ_Et_byfile->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
         }
-        
+
+        // === Jet-type comparison fills (background) ===
+        // Pair 1: Reco vs. Reco+SD
+        if (recoAntiKt10UFOCSSKSDLeadingEtValuesBack->size() > 0) {
+            back_h2_recoVsRecoSD_leading_Et->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), recoAntiKt10UFOCSSKSDLeadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h2_recoVsRecoSD_leading_Mass->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), recoAntiKt10UFOCSSKSDLeadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        if (recoAntiKt10LRJSubleadingEtValuesBack->size() > 0 && recoAntiKt10UFOCSSKSDSubleadingEtValuesBack->size() > 0) {
+            back_h2_recoVsRecoSD_subleading_Et->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), recoAntiKt10UFOCSSKSDSubleadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h2_recoVsRecoSD_subleading_Mass->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), recoAntiKt10UFOCSSKSDSubleadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        // Pair 2: Reco vs. Truth
+        if (antiKt10TruthLeadingEtValuesBack->size() > 0) {
+            back_h2_recoVsTruth_leading_Et->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), antiKt10TruthLeadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h2_recoVsTruth_leading_Mass->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), antiKt10TruthLeadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        if (recoAntiKt10LRJSubleadingEtValuesBack->size() > 0 && antiKt10TruthSubleadingEtValuesBack->size() > 0) {
+            back_h2_recoVsTruth_subleading_Et->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), antiKt10TruthSubleadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h2_recoVsTruth_subleading_Mass->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), antiKt10TruthSubleadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        // Pair 3: Truth vs. Truth+SD
+        if (antiKt10TruthLeadingEtValuesBack->size() > 0 && antiKt10TruthSDLeadingEtValuesBack->size() > 0) {
+            back_h2_truthVsTruthSD_leading_Et->Fill(antiKt10TruthLeadingEtValuesBack->at(0), antiKt10TruthSDLeadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h2_truthVsTruthSD_leading_Mass->Fill(antiKt10TruthLeadingMassValuesBack->at(0), antiKt10TruthSDLeadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        if (antiKt10TruthSubleadingEtValuesBack->size() > 0 && antiKt10TruthSDSubleadingEtValuesBack->size() > 0) {
+            back_h2_truthVsTruthSD_subleading_Et->Fill(antiKt10TruthSubleadingEtValuesBack->at(0), antiKt10TruthSDSubleadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h2_truthVsTruthSD_subleading_Mass->Fill(antiKt10TruthSubleadingMassValuesBack->at(0), antiKt10TruthSDSubleadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+
+        // === E_T vs. Mass TH2F and TH1F overlay fills (background) ===
+        // Reco (leading always available here)
+        back_h2_reco_leading_EtVsMass->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+        back_h1_reco_leading_Et->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+        back_h1_reco_leading_Mass->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+        if (recoAntiKt10LRJSubleadingEtValuesBack->size() > 0) {
+            back_h2_reco_subleading_EtVsMass->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+            back_h1_reco_subleading_Et->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h1_reco_subleading_Mass->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        // RecoSD
+        if (recoAntiKt10UFOCSSKSDLeadingEtValuesBack->size() > 0) {
+            back_h2_recoSD_leading_EtVsMass->Fill(recoAntiKt10UFOCSSKSDLeadingEtValuesBack->at(0), recoAntiKt10UFOCSSKSDLeadingMassValuesBack->at(0), backgroundEventWeight);
+            back_h1_recoSD_leading_Et->Fill(recoAntiKt10UFOCSSKSDLeadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h1_recoSD_leading_Mass->Fill(recoAntiKt10UFOCSSKSDLeadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        if (recoAntiKt10UFOCSSKSDSubleadingEtValuesBack->size() > 0) {
+            back_h2_recoSD_subleading_EtVsMass->Fill(recoAntiKt10UFOCSSKSDSubleadingEtValuesBack->at(0), recoAntiKt10UFOCSSKSDSubleadingMassValuesBack->at(0), backgroundEventWeight);
+            back_h1_recoSD_subleading_Et->Fill(recoAntiKt10UFOCSSKSDSubleadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h1_recoSD_subleading_Mass->Fill(recoAntiKt10UFOCSSKSDSubleadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        // Truth
+        if (antiKt10TruthLeadingEtValuesBack->size() > 0) {
+            back_h2_truth_leading_EtVsMass->Fill(antiKt10TruthLeadingEtValuesBack->at(0), antiKt10TruthLeadingMassValuesBack->at(0), backgroundEventWeight);
+            back_h1_truth_leading_Et->Fill(antiKt10TruthLeadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h1_truth_leading_Mass->Fill(antiKt10TruthLeadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        if (antiKt10TruthSubleadingEtValuesBack->size() > 0) {
+            back_h2_truth_subleading_EtVsMass->Fill(antiKt10TruthSubleadingEtValuesBack->at(0), antiKt10TruthSubleadingMassValuesBack->at(0), backgroundEventWeight);
+            back_h1_truth_subleading_Et->Fill(antiKt10TruthSubleadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h1_truth_subleading_Mass->Fill(antiKt10TruthSubleadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        // TruthSD
+        if (antiKt10TruthSDLeadingEtValuesBack->size() > 0) {
+            back_h2_truthSD_leading_EtVsMass->Fill(antiKt10TruthSDLeadingEtValuesBack->at(0), antiKt10TruthSDLeadingMassValuesBack->at(0), backgroundEventWeight);
+            back_h1_truthSD_leading_Et->Fill(antiKt10TruthSDLeadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h1_truthSD_leading_Mass->Fill(antiKt10TruthSDLeadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+        if (antiKt10TruthSDSubleadingEtValuesBack->size() > 0) {
+            back_h2_truthSD_subleading_EtVsMass->Fill(antiKt10TruthSDSubleadingEtValuesBack->at(0), antiKt10TruthSDSubleadingMassValuesBack->at(0), backgroundEventWeight);
+            back_h1_truthSD_subleading_Et->Fill(antiKt10TruthSDSubleadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h1_truthSD_subleading_Mass->Fill(antiKt10TruthSDSubleadingMassValuesBack->at(0), backgroundEventWeight);
+        }
+
         back_h_leading_offlineLRJ_Et->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
         back_h_leading_offlineLRJ_Et_byfile->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
         back_h_leading_offlineLRJ_Mass_byfile->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+        back_h_leading_offlineLRJ_Et_before->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+        back_h_leading_offlineLRJ_Mass_before->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+        if (back_leadConeEt_perEvt[i] < cone_singleJet_25kHz_threshold &&
+            back_4thConeEt_perEvt[i]  < cone_multiJet_100kHz_threshold  &&
+            back_HT_perEvt[i]         < cone_HT_50kHz_threshold) {
+            back_h_leading_offlineLRJ_Et_unique->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+            back_h_leading_offlineLRJ_Mass_unique->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+        }
 
         if(recoAntiKt10LRJSubleadingEtValuesBack->size() > 0) back_h_subleading_offlineLRJ_Et->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
         //std::cout << "test 4" << "\n";
@@ -8512,6 +9369,81 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     back_h_leading_offline_LRJ_Et_vec.push_back(static_cast<TH1F*>(back_h_leading_offlineLRJ_Et_byfile->Clone()));
     back_h_leading_offline_LRJ_Mass_vec.push_back(static_cast<TH1F*>(back_h_leading_offlineLRJ_Mass_byfile->Clone()));
     back_h_subleading_offline_LRJ_Et_vec.push_back(static_cast<TH1F*>(back_h_subleading_offlineLRJ_Et_byfile->Clone()));
+    // Save per-file before/after unique plots (log-y, 4 curves per canvas)
+    {
+        auto saveBeforeAfter = [](TH1F* hs_bef, TH1F* hb_bef,
+                                  TH1F* hs_aft, TH1F* hb_aft,
+                                  const char* title, const char* xLabel, TString path) {
+            // Normalize clones to unit area
+            auto normClone = [](TH1F* h, const char* suffix) {
+                TH1F* c = static_cast<TH1F*>(h->Clone(
+                    (std::string(h->GetName()) + suffix).c_str()));
+                if (c->Integral() > 0) c->Scale(1.0 / c->Integral());
+                return c;
+            };
+            TH1F* sB = normClone(hs_bef, "_nb"); TH1F* bB = normClone(hb_bef, "_nb");
+            TH1F* sA = normClone(hs_aft, "_na"); TH1F* bA = normClone(hb_aft, "_na");
+
+            // Signal: red solid (before), red dashed (after)
+            sB->SetLineColor(kRed);  sB->SetLineStyle(1); sB->SetLineWidth(2);
+            sA->SetLineColor(kRed);  sA->SetLineStyle(2); sA->SetLineWidth(2);
+            // Background: blue solid (before), blue dashed (after)
+            bB->SetLineColor(kBlue); bB->SetLineStyle(1); bB->SetLineWidth(2);
+            bA->SetLineColor(kBlue); bA->SetLineStyle(2); bA->SetLineWidth(2);
+
+            double ymax = std::max({sB->GetMaximum(), bB->GetMaximum(),
+                                    sA->GetMaximum(), bA->GetMaximum()}) * 5.0;
+            double ymin = 1e-5;
+
+            TCanvas cu("cu_tmp", title, 700, 600);
+            cu.SetLeftMargin(0.16); cu.SetBottomMargin(0.16); cu.SetTicks(1,1);
+            cu.SetLogy();
+            bB->GetXaxis()->SetTitle(xLabel);
+            bB->GetYaxis()->SetTitle("Fraction of Events");
+            bB->SetMaximum(ymax); bB->SetMinimum(ymin);
+            bB->Draw("HIST");
+            sB->Draw("HIST SAME");
+            bA->Draw("HIST SAME");
+            sA->Draw("HIST SAME");
+
+            TLegend leg(0.42, 0.68, 0.88, 0.88);
+            leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.028);
+            leg.AddEntry(sB, "Signal (all)", "l");
+            leg.AddEntry(sA, "Signal (unique)", "l");
+            leg.AddEntry(bB, "Background (all)", "l");
+            leg.AddEntry(bA, "Background (unique)", "l");
+            leg.Draw();
+            cu.SaveAs(path);
+            delete sB; delete bB; delete sA; delete bA;
+        };
+
+        saveBeforeAfter(sig_h_leading_offlineLRJ_Et_before, back_h_leading_offlineLRJ_Et_before,
+                        sig_h_leading_offlineLRJ_Et_unique, back_h_leading_offlineLRJ_Et_unique,
+                        "Offline LRJ E_{T}: before & after baseline veto",
+                        "Leading Offline LRJ E_{T} [GeV]",
+                        rateVsEffFileDir + "unique_offlineLRJ_Et.pdf");
+        saveBeforeAfter(sig_h_leading_offlineLRJ_Mass_before, back_h_leading_offlineLRJ_Mass_before,
+                        sig_h_leading_offlineLRJ_Mass_unique, back_h_leading_offlineLRJ_Mass_unique,
+                        "Offline LRJ Mass: before & after baseline veto",
+                        "Leading Offline LRJ Mass [GeV]",
+                        rateVsEffFileDir + "unique_offlineLRJ_Mass.pdf");
+    }
+    sig_h_leading_offlineLRJ_Et_unique_vec.push_back(
+        static_cast<TH1F*>(sig_h_leading_offlineLRJ_Et_unique->Clone()));
+    sig_h_leading_offlineLRJ_Mass_unique_vec.push_back(
+        static_cast<TH1F*>(sig_h_leading_offlineLRJ_Mass_unique->Clone()));
+    back_h_leading_offlineLRJ_Et_unique_vec.push_back(
+        static_cast<TH1F*>(back_h_leading_offlineLRJ_Et_unique->Clone()));
+    back_h_leading_offlineLRJ_Mass_unique_vec.push_back(
+        static_cast<TH1F*>(back_h_leading_offlineLRJ_Mass_unique->Clone()));
+    sig_h_leading_offlineLRJ_Et_before_vec.push_back(
+        static_cast<TH1F*>(sig_h_leading_offlineLRJ_Et_before->Clone()));
+    sig_h_leading_offlineLRJ_Mass_before_vec.push_back(
+        static_cast<TH1F*>(sig_h_leading_offlineLRJ_Mass_before->Clone()));
+    back_h_leading_offlineLRJ_Et_before_vec.push_back(
+        static_cast<TH1F*>(back_h_leading_offlineLRJ_Et_before->Clone()));
+    back_h_leading_offlineLRJ_Mass_before_vec.push_back(
+        static_cast<TH1F*>(back_h_leading_offlineLRJ_Mass_before->Clone()));
     back_h_leading_LRJ_Et_vec.push_back(static_cast<TH1F*>(back_h_leading_LRJ_Et_normalbinning->Clone()));
     back_h_subleading_LRJ_Et_vec.push_back(static_cast<TH1F*>(back_h_subleading_LRJ_Et_normalbinning->Clone()));
     sig_h_leading_LRJ_psi_R_vec.push_back(static_cast<TH1F*>(sig_h_leading_LRJ_psi_R->Clone()));
@@ -8558,6 +9490,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_0Subjets->Divide(2,1);
     c1_0Subjets->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_0subjetEtScan.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_0Subjets->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -8632,6 +9565,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_1Subjet->Divide(2,1);
     c1_1Subjet->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_1subjetEtScan.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_1Subjet->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -8760,14 +9694,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         }
 
         // Find best ET threshold for ET-only scan
-        
         {
             for(int ix = 1; ix <= out.hRate_vsThr->GetNbinsX(); ++ix){
-                double rate = out.hRate_vsThr->GetBinContent(ix);
-                double eff  = out.hEff_vsThr ->GetBinContent(ix);
-                if(rate <= 1e4 && eff > bestEt_eff){
-                    bestEt_eff = eff;
+                if(out.hRate_vsThr->GetBinContent(ix) <= 1e4){
                     bestEt_thr = out.hRate_vsThr->GetXaxis()->GetBinLowEdge(ix);
+                    bestEt_eff = out.hEff_vsThr->GetBinContent(ix);
+                    break;
                 }
             }
         }
@@ -8916,6 +9848,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_0Subjets_Leading ->Divide(2,1);
     c1_0Subjets_Leading ->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_0subjetEtScan_LeadingEt.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_0Subjets_Leading ->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -8948,6 +9881,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     c1_0Subjets_Subleading ->Divide(2,1);
     c1_0Subjets_Subleading ->cd(1);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+    gPad->SetLogy();
     out_0subjetEtScan_SubleadingEt.hEff_vsThr->Draw("HIST");  // draw as histogram
     c1_0Subjets_Subleading ->cd(2);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
@@ -9157,6 +10091,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
         c_thr_A_leadGe2_subleadLt2->cd(1);
         gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
         out_EtScan_A_leadGe2_subleadLt2.hEff_vsThr->Draw("HIST");
 
         c_thr_A_leadGe2_subleadLt2->cd(2);
@@ -9226,6 +10161,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
         c_thr_B_subleadGe2_leadLt2->cd(1);
         gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
         out_EtScan_B_subleadGe2_leadLt2.hEff_vsThr->Draw("HIST");
 
         c_thr_B_subleadGe2_leadLt2->cd(2);
@@ -9295,6 +10231,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
         c_thr_C_leadGe2_subleadGe2->cd(1);
         gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
         out_EtScan_C_leadGe2_subleadGe2.hEff_vsThr->Draw("HIST");
 
         c_thr_C_leadGe2_subleadGe2->cd(2);
@@ -9340,9 +10277,25 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         TH1F* eff_ET_mass_35kHz = nullptr;
         double thr_ET_only_10kHz_p = -1.0, thr_ET_mass_10kHz_p = -1.0, thr_mass_min_10kHz_p = -1.0;
         double thr_ET_only_35kHz_p = -1.0, thr_ET_mass_35kHz_p = -1.0, thr_mass_min_35kHz_p = -1.0;
+        // Mass-split efficiency histograms (assigned in event loops below)
+        TH1F* eff_ET_only_10kHz_MassSel  = nullptr; TH1F* eff_ET_only_10kHz_NoMassSel  = nullptr;
+        TH1F* eff_ET_mass_10kHz_MassSel  = nullptr; TH1F* eff_ET_mass_10kHz_NoMassSel  = nullptr;
+        TH1F* eff_ET_only_35kHz_MassSel  = nullptr; TH1F* eff_ET_only_35kHz_NoMassSel  = nullptr;
+        TH1F* eff_ET_mass_35kHz_MassSel  = nullptr; TH1F* eff_ET_mass_35kHz_NoMassSel  = nullptr;
+        TH1F* sig_eff_offlineLRJ10kHz_SubjetBased_MassSel  = nullptr;
+        TH1F* sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel = nullptr;
+        TH1F* sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel  = nullptr;
+        TH1F* sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel = nullptr;
+        double intEff_SubjetBased_10kHz_all = 0, intEff_SubjetBased_10kHz_massSel = 0, intEff_SubjetBased_10kHz_noMassSel = 0;
+        double intEff_ETonly_10kHz_all = 0, intEff_ETonly_10kHz_massSel = 0, intEff_ETonly_10kHz_noMassSel = 0;
+        double intEff_ETmass_10kHz_all = 0, intEff_ETmass_10kHz_massSel = 0, intEff_ETmass_10kHz_noMassSel = 0;
+        double intEff_SubjetBased_35kHz_all = 0, intEff_SubjetBased_35kHz_massSel = 0, intEff_SubjetBased_35kHz_noMassSel = 0;
+        double intEff_ETonly_35kHz_all = 0, intEff_ETonly_35kHz_massSel = 0, intEff_ETonly_35kHz_noMassSel = 0;
+        double intEff_ETmass_35kHz_all = 0, intEff_ETmass_35kHz_massSel = 0, intEff_ETmass_35kHz_noMassSel = 0;
 
-        // 2D (ET + constituent mass) scans for cats A, B, C
+        // 2D (ET + constituent mass) scans for cats 0, 2, 3, 4
         // ============================
+        auto out_2D_cat0 = MakeRateVsEff_ScanRMin(sig_h2_cat0_Et_vs_ConstituentMass, back_h2_cat0_Et_vs_ConstituentMass);
         auto out_2D_catA = MakeRateVsEff_ScanRMin(sig_h2_catA_Et_vs_ConstituentMass, back_h2_catA_Et_vs_ConstituentMass);
         auto out_2D_catB = MakeRateVsEff_ScanRMin(sig_h2_catB_Et_vs_ConstituentMass, back_h2_catB_Et_vs_ConstituentMass);
         auto out_2D_catC = MakeRateVsEff_ScanRMin(sig_h2_catC_Et_vs_AvgConstituentMass, back_h2_catC_Et_vs_AvgConstituentMass);
@@ -9367,11 +10320,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                   << " Global eff = " << global5_mass.bestEff << "\n"
                   << " Total rate = " << global5_mass.bestRate << " Hz\n"
                   << " Selections (ET + constituent mass):\n"
-                  << " (0) cat0 (1 lead & 1 subl subjet): lead E_{T} > " << global5_mass.bestEtCut_0_lead << " GeV\n"
-                  << " (1) cat1 (0/1 lead or 0/1 subl): subl E_{T} > "   << global5_mass.bestEtCut_0_sub  << " GeV\n"
-                  << " (A) catA (lead>=2, subl<2): lead E_{T} > " << global5_mass.bestEtCut_lead2 << " GeV, lead mass > " << global5_mass.bestMassCut_lead2 << " GeV\n"
-                  << " (B) catB (subl>=2, lead<2): subl E_{T} > " << global5_mass.bestEtCut_sub2  << " GeV, subl mass > " << global5_mass.bestMassCut_sub2  << " GeV\n"
-                  << " (C) catC (both>=2): subl E_{T} > " << global5_mass.bestEtCut_3D_sub << " GeV, avg mass > " << global5_mass.bestMassCut_3D_lead << " GeV\n";
+                  << " (0) cat0 (1 lead & 1 subl subjet): lead E_{T} > " << global5_mass.bestEtCut_0_lead << " GeV, lead mass > " << global5_mass.bestMassCut_0_lead << " GeV\n"
+                  << " (2) cat2 (lead>=2, subl<2): lead E_{T} > " << global5_mass.bestEtCut_lead2 << " GeV, lead mass > " << global5_mass.bestMassCut_lead2 << " GeV\n"
+                  << " (3) cat3 (subl>=2, lead<2): subl E_{T} > " << global5_mass.bestEtCut_sub2  << " GeV, subl mass > " << global5_mass.bestMassCut_sub2  << " GeV\n"
+                  << " (4) cat4 (both>=2): subl E_{T} > " << global5_mass.bestEtCut_3D_sub << " GeV, avg mass > " << global5_mass.bestMassCut_3D_lead << " GeV\n"
+                  << " Per-category at best point (cat, eff_cat, eff_tot, rate [Hz]):\n";
+        for (int c = 0; c < 5; ++c) {
+            std::cout << " cat " << c
+                << ": eff_cat = " << global5_mass.bestEff_cat[c]
+                << ", eff_tot = " << global5_mass.bestEff_tot[c]
+                << ", rate = "    << global5_mass.bestRate_cat[c] << " Hz\n";
+        }
 
         auto c_global5_mass = new TCanvas("c_global5_mass", "Combined 5-cat ET+mass ROC", 700, 600);
         c_global5_mass->SetLeftMargin(0.16); c_global5_mass->SetBottomMargin(0.16);
@@ -9400,6 +10359,71 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         leg_global5_mass->Draw();
         gPad->RedrawAxis();
         c_global5_mass->SaveAs(rateVsEffFileDir + "rate_vs_eff_combined_5selections_Et_plus_ConstituentMass.pdf");
+
+        // Combined 5-category scan with ET + constituent mass, cat0 also gets 2D scan
+        auto global5_mass_cat0 = MakeCombinedRateVsEff_AllFive_NSubjetiness_Cat0Mass(
+            out_2D_cat0,
+            out_0subjetEtScan_SubleadingEt,
+            out_2D_catA,
+            out_2D_catB,
+            out_2D_catC,
+            sig_h2_cat0_Et_vs_ConstituentMass,
+            sig_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead,
+            sig_h2_catA_Et_vs_ConstituentMass,
+            sig_h2_catB_Et_vs_ConstituentMass,
+            sig_h2_catC_Et_vs_AvgConstituentMass,
+            5.0e4,
+            1.0e4
+        );
+        std::cout << "Best combined point (ET + constituent mass, cat0 2D) with total rate <= 10 kHz:\n"
+                  << " Global eff = " << global5_mass_cat0.bestEff << "\n"
+                  << " Total rate = " << global5_mass_cat0.bestRate << " Hz\n"
+                  << " Selections:\n"
+                  << " (0) cat0: lead E_{T} > " << global5_mass_cat0.bestEtCut_0_lead
+                      << " GeV, lead mass > " << global5_mass_cat0.bestMassCut_0_lead << " GeV\n"
+                  << " (2) cat2 (lead>=2, subl<2): lead E_{T} > " << global5_mass_cat0.bestEtCut_lead2
+                      << " GeV, lead mass > " << global5_mass_cat0.bestMassCut_lead2 << " GeV\n"
+                  << " (3) cat3 (subl>=2, lead<2): subl E_{T} > " << global5_mass_cat0.bestEtCut_sub2
+                      << " GeV, subl mass > " << global5_mass_cat0.bestMassCut_sub2 << " GeV\n"
+                  << " (4) cat4 (both>=2): subl E_{T} > " << global5_mass_cat0.bestEtCut_3D_sub
+                      << " GeV, avg mass > " << global5_mass_cat0.bestMassCut_3D_lead << " GeV\n"
+                  << " Per-category at best point (cat, eff_cat, eff_tot, rate [Hz]):\n";
+        for (int c = 0; c < 5; ++c) {
+            std::cout << " cat " << c
+                << ": eff_cat = " << global5_mass_cat0.bestEff_cat[c]
+                << ", eff_tot = " << global5_mass_cat0.bestEff_tot[c]
+                << ", rate = "    << global5_mass_cat0.bestRate_cat[c] << " Hz\n";
+        }
+        {
+            auto c_cat0mass = new TCanvas("c_cat0mass", "Combined 5-cat ET+mass (cat0 2D) ROC", 700, 600);
+            c_cat0mass->SetLeftMargin(0.16); c_cat0mass->SetBottomMargin(0.16);
+            c_cat0mass->SetTicks(1,1); c_cat0mass->SetLogy();
+            global5_mass_cat0.gRate_vsEff_combined->SetMarkerColor(kBlue+1);
+            global5_mass_cat0.gRate_vsEff_combined->SetMarkerStyle(20);
+            global5_mass_cat0.gRate_vsEff_combined->GetXaxis()->SetLimits(0.0, 1.0);
+            global5_mass_cat0.gRate_vsEff_combined->Draw("AP");
+            {
+                double xmin = gPad->GetUxmin(), xmax = gPad->GetUxmax();
+                TLine *hl = new TLine(xmin, 1e4, xmax, 1e4);
+                hl->SetLineColor(kGray+2); hl->SetLineStyle(2); hl->SetLineWidth(2);
+                hl->Draw("SAME");
+                auto best = FindBestPointBelowRate(global5_mass_cat0.gRate_vsEff_combined, 1e4);
+                if (best.first > 0.0) {
+                    TLine *vl = new TLine(best.first, gPad->GetUymin(), best.first, 1e4);
+                    vl->SetLineColor(kBlue+1); vl->SetLineStyle(2); vl->SetLineWidth(2);
+                    vl->Draw("SAME");
+                    TLatex ltx; ltx.SetTextSize(0.028); ltx.SetTextColor(kBlue+1);
+                    ltx.DrawLatexNDC(0.38, 0.21, Form("@ 10 kHz: #varepsilon = %.3f", best.first));
+                }
+            }
+            auto leg_cat0mass = new TLegend(0.18, 0.78, 0.88, 0.88);
+            leg_cat0mass->SetTextSize(0.028);
+            leg_cat0mass->AddEntry(global5_mass_cat0.gRate_vsEff_combined,
+                "5-cat combined: E_{T} + constituent mass (cat0 2D)", "p");
+            leg_cat0mass->Draw();
+            gPad->RedrawAxis();
+            c_cat0mass->SaveAs(rateVsEffFileDir + "rate_vs_eff_combined_5selections_Et_plus_ConstituentMass_Cat0Mass.pdf");
+        }
 
         // 10 kHz efficiency turn-on: ET+mass vs ET-only (both from all-event 2D/1D scans)
         {
@@ -9431,25 +10455,59 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             TH1F* h_num_Et   = new TH1F("h_num_Et_tOn",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_num_mass = new TH1F("h_num_mass_tOn",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_den_tOn  = new TH1F("h_den_tOn",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_massSel    = new TH1F("h_num_Et_tOn_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_noMassSel  = new TH1F("h_num_Et_tOn_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_massSel  = new TH1F("h_num_mass_tOn_massSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_noMassSel= new TH1F("h_num_mass_tOn_noMassSel",";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_massSel       = new TH1F("h_den_tOn_massSel",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_noMassSel     = new TH1F("h_den_tOn_noMassSel",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
 
             for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
                 jetTaggerLeadingLRJsSignal->GetEntry(iEvt);
                 leadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
+                leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(iEvt);
+                leadingAntiKt10TruthJetsTreeSignal->GetEntry(iEvt);
+                leadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(iEvt);
                 if(recoAntiKt10LRJLeadingEtValuesSignal->size() == 0) continue;
                 double offlineEt = recoAntiKt10LRJLeadingEtValuesSignal->at(0);
                 double leadEt    = jetTaggerLeadingLRJEtValuesSignal->at(0);
                 double mLead     = sig_lead_constituent_mass_vec[iEvt];
+                double offlineMass10 = (recoAntiKt10LRJLeadingMassValuesSignal->size() > 0) ? recoAntiKt10LRJLeadingMassValuesSignal->at(0) : -1.0;
+                bool passOfflineMass10 = offlineMass10 >= offlineLRJMassSel_threshold;
                 h_den_tOn->Fill(offlineEt);
                 if(thr_ET_only >= 0.0 && leadEt >= thr_ET_only)
                     h_num_Et->Fill(offlineEt);
                 if(thr_ET_mass >= 0.0 && leadEt >= thr_ET_mass && mLead >= thr_mass_min)
                     h_num_mass->Fill(offlineEt);
+                if(passOfflineMass10){
+                    h_den_massSel->Fill(offlineEt);
+                    if(thr_ET_only >= 0.0 && leadEt >= thr_ET_only) h_num_Et_massSel->Fill(offlineEt);
+                    if(thr_ET_mass >= 0.0 && leadEt >= thr_ET_mass && mLead >= thr_mass_min) h_num_mass_massSel->Fill(offlineEt);
+                } else {
+                    h_den_noMassSel->Fill(offlineEt);
+                    if(thr_ET_only >= 0.0 && leadEt >= thr_ET_only) h_num_Et_noMassSel->Fill(offlineEt);
+                    if(thr_ET_mass >= 0.0 && leadEt >= thr_ET_mass && mLead >= thr_mass_min) h_num_mass_noMassSel->Fill(offlineEt);
+                }
             }
 
             eff_ET_only_10kHz = (TH1F*)h_num_Et->Clone("eff_ET_only_tOn_10kHz");
             eff_ET_only_10kHz->Divide(h_num_Et, h_den_tOn, 1.0, 1.0, "B");
             eff_ET_mass_10kHz = (TH1F*)h_num_mass->Clone("eff_ET_mass_tOn_10kHz");
             eff_ET_mass_10kHz->Divide(h_num_mass, h_den_tOn, 1.0, 1.0, "B");
+            eff_ET_only_10kHz_MassSel = (TH1F*)h_num_Et_massSel->Clone("eff_ET_only_tOn_10kHz_massSel");
+            eff_ET_only_10kHz_MassSel->Divide(h_num_Et_massSel, h_den_massSel, 1.0, 1.0, "B");
+            eff_ET_only_10kHz_NoMassSel = (TH1F*)h_num_Et_noMassSel->Clone("eff_ET_only_tOn_10kHz_noMassSel");
+            eff_ET_only_10kHz_NoMassSel->Divide(h_num_Et_noMassSel, h_den_noMassSel, 1.0, 1.0, "B");
+            eff_ET_mass_10kHz_MassSel = (TH1F*)h_num_mass_massSel->Clone("eff_ET_mass_tOn_10kHz_massSel");
+            eff_ET_mass_10kHz_MassSel->Divide(h_num_mass_massSel, h_den_massSel, 1.0, 1.0, "B");
+            eff_ET_mass_10kHz_NoMassSel = (TH1F*)h_num_mass_noMassSel->Clone("eff_ET_mass_tOn_10kHz_noMassSel");
+            eff_ET_mass_10kHz_NoMassSel->Divide(h_num_mass_noMassSel, h_den_noMassSel, 1.0, 1.0, "B");
+            intEff_ETonly_10kHz_all      = (h_den_tOn->Integral()     > 0) ? h_num_Et->Integral()       / h_den_tOn->Integral()     : 0.0;
+            intEff_ETonly_10kHz_massSel  = (h_den_massSel->Integral() > 0) ? h_num_Et_massSel->Integral()  / h_den_massSel->Integral() : 0.0;
+            intEff_ETonly_10kHz_noMassSel= (h_den_noMassSel->Integral()> 0) ? h_num_Et_noMassSel->Integral()/ h_den_noMassSel->Integral(): 0.0;
+            intEff_ETmass_10kHz_all      = (h_den_tOn->Integral()     > 0) ? h_num_mass->Integral()      / h_den_tOn->Integral()     : 0.0;
+            intEff_ETmass_10kHz_massSel  = (h_den_massSel->Integral() > 0) ? h_num_mass_massSel->Integral() / h_den_massSel->Integral() : 0.0;
+            intEff_ETmass_10kHz_noMassSel= (h_den_noMassSel->Integral()> 0) ? h_num_mass_noMassSel->Integral()/ h_den_noMassSel->Integral(): 0.0;
             TH1F* eff_ET_only = eff_ET_only_10kHz;
             TH1F* eff_ET_mass = eff_ET_mass_10kHz;
 
@@ -9471,6 +10529,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             c_turnOn_mass.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_Et_plus_ConstituentMass_overlay.pdf");
         }
         eff_ET_mass_10kHz_vec.push_back(eff_ET_mass_10kHz);
+        thr_ET_mass_10kHz_vec.push_back(thr_ET_mass_10kHz_p);
+        thr_mass_min_10kHz_vec.push_back(thr_mass_min_10kHz_p);
+        thr_ET_mass_35kHz_vec.push_back(thr_ET_mass_35kHz_p);
+        thr_mass_min_35kHz_vec.push_back(thr_mass_min_35kHz_p);
         nInputObjects_vec.push_back(nInputObjectsAlgorithmConfiguration);
 
         // ======= 35 kHz versions: subjet-based, ET-only, ET+mass =======
@@ -9507,7 +10569,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         {
             // Find best ET-only threshold at <= 35 kHz
             double thr_ET_only_35 = -1.0;
-            for(int ix = out.hRate_vsThr->GetNbinsX(); ix >= 1; --ix){
+            for(int ix = 1; ix <= out.hRate_vsThr->GetNbinsX(); ++ix){
                 if(out.hRate_vsThr->GetBinContent(ix) <= 3.5e4){
                     thr_ET_only_35 = out.hRate_vsThr->GetXaxis()->GetBinLowEdge(ix);
                     break;
@@ -9540,11 +10602,22 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             TH1F* h_num_mass_35 = new TH1F("h_num_mass_35", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_num_sub_35  = new TH1F("h_num_sub_35",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_den_35      = new TH1F("h_den_35",      ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_35_massSel    = new TH1F("h_num_Et_35_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_35_noMassSel  = new TH1F("h_num_Et_35_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_35_massSel  = new TH1F("h_num_mass_35_massSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_35_noMassSel= new TH1F("h_num_mass_35_noMassSel",";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_sub_35_massSel   = new TH1F("h_num_sub_35_massSel",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_sub_35_noMassSel = new TH1F("h_num_sub_35_noMassSel", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_35_massSel       = new TH1F("h_den_35_massSel",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_35_noMassSel     = new TH1F("h_den_35_noMassSel",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
 
             for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
                 jetTaggerLeadingLRJsSignal->GetEntry(iEvt);
                 jetTaggerSubleadingLRJsSignal->GetEntry(iEvt);
                 leadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
+                leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(iEvt);
+                leadingAntiKt10TruthJetsTreeSignal->GetEntry(iEvt);
+                leadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(iEvt);
                 if(recoAntiKt10LRJLeadingEtValuesSignal->size() == 0) continue;
                 double offlineEt = recoAntiKt10LRJLeadingEtValuesSignal->at(0);
                 double leadEt    = jetTaggerLeadingLRJEtValuesSignal->at(0);
@@ -9552,6 +10625,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                 unsigned int nLead = nSubjetsLeadingLRJSignal[iEvt];
                 unsigned int nSubl = nSubjetsSubleadingLRJSignal[iEvt];
                 double mLead = sig_lead_constituent_mass_vec[iEvt];
+                double offlineMass35 = (recoAntiKt10LRJLeadingMassValuesSignal->size() > 0) ? recoAntiKt10LRJLeadingMassValuesSignal->at(0) : -1.0;
+                bool passOfflineMass35 = offlineMass35 >= offlineLRJMassSel_threshold;
                 h_den_35->Fill(offlineEt);
                 // ET-only
                 if(thr_ET_only_35 >= 0.0 && leadEt >= thr_ET_only_35)
@@ -9564,7 +10639,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                 if(nLead == 1 && nSubl == 1)
                     passSubj35 = leadEt >= global5_35kHz.bestEtCut[0];
                 else if((nLead < 1 && nSubl < 1) || (nLead == 0 && nSubl == 1) || (nLead == 1 && nSubl == 0))
-                    passSubj35 = sublEt >= global5_35kHz.bestEtCut[1];
+                    passSubj35 = false; // category disabled: bestEtCut[1] = 0 GeV would always pass
                 else if(nLead >= 2 && nSubl <= 1)
                     passSubj35 = leadEt >= global5_35kHz.bestEtCut[2];
                 else if(nLead <= 1 && nSubl >= 2)
@@ -9572,6 +10647,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                 else if(nLead >= 2 && nSubl >= 2)
                     passSubj35 = sublEt >= global5_35kHz.bestEtCut[4];
                 if(passSubj35) h_num_sub_35->Fill(offlineEt);
+                // Mass-split
+                if(passOfflineMass35){
+                    h_den_35_massSel->Fill(offlineEt);
+                    if(thr_ET_only_35 >= 0.0 && leadEt >= thr_ET_only_35) h_num_Et_35_massSel->Fill(offlineEt);
+                    if(thr_ET_mass_35 >= 0.0 && leadEt >= thr_ET_mass_35 && mLead >= thr_mass_min_35) h_num_mass_35_massSel->Fill(offlineEt);
+                    if(passSubj35) h_num_sub_35_massSel->Fill(offlineEt);
+                } else {
+                    h_den_35_noMassSel->Fill(offlineEt);
+                    if(thr_ET_only_35 >= 0.0 && leadEt >= thr_ET_only_35) h_num_Et_35_noMassSel->Fill(offlineEt);
+                    if(thr_ET_mass_35 >= 0.0 && leadEt >= thr_ET_mass_35 && mLead >= thr_mass_min_35) h_num_mass_35_noMassSel->Fill(offlineEt);
+                    if(passSubj35) h_num_sub_35_noMassSel->Fill(offlineEt);
+                }
             }
             eff_ET_only_35kHz = (TH1F*)h_num_Et_35->Clone("eff_ET_only_35kHz");
             eff_ET_only_35kHz->Divide(h_num_Et_35, h_den_35, 1.0, 1.0, "B");
@@ -9579,6 +10666,27 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             eff_ET_mass_35kHz->Divide(h_num_mass_35, h_den_35, 1.0, 1.0, "B");
             sig_eff_offlineLRJ_SubjetBased_35kHz = (TH1F*)h_num_sub_35->Clone("eff_subjet_35kHz");
             sig_eff_offlineLRJ_SubjetBased_35kHz->Divide(h_num_sub_35, h_den_35, 1.0, 1.0, "B");
+            eff_ET_only_35kHz_MassSel = (TH1F*)h_num_Et_35_massSel->Clone("eff_ET_only_35kHz_massSel");
+            eff_ET_only_35kHz_MassSel->Divide(h_num_Et_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
+            eff_ET_only_35kHz_NoMassSel = (TH1F*)h_num_Et_35_noMassSel->Clone("eff_ET_only_35kHz_noMassSel");
+            eff_ET_only_35kHz_NoMassSel->Divide(h_num_Et_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
+            eff_ET_mass_35kHz_MassSel = (TH1F*)h_num_mass_35_massSel->Clone("eff_ET_mass_35kHz_massSel");
+            eff_ET_mass_35kHz_MassSel->Divide(h_num_mass_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
+            eff_ET_mass_35kHz_NoMassSel = (TH1F*)h_num_mass_35_noMassSel->Clone("eff_ET_mass_35kHz_noMassSel");
+            eff_ET_mass_35kHz_NoMassSel->Divide(h_num_mass_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
+            sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel = (TH1F*)h_num_sub_35_massSel->Clone("eff_subjet_35kHz_massSel");
+            sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel->Divide(h_num_sub_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
+            sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel = (TH1F*)h_num_sub_35_noMassSel->Clone("eff_subjet_35kHz_noMassSel");
+            sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel->Divide(h_num_sub_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
+            intEff_ETonly_35kHz_all       = (h_den_35->Integral()        > 0) ? h_num_Et_35->Integral()        / h_den_35->Integral()        : 0.0;
+            intEff_ETonly_35kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_Et_35_massSel->Integral()   / h_den_35_massSel->Integral()  : 0.0;
+            intEff_ETonly_35kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_Et_35_noMassSel->Integral()  / h_den_35_noMassSel->Integral() : 0.0;
+            intEff_ETmass_35kHz_all       = (h_den_35->Integral()        > 0) ? h_num_mass_35->Integral()       / h_den_35->Integral()        : 0.0;
+            intEff_ETmass_35kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_mass_35_massSel->Integral()  / h_den_35_massSel->Integral()  : 0.0;
+            intEff_ETmass_35kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_mass_35_noMassSel->Integral() / h_den_35_noMassSel->Integral() : 0.0;
+            intEff_SubjetBased_35kHz_all       = (h_den_35->Integral()        > 0) ? h_num_sub_35->Integral()         / h_den_35->Integral()        : 0.0;
+            intEff_SubjetBased_35kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_sub_35_massSel->Integral()    / h_den_35_massSel->Integral()  : 0.0;
+            intEff_SubjetBased_35kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_sub_35_noMassSel->Integral()   / h_den_35_noMassSel->Integral() : 0.0;
         }
 
         // Et-only combined scan (5 categories)
@@ -9624,6 +10732,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
         TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
         TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel   = new TH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel",   "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel   = new TH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel",   "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
 
         TH1F* sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
         TH1F* sig_h_offlineLRJ_Et_denom10kHz_1OfflineSubjet_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_1OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
@@ -9639,6 +10751,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             jetTaggerSubleadingLRJsSignal->GetEntry(iEvt);
             leadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
             subleadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
+            leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(iEvt);
+            subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(iEvt);
+            leadingAntiKt10TruthJetsTreeSignal->GetEntry(iEvt);
+            subleadingAntiKt10TruthJetsTreeSignal->GetEntry(iEvt);
+            leadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(iEvt);
+            subleadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(iEvt);
             if(recoAntiKt10LRJLeadingEtValuesSignal->size() == 0) continue;
 
             if(nOfflineLeadingLRJSubjets >= 2) sig_h_offlineLRJ_Et_denom10kHz_GrEq2OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
@@ -9648,13 +10766,20 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                 // do nothing for computing efficiency, reject these events
             } 
 
+            double offlineMassSubj = (recoAntiKt10LRJLeadingMassValuesSignal->size() > 0) ? recoAntiKt10LRJLeadingMassValuesSignal->at(0) : -1.0;
+            bool passOfflineMassSubj = offlineMassSubj >= offlineLRJMassSel_threshold;
+            auto fillSubjMassSplit = [&](bool passes){
+                if(passes) sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                else        sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+            };
             if(nSubjetConeCellsTowersJetTaggerLeading == 1 && nSubjetConeCellsTowersJetTaggerSubleading == 1){
                 if(jetTaggerLeadingLRJEtValuesSignal->at(0) >= global5.bestEtCut[0]){
                     sig_h_offlineLRJ_Et_num10kHz_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                     if(nOfflineLeadingLRJSubjets >= 2) sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                     else sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                    fillSubjMassSplit(passOfflineMassSubj);
                 }
-                
+
             }
 
             if(nSubjetConeCellsTowersJetTaggerLeading >= 2 && nSubjetConeCellsTowersJetTaggerSubleading <= 1){
@@ -9662,6 +10787,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                     sig_h_offlineLRJ_Et_num10kHz_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                     if(nOfflineLeadingLRJSubjets >= 2) sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                     else sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                    fillSubjMassSplit(passOfflineMassSubj);
                 }
             }
 
@@ -9670,6 +10796,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                     sig_h_offlineLRJ_Et_num10kHz_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                     if(nOfflineLeadingLRJSubjets >= 2) sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                     else sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                    fillSubjMassSplit(passOfflineMassSubj);
                 }
             }
 
@@ -9678,9 +10805,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                     sig_h_offlineLRJ_Et_num10kHz_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                     if(nOfflineLeadingLRJSubjets >= 2) sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                     else sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                    fillSubjMassSplit(passOfflineMassSubj);
                 }
             }
             sig_h_offlineLRJ_Et_denom10kHz_SubjetBased->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0)); // fill denom each event
+            if(passOfflineMassSubj) sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+            else sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
         }
         TCanvas c;
@@ -9688,8 +10818,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         sig_eff_offlineLRJ10kHz_SubjetBased->SetName("eff_LRJ10kHz_SubjetBased");
         sig_eff_offlineLRJ10kHz_SubjetBased->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
         sig_eff_offlineLRJ10kHz_SubjetBased->Divide(sig_h_offlineLRJ_Et_num10kHz_SubjetBased, sig_h_offlineLRJ_Et_denom10kHz_SubjetBased, 1.0, 1.0, "B");
-        
+
         sig_eff_offlineLRJ10kHz_SubjetBased->SetAxisRange(0, 1.1, "Y");
+
+        sig_eff_offlineLRJ10kHz_SubjetBased_MassSel = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel->Clone();
+        sig_eff_offlineLRJ10kHz_SubjetBased_MassSel->SetName("eff_LRJ10kHz_SubjetBased_MassSel");
+        sig_eff_offlineLRJ10kHz_SubjetBased_MassSel->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
+        sig_eff_offlineLRJ10kHz_SubjetBased_MassSel->Divide(sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel, sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel, 1.0, 1.0, "B");
+        sig_eff_offlineLRJ10kHz_SubjetBased_MassSel->SetAxisRange(0, 1.1, "Y");
+
+        sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel->Clone();
+        sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel->SetName("eff_LRJ10kHz_SubjetBased_NoMassSel");
+        sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
+        sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel->Divide(sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel, sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel, 1.0, 1.0, "B");
+        sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel->SetAxisRange(0, 1.1, "Y");
+
+        intEff_SubjetBased_10kHz_all       = (sig_h_offlineLRJ_Et_denom10kHz_SubjetBased->Integral()        > 0) ? sig_h_offlineLRJ_Et_num10kHz_SubjetBased->Integral()        / sig_h_offlineLRJ_Et_denom10kHz_SubjetBased->Integral()        : 0.0;
+        intEff_SubjetBased_10kHz_massSel   = (sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel->Integral() > 0) ? sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel->Integral()   / sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel->Integral()   : 0.0;
+        intEff_SubjetBased_10kHz_noMassSel = (sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel->Integral()> 0) ? sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel->Integral() / sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel->Integral() : 0.0;
 
         sig_eff_offlineLRJ10kHz_SubjetBased->Draw();
 
@@ -9809,9 +10955,77 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         // --- Save overlay ---
         c_effLRJ10kHz_Subjet.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets_subjetbased.pdf");
 
-        TH1F* back_h_leading_offlineLRJ_Mass_beforeselection = new TH1F("back_h_leading_offlineLRJ_Mass_beforeselection", "Leading LRJ Et Distribution;Leading Offline LRJ Mass (Before Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400); // moved outside scope of file loop for use afterwards
-        TH1F* back_h_leading_offlineLRJ_Mass_afterEtselection = new TH1F("back_h_leading_offlineLRJ_Mass_afterEtselection", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass (After Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400); // now will only fill for first file as is same for each
-        TH1F* back_h_leading_offlineLRJ_Mass_afterselection = new TH1F("back_h_leading_offlineLRJ_Mass_afterselection", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass (After Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400); // now will only fill for first file as is same for each
+        // --- Leading offline LRJ mass distributions ---
+        TH1F* back_h_leading_offlineLRJ_Mass_beforeselection = new TH1F("back_h_leading_offlineLRJ_Mass_beforeselection", "Leading LRJ Et Distribution;Leading Offline LRJ Mass (Before Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_leading_offlineLRJ_Mass_afterEtselection = new TH1F("back_h_leading_offlineLRJ_Mass_afterEtselection", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass (After ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_leading_offlineLRJ_Mass_afterselection = new TH1F("back_h_leading_offlineLRJ_Mass_afterselection", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass (After Subjet-based ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_leading_offlineLRJ_Mass_afterEtAndMassselection = new TH1F("back_h_leading_offlineLRJ_Mass_afterEtAndMassselection", "Leading Offline LRJ Mass (After ET+Constituent Mass Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+
+        // --- Subleading offline LRJ mass distributions ---
+        TH1F* back_h_subleading_offlineLRJ_Mass_beforeselection = new TH1F("back_h_subleading_offlineLRJ_Mass_beforeselection", "Subleading Offline LRJ Mass (Before Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_subleading_offlineLRJ_Mass_afterEtselection = new TH1F("back_h_subleading_offlineLRJ_Mass_afterEtselection", "Subleading Offline LRJ Mass (After ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_subleading_offlineLRJ_Mass_afterselection = new TH1F("back_h_subleading_offlineLRJ_Mass_afterselection", "Subleading Offline LRJ Mass (After Subjet-based ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection = new TH1F("back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection", "Subleading Offline LRJ Mass (After ET+Constituent Mass Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+
+        // --- Leading offline LRJ eta distributions ---
+        TH1F* back_h_leading_offlineLRJ_Eta_beforeselection = new TH1F("back_h_leading_offlineLRJ_Eta_beforeselection", "Leading Offline LRJ #eta (Before Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_leading_offlineLRJ_Eta_afterEtselection = new TH1F("back_h_leading_offlineLRJ_Eta_afterEtselection", "Leading Offline LRJ #eta (After ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_leading_offlineLRJ_Eta_afterselection = new TH1F("back_h_leading_offlineLRJ_Eta_afterselection", "Leading Offline LRJ #eta (After Subjet-based ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_leading_offlineLRJ_Eta_afterEtAndMassselection = new TH1F("back_h_leading_offlineLRJ_Eta_afterEtAndMassselection", "Leading Offline LRJ #eta (After ET+Constituent Mass Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+
+        // --- Subleading offline LRJ eta distributions ---
+        TH1F* back_h_subleading_offlineLRJ_Eta_beforeselection = new TH1F("back_h_subleading_offlineLRJ_Eta_beforeselection", "Subleading Offline LRJ #eta (Before Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_subleading_offlineLRJ_Eta_afterEtselection = new TH1F("back_h_subleading_offlineLRJ_Eta_afterEtselection", "Subleading Offline LRJ #eta (After ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_subleading_offlineLRJ_Eta_afterselection = new TH1F("back_h_subleading_offlineLRJ_Eta_afterselection", "Subleading Offline LRJ #eta (After Subjet-based ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection = new TH1F("back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection", "Subleading Offline LRJ #eta (After ET+Constituent Mass Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+
+        // --- Leading offline LRJ ET distributions ---
+        TH1F* back_h_leading_offlineLRJ_Et_beforeselection = new TH1F("back_h_leading_offlineLRJ_Et_beforeselection", "Leading Offline LRJ E_{T} (Before Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_leading_offlineLRJ_Et_afterEtselection = new TH1F("back_h_leading_offlineLRJ_Et_afterEtselection", "Leading Offline LRJ E_{T} (After ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_leading_offlineLRJ_Et_afterselection = new TH1F("back_h_leading_offlineLRJ_Et_afterselection", "Leading Offline LRJ E_{T} (After Subjet-based ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_leading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("back_h_leading_offlineLRJ_Et_afterEtAndMassselection", "Leading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+
+        // --- Subleading offline LRJ ET distributions ---
+        TH1F* back_h_subleading_offlineLRJ_Et_beforeselection = new TH1F("back_h_subleading_offlineLRJ_Et_beforeselection", "Subleading Offline LRJ E_{T} (Before Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_subleading_offlineLRJ_Et_afterEtselection = new TH1F("back_h_subleading_offlineLRJ_Et_afterEtselection", "Subleading Offline LRJ E_{T} (After ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_subleading_offlineLRJ_Et_afterselection = new TH1F("back_h_subleading_offlineLRJ_Et_afterselection", "Subleading Offline LRJ E_{T} (After Subjet-based ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_subleading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("back_h_subleading_offlineLRJ_Et_afterEtAndMassselection", "Subleading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+
+        // --- Signal: Leading offline LRJ mass distributions ---
+        TH1F* sig_h_leading_offlineLRJ_Mass_beforeselection = new TH1F("sig_h_leading_offlineLRJ_Mass_beforeselection", "Leading Offline LRJ Mass (Before Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_leading_offlineLRJ_Mass_afterEtselection = new TH1F("sig_h_leading_offlineLRJ_Mass_afterEtselection", "Leading Offline LRJ Mass (After ET Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_leading_offlineLRJ_Mass_afterselection = new TH1F("sig_h_leading_offlineLRJ_Mass_afterselection", "Leading Offline LRJ Mass (After Subjet-based ET Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection = new TH1F("sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection", "Leading Offline LRJ Mass (After ET+Constituent Mass Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+
+        // --- Signal: Subleading offline LRJ mass distributions ---
+        TH1F* sig_h_subleading_offlineLRJ_Mass_beforeselection = new TH1F("sig_h_subleading_offlineLRJ_Mass_beforeselection", "Subleading Offline LRJ Mass (Before Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_subleading_offlineLRJ_Mass_afterEtselection = new TH1F("sig_h_subleading_offlineLRJ_Mass_afterEtselection", "Subleading Offline LRJ Mass (After ET Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_subleading_offlineLRJ_Mass_afterselection = new TH1F("sig_h_subleading_offlineLRJ_Mass_afterselection", "Subleading Offline LRJ Mass (After Subjet-based ET Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection = new TH1F("sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection", "Subleading Offline LRJ Mass (After ET+Constituent Mass Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+
+        // --- Signal: Leading offline LRJ eta distributions ---
+        TH1F* sig_h_leading_offlineLRJ_Eta_beforeselection = new TH1F("sig_h_leading_offlineLRJ_Eta_beforeselection", "Leading Offline LRJ #eta (Before Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_leading_offlineLRJ_Eta_afterEtselection = new TH1F("sig_h_leading_offlineLRJ_Eta_afterEtselection", "Leading Offline LRJ #eta (After ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_leading_offlineLRJ_Eta_afterselection = new TH1F("sig_h_leading_offlineLRJ_Eta_afterselection", "Leading Offline LRJ #eta (After Subjet-based ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection = new TH1F("sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection", "Leading Offline LRJ #eta (After ET+Constituent Mass Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+
+        // --- Signal: Subleading offline LRJ eta distributions ---
+        TH1F* sig_h_subleading_offlineLRJ_Eta_beforeselection = new TH1F("sig_h_subleading_offlineLRJ_Eta_beforeselection", "Subleading Offline LRJ #eta (Before Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_subleading_offlineLRJ_Eta_afterEtselection = new TH1F("sig_h_subleading_offlineLRJ_Eta_afterEtselection", "Subleading Offline LRJ #eta (After ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_subleading_offlineLRJ_Eta_afterselection = new TH1F("sig_h_subleading_offlineLRJ_Eta_afterselection", "Subleading Offline LRJ #eta (After Subjet-based ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection = new TH1F("sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection", "Subleading Offline LRJ #eta (After ET+Constituent Mass Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+
+        // --- Signal: Leading offline LRJ ET distributions ---
+        TH1F* sig_h_leading_offlineLRJ_Et_beforeselection = new TH1F("sig_h_leading_offlineLRJ_Et_beforeselection", "Leading Offline LRJ E_{T} (Before Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_leading_offlineLRJ_Et_afterEtselection = new TH1F("sig_h_leading_offlineLRJ_Et_afterEtselection", "Leading Offline LRJ E_{T} (After ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_leading_offlineLRJ_Et_afterselection = new TH1F("sig_h_leading_offlineLRJ_Et_afterselection", "Leading Offline LRJ E_{T} (After Subjet-based ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_leading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("sig_h_leading_offlineLRJ_Et_afterEtAndMassselection", "Leading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+
+        // --- Signal: Subleading offline LRJ ET distributions ---
+        TH1F* sig_h_subleading_offlineLRJ_Et_beforeselection = new TH1F("sig_h_subleading_offlineLRJ_Et_beforeselection", "Subleading Offline LRJ E_{T} (Before Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_subleading_offlineLRJ_Et_afterEtselection = new TH1F("sig_h_subleading_offlineLRJ_Et_afterEtselection", "Subleading Offline LRJ E_{T} (After ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_subleading_offlineLRJ_Et_afterselection = new TH1F("sig_h_subleading_offlineLRJ_Et_afterselection", "Subleading Offline LRJ E_{T} (After Subjet-based ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection", "Subleading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
 
         for(unsigned int iEvt = 0; iEvt < num_processed_events_background; iEvt ++ ){
             unsigned int nSubjetConeCellsTowersJetTaggerLeading = nSubjetsLeadingLRJBack[iEvt];
@@ -9820,250 +11034,471 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             jetTaggerSubleadingLRJsBack->GetEntry(iEvt);
             leadingRecoAntiKt10UFOCSSKJetsBack->GetEntry(iEvt);
             subleadingRecoAntiKt10UFOCSSKJetsBack->GetEntry(iEvt);
+            leadingRecoAntiKt10UFOCSSKSoftDropJetsBack->GetEntry(iEvt);
+            subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack->GetEntry(iEvt);
+            leadingAntiKt10TruthJetsTreeBack->GetEntry(iEvt);
+            subleadingAntiKt10TruthJetsTreeBack->GetEntry(iEvt);
+            leadingAntiKt10TruthSoftDropJetsTreeBack->GetEntry(iEvt);
+            subleadingAntiKt10TruthSoftDropJetsTreeBack->GetEntry(iEvt);
             eventInfoTreeBack->GetEntry(iEvt);
             double backgroundEventWeight = eventWeightsValuesBack->at(0);
             if(recoAntiKt10LRJLeadingMassValuesBack->size() == 0) continue;
-            back_h_leading_offlineLRJ_Mass_beforeselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+            const bool hasSubleading = (recoAntiKt10LRJSubleadingMassValuesBack->size() > 0);
+            const double back_lead_cm = back_lead_constituent_mass_vec[iEvt];
 
-            //jetTagger_10kHz_Threshold_Subleading
-            if(jetTaggerLeadingLRJEtValuesBack->at(0) > jetTagger_10kHz_Threshold_Leading){
-                back_h_leading_offlineLRJ_Mass_afterEtselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+            // --- Before selection ---
+            back_h_leading_offlineLRJ_Mass_beforeselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+            back_h_leading_offlineLRJ_Eta_beforeselection->Fill(recoAntiKt10LRJLeadingEtaValuesBack->at(0), backgroundEventWeight);
+            back_h_leading_offlineLRJ_Et_beforeselection->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+            if(hasSubleading){
+                back_h_subleading_offlineLRJ_Mass_beforeselection->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+                back_h_subleading_offlineLRJ_Eta_beforeselection->Fill(recoAntiKt10LRJSubleadingEtaValuesBack->at(0), backgroundEventWeight);
+                back_h_subleading_offlineLRJ_Et_beforeselection->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
             }
 
-            if((nSubjetConeCellsTowersJetTaggerLeading < 1 && nSubjetConeCellsTowersJetTaggerSubleading < 1) || (nSubjetConeCellsTowersJetTaggerLeading == 0 && nSubjetConeCellsTowersJetTaggerSubleading == 1) || (nSubjetConeCellsTowersJetTaggerLeading == 1 && nSubjetConeCellsTowersJetTaggerSubleading == 0)){
-                // do nothing for computing efficiency, reject these events
-            } 
+            // --- After leading ET-only selection (@ 10 kHz threshold) ---
+            if(jetTaggerLeadingLRJEtValuesBack->at(0) > jetTagger_10kHz_Threshold_Leading){
+                back_h_leading_offlineLRJ_Mass_afterEtselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+                back_h_leading_offlineLRJ_Eta_afterEtselection->Fill(recoAntiKt10LRJLeadingEtaValuesBack->at(0), backgroundEventWeight);
+                back_h_leading_offlineLRJ_Et_afterEtselection->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+                if(hasSubleading){
+                    back_h_subleading_offlineLRJ_Mass_afterEtselection->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+                    back_h_subleading_offlineLRJ_Eta_afterEtselection->Fill(recoAntiKt10LRJSubleadingEtaValuesBack->at(0), backgroundEventWeight);
+                    back_h_subleading_offlineLRJ_Et_afterEtselection->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
+                }
+            }
 
+            // --- After subjet-based ET selection (@ 10 kHz, ET-only) ---
+            // cat0: 1 lead & 1 subl subjet
             if(nSubjetConeCellsTowersJetTaggerLeading == 1 && nSubjetConeCellsTowersJetTaggerSubleading == 1){
                 if(jetTaggerLeadingLRJEtValuesBack->at(0) >= global5.bestEtCut[0]){
                     back_h_leading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+                    back_h_leading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJLeadingEtaValuesBack->at(0), backgroundEventWeight);
+                    back_h_leading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+                    if(hasSubleading){
+                        back_h_subleading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+                        back_h_subleading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJSubleadingEtaValuesBack->at(0), backgroundEventWeight);
+                        back_h_subleading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
+                    }
                 }
             }
-
+            // cat2: lead>=2, subl<2
             if(nSubjetConeCellsTowersJetTaggerLeading >= 2 && nSubjetConeCellsTowersJetTaggerSubleading <= 1){
                 if(jetTaggerLeadingLRJEtValuesBack->at(0) >= global5.bestEtCut[2]){
                     back_h_leading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+                    back_h_leading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJLeadingEtaValuesBack->at(0), backgroundEventWeight);
+                    back_h_leading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+                    if(hasSubleading){
+                        back_h_subleading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+                        back_h_subleading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJSubleadingEtaValuesBack->at(0), backgroundEventWeight);
+                        back_h_subleading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
+                    }
                 }
             }
-
+            // cat3: subl>=2, lead<2
             if(nSubjetConeCellsTowersJetTaggerLeading <= 1 && nSubjetConeCellsTowersJetTaggerSubleading >= 2){
                 if(jetTaggerSubleadingLRJEtValuesBack->at(0) >= global5.bestEtCut[3]){
                     back_h_leading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+                    back_h_leading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJLeadingEtaValuesBack->at(0), backgroundEventWeight);
+                    back_h_leading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+                    if(hasSubleading){
+                        back_h_subleading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+                        back_h_subleading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJSubleadingEtaValuesBack->at(0), backgroundEventWeight);
+                        back_h_subleading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
+                    }
                 }
             }
-
+            // cat4: both>=2
             if(nSubjetConeCellsTowersJetTaggerLeading >= 2 && nSubjetConeCellsTowersJetTaggerSubleading >= 2){
                 if(jetTaggerSubleadingLRJEtValuesBack->at(0) >= global5.bestEtCut[4]){
                     back_h_leading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+                    back_h_leading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJLeadingEtaValuesBack->at(0), backgroundEventWeight);
+                    back_h_leading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+                    if(hasSubleading){
+                        back_h_subleading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+                        back_h_subleading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJSubleadingEtaValuesBack->at(0), backgroundEventWeight);
+                        back_h_subleading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
+                    }
+                }
+            }
+
+            // --- After leading LRJ E_T + constituent mass selection (@ 10 kHz, 2D scan) ---
+            if(jetTaggerLeadingLRJEtValuesBack->at(0) >= thr_ET_mass_10kHz_p &&
+               back_lead_cm >= thr_mass_min_10kHz_p){
+                back_h_leading_offlineLRJ_Mass_afterEtAndMassselection->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
+                back_h_leading_offlineLRJ_Eta_afterEtAndMassselection->Fill(recoAntiKt10LRJLeadingEtaValuesBack->at(0), backgroundEventWeight);
+                back_h_leading_offlineLRJ_Et_afterEtAndMassselection->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+                if(hasSubleading){
+                    back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection->Fill(recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
+                    back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection->Fill(recoAntiKt10LRJSubleadingEtaValuesBack->at(0), backgroundEventWeight);
+                    back_h_subleading_offlineLRJ_Et_afterEtAndMassselection->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
                 }
             }
 
         }
-        // Compute ratio of leading offline LRJ mass before and after selection by subjet-based scan
-
         // ----------------------------
-        // Ensure proper sumw2 FIRST
+        // Helper lambda: normalize to unit area in-place
         // ----------------------------
-        back_h_leading_offlineLRJ_Mass_beforeselection->Sumw2();
-        back_h_leading_offlineLRJ_Mass_afterselection->Sumw2();
-        back_h_leading_offlineLRJ_Mass_afterEtselection->Sumw2();
+        auto normalizeHist = [](TH1F* h){
+            h->Sumw2();
+            if(h->Integral() > 0) h->Scale(1.0 / h->Integral());
+        };
 
-        // ----------------------------
-        // Normalize to unit area (shape comparison)
-        // ----------------------------
-        if (back_h_leading_offlineLRJ_Mass_beforeselection->Integral() > 0)
-            back_h_leading_offlineLRJ_Mass_beforeselection->Scale(
-                1.0 / back_h_leading_offlineLRJ_Mass_beforeselection->Integral()
-            );
+        // Sumw2 + normalize all mass and eta histograms
+        normalizeHist(back_h_leading_offlineLRJ_Mass_beforeselection);
+        normalizeHist(back_h_leading_offlineLRJ_Mass_afterEtselection);
+        normalizeHist(back_h_leading_offlineLRJ_Mass_afterselection);
+        normalizeHist(back_h_leading_offlineLRJ_Mass_afterEtAndMassselection);
 
-        if (back_h_leading_offlineLRJ_Mass_afterselection->Integral() > 0)
-            back_h_leading_offlineLRJ_Mass_afterselection->Scale(
-                1.0 / back_h_leading_offlineLRJ_Mass_afterselection->Integral()
-            );
+        normalizeHist(back_h_subleading_offlineLRJ_Mass_beforeselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Mass_afterEtselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Mass_afterselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection);
 
-        if (back_h_leading_offlineLRJ_Mass_afterEtselection->Integral() > 0)
-            back_h_leading_offlineLRJ_Mass_afterEtselection->Scale(
-                1.0 / back_h_leading_offlineLRJ_Mass_afterEtselection->Integral()
-            );
+        normalizeHist(back_h_leading_offlineLRJ_Eta_beforeselection);
+        normalizeHist(back_h_leading_offlineLRJ_Eta_afterEtselection);
+        normalizeHist(back_h_leading_offlineLRJ_Eta_afterselection);
+        normalizeHist(back_h_leading_offlineLRJ_Eta_afterEtAndMassselection);
 
-        // ----------------------------
-        // Ratios: (after / before) for both selections
-        // ----------------------------
-        TH1F* h_ratio_subjet = (TH1F*)back_h_leading_offlineLRJ_Mass_afterselection->Clone("h_ratio_subjet_after_over_before");
-        h_ratio_subjet->SetTitle("");
-        h_ratio_subjet->Divide(back_h_leading_offlineLRJ_Mass_beforeselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Eta_beforeselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Eta_afterEtselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Eta_afterselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection);
 
-        TH1F* h_ratio_leadEt = (TH1F*)back_h_leading_offlineLRJ_Mass_afterEtselection->Clone("h_ratio_leadEt_after_over_before");
-        h_ratio_leadEt->SetTitle("");
-        h_ratio_leadEt->Divide(back_h_leading_offlineLRJ_Mass_beforeselection);
+        normalizeHist(back_h_leading_offlineLRJ_Et_beforeselection);
+        normalizeHist(back_h_leading_offlineLRJ_Et_afterEtselection);
+        normalizeHist(back_h_leading_offlineLRJ_Et_afterselection);
+        normalizeHist(back_h_leading_offlineLRJ_Et_afterEtAndMassselection);
 
-        // For log-y ratio plot: enforce strictly positive bins; blank bins with denom<=0 or ratio<=0
-        for (int b = 1; b <= back_h_leading_offlineLRJ_Mass_beforeselection->GetNbinsX(); ++b) {
-            const double denom = back_h_leading_offlineLRJ_Mass_beforeselection->GetBinContent(b);
+        normalizeHist(back_h_subleading_offlineLRJ_Et_beforeselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Et_afterEtselection);
 
-            const double r1 = h_ratio_subjet->GetBinContent(b);
-            if (denom <= 0.0 || r1 <= 0.0) {
-                h_ratio_subjet->SetBinContent(b, 0.0);
-                h_ratio_subjet->SetBinError(b, 0.0);
+        // --- Signal: before/after selection distributions (mass, eta, ET) ---
+        for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
+            unsigned int nSubjetConeCellsTowersJetTaggerLeading = nSubjetsLeadingLRJSignal[iEvt];
+            unsigned int nSubjetConeCellsTowersJetTaggerSubleading = nSubjetsSubleadingLRJSignal[iEvt];
+            const double sig_lead_cm = sig_lead_constituent_mass_vec[iEvt];
+            jetTaggerLeadingLRJsSignal->GetEntry(iEvt);
+            jetTaggerSubleadingLRJsSignal->GetEntry(iEvt);
+            leadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
+            subleadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
+            leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(iEvt);
+            subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(iEvt);
+            leadingAntiKt10TruthJetsTreeSignal->GetEntry(iEvt);
+            subleadingAntiKt10TruthJetsTreeSignal->GetEntry(iEvt);
+            leadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(iEvt);
+            subleadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(iEvt);
+            if(recoAntiKt10LRJLeadingMassValuesSignal->size() == 0) continue;
+            const bool sigHasSubleading = (recoAntiKt10LRJSubleadingMassValuesSignal->size() > 0);
+
+            // Before selection
+            sig_h_leading_offlineLRJ_Mass_beforeselection->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+            sig_h_leading_offlineLRJ_Eta_beforeselection->Fill(recoAntiKt10LRJLeadingEtaValuesSignal->at(0));
+            sig_h_leading_offlineLRJ_Et_beforeselection->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+            if(sigHasSubleading){
+                sig_h_subleading_offlineLRJ_Mass_beforeselection->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
+                sig_h_subleading_offlineLRJ_Eta_beforeselection->Fill(recoAntiKt10LRJSubleadingEtaValuesSignal->at(0));
+                sig_h_subleading_offlineLRJ_Et_beforeselection->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
 
-            const double r2 = h_ratio_leadEt->GetBinContent(b);
-            if (denom <= 0.0 || r2 <= 0.0) {
-                h_ratio_leadEt->SetBinContent(b, 0.0);
-                h_ratio_leadEt->SetBinError(b, 0.0);
+            // After leading ET-only selection (@ 10 kHz threshold)
+            if(jetTaggerLeadingLRJEtValuesSignal->at(0) > jetTagger_10kHz_Threshold_Leading){
+                sig_h_leading_offlineLRJ_Mass_afterEtselection->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+                sig_h_leading_offlineLRJ_Eta_afterEtselection->Fill(recoAntiKt10LRJLeadingEtaValuesSignal->at(0));
+                sig_h_leading_offlineLRJ_Et_afterEtselection->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                if(sigHasSubleading){
+                    sig_h_subleading_offlineLRJ_Mass_afterEtselection->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
+                    sig_h_subleading_offlineLRJ_Eta_afterEtselection->Fill(recoAntiKt10LRJSubleadingEtaValuesSignal->at(0));
+                    sig_h_subleading_offlineLRJ_Et_afterEtselection->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
+                }
+            }
+
+            // After subjet-based ET selection (@ 10 kHz, ET-only)
+            if(nSubjetConeCellsTowersJetTaggerLeading == 1 && nSubjetConeCellsTowersJetTaggerSubleading == 1){
+                if(jetTaggerLeadingLRJEtValuesSignal->at(0) >= global5.bestEtCut[0]){
+                    sig_h_leading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+                    sig_h_leading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJLeadingEtaValuesSignal->at(0));
+                    sig_h_leading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                    if(sigHasSubleading){ sig_h_subleading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0)); sig_h_subleading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJSubleadingEtaValuesSignal->at(0)); sig_h_subleading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0)); }
+                }
+            }
+            if(nSubjetConeCellsTowersJetTaggerLeading >= 2 && nSubjetConeCellsTowersJetTaggerSubleading <= 1){
+                if(jetTaggerLeadingLRJEtValuesSignal->at(0) >= global5.bestEtCut[2]){
+                    sig_h_leading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+                    sig_h_leading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJLeadingEtaValuesSignal->at(0));
+                    sig_h_leading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                    if(sigHasSubleading){ sig_h_subleading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0)); sig_h_subleading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJSubleadingEtaValuesSignal->at(0)); sig_h_subleading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0)); }
+                }
+            }
+            if(nSubjetConeCellsTowersJetTaggerLeading <= 1 && nSubjetConeCellsTowersJetTaggerSubleading >= 2){
+                if(jetTaggerSubleadingLRJEtValuesSignal->at(0) >= global5.bestEtCut[3]){
+                    sig_h_leading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+                    sig_h_leading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJLeadingEtaValuesSignal->at(0));
+                    sig_h_leading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                    if(sigHasSubleading){ sig_h_subleading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0)); sig_h_subleading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJSubleadingEtaValuesSignal->at(0)); sig_h_subleading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0)); }
+                }
+            }
+            if(nSubjetConeCellsTowersJetTaggerLeading >= 2 && nSubjetConeCellsTowersJetTaggerSubleading >= 2){
+                if(jetTaggerSubleadingLRJEtValuesSignal->at(0) >= global5.bestEtCut[4]){
+                    sig_h_leading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+                    sig_h_leading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJLeadingEtaValuesSignal->at(0));
+                    sig_h_leading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                    if(sigHasSubleading){ sig_h_subleading_offlineLRJ_Mass_afterselection->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0)); sig_h_subleading_offlineLRJ_Eta_afterselection->Fill(recoAntiKt10LRJSubleadingEtaValuesSignal->at(0)); sig_h_subleading_offlineLRJ_Et_afterselection->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0)); }
+                }
+            }
+
+            // After leading LRJ E_T + constituent mass selection (@ 10 kHz, 2D scan)
+            if(jetTaggerLeadingLRJEtValuesSignal->at(0) >= thr_ET_mass_10kHz_p &&
+               sig_lead_cm >= thr_mass_min_10kHz_p){
+                sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0));
+                sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection->Fill(recoAntiKt10LRJLeadingEtaValuesSignal->at(0));
+                sig_h_leading_offlineLRJ_Et_afterEtAndMassselection->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                if(sigHasSubleading){
+                    sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection->Fill(recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
+                    sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection->Fill(recoAntiKt10LRJSubleadingEtaValuesSignal->at(0));
+                    sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
+                }
             }
         }
+        normalizeHist(back_h_subleading_offlineLRJ_Et_afterselection);
+        normalizeHist(back_h_subleading_offlineLRJ_Et_afterEtAndMassselection);
+
+        // ----------------------------
+        // Ratios: (after / before) for all three selections — leading and subleading mass
+        // ----------------------------
+        auto makeRatio = [](TH1F* after, TH1F* before, const char* name) -> TH1F* {
+            TH1F* h = (TH1F*)after->Clone(name);
+            h->SetTitle("");
+            h->Divide(before);
+            for(int b = 1; b <= h->GetNbinsX(); ++b){
+                if(before->GetBinContent(b) <= 0.0 || h->GetBinContent(b) <= 0.0){
+                    h->SetBinContent(b, 0.0); h->SetBinError(b, 0.0);
+                }
+            }
+            return h;
+        };
+
+        TH1F* h_ratio_subjet    = makeRatio(back_h_leading_offlineLRJ_Mass_afterselection,            back_h_leading_offlineLRJ_Mass_beforeselection,    "h_ratio_lead_subjet_after_over_before");
+        TH1F* h_ratio_leadEt    = makeRatio(back_h_leading_offlineLRJ_Mass_afterEtselection,          back_h_leading_offlineLRJ_Mass_beforeselection,    "h_ratio_lead_Et_after_over_before");
+        TH1F* h_ratio_EtAndMass = makeRatio(back_h_leading_offlineLRJ_Mass_afterEtAndMassselection,   back_h_leading_offlineLRJ_Mass_beforeselection,    "h_ratio_lead_EtMass_after_over_before");
+
+        TH1F* h_ratio_subl_subjet    = makeRatio(back_h_subleading_offlineLRJ_Mass_afterselection,           back_h_subleading_offlineLRJ_Mass_beforeselection, "h_ratio_subl_subjet_after_over_before");
+        TH1F* h_ratio_subl_leadEt    = makeRatio(back_h_subleading_offlineLRJ_Mass_afterEtselection,         back_h_subleading_offlineLRJ_Mass_beforeselection, "h_ratio_subl_Et_after_over_before");
+        TH1F* h_ratio_subl_EtAndMass = makeRatio(back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection,  back_h_subleading_offlineLRJ_Mass_beforeselection, "h_ratio_subl_EtMass_after_over_before");
 
         // ----------------------------
         // Style
         // ----------------------------
-        back_h_leading_offlineLRJ_Mass_beforeselection->SetLineColor(kBlack);
-        back_h_leading_offlineLRJ_Mass_beforeselection->SetLineWidth(2);
+        const double leadEtThr = jetTagger_10kHz_Threshold_Leading;
+        TString leadEtLabel    = Form("Lead. LRJ E_{T} > %.1f GeV", leadEtThr);
 
-        back_h_leading_offlineLRJ_Mass_afterselection->SetLineColor(kRed + 1);
-        back_h_leading_offlineLRJ_Mass_afterselection->SetLineWidth(2);
+        auto styleHist  = [](TH1F* h, Color_t col){ h->SetLineColor(col); h->SetLineWidth(2); };
+        auto styleRatio = [](TH1F* h, Color_t col, int ms){
+            h->SetLineColor(col); h->SetLineWidth(2);
+            h->SetMarkerColor(col); h->SetMarkerStyle(ms); h->SetMarkerSize(0.7);
+        };
 
-        back_h_leading_offlineLRJ_Mass_afterEtselection->SetLineColor(kBlue + 1);
-        back_h_leading_offlineLRJ_Mass_afterEtselection->SetLineWidth(2);
+        styleHist(back_h_leading_offlineLRJ_Mass_beforeselection,        kBlack);
+        styleHist(back_h_leading_offlineLRJ_Mass_afterEtselection,       kBlue+1);
+        styleHist(back_h_leading_offlineLRJ_Mass_afterselection,         kRed+1);
+        styleHist(back_h_leading_offlineLRJ_Mass_afterEtAndMassselection, kGreen+2);
 
-        // ratios match their parents
-        h_ratio_subjet->SetLineColor(kRed + 1);
-        h_ratio_subjet->SetLineWidth(2);
-        h_ratio_subjet->SetMarkerStyle(20);
-        h_ratio_subjet->SetMarkerSize(0.7);
-        h_ratio_subjet->SetMarkerColor(kRed + 1);
+        styleHist(back_h_subleading_offlineLRJ_Mass_beforeselection,        kBlack);
+        styleHist(back_h_subleading_offlineLRJ_Mass_afterEtselection,       kBlue+1);
+        styleHist(back_h_subleading_offlineLRJ_Mass_afterselection,         kRed+1);
+        styleHist(back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection, kGreen+2);
 
-        h_ratio_leadEt->SetLineColor(kBlue + 1);
-        h_ratio_leadEt->SetLineWidth(2);
-        h_ratio_leadEt->SetMarkerStyle(24);
-        h_ratio_leadEt->SetMarkerSize(0.7);
-        h_ratio_leadEt->SetMarkerColor(kBlue + 1);
+        styleHist(back_h_leading_offlineLRJ_Eta_beforeselection,        kBlack);
+        styleHist(back_h_leading_offlineLRJ_Eta_afterEtselection,       kBlue+1);
+        styleHist(back_h_leading_offlineLRJ_Eta_afterselection,         kRed+1);
+        styleHist(back_h_leading_offlineLRJ_Eta_afterEtAndMassselection, kGreen+2);
 
-        // ----------------------------
-        // Canvas + pads
-        // ----------------------------
-        TCanvas* c_mass = new TCanvas("c_mass", "Offline LRJ mass: before/after + ratio", 900, 850);
-        c_mass->cd();
+        styleHist(back_h_subleading_offlineLRJ_Eta_beforeselection,        kBlack);
+        styleHist(back_h_subleading_offlineLRJ_Eta_afterEtselection,       kBlue+1);
+        styleHist(back_h_subleading_offlineLRJ_Eta_afterselection,         kRed+1);
+        styleHist(back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection, kGreen+2);
 
-        TPad* p_top = new TPad("p_top", "p_top", 0.0, 0.30, 1.0, 1.0);
-        TPad* p_bot = new TPad("p_bot", "p_bot", 0.0, 0.00, 1.0, 0.30);
+        styleHist(back_h_leading_offlineLRJ_Et_beforeselection,        kBlack);
+        styleHist(back_h_leading_offlineLRJ_Et_afterEtselection,       kBlue+1);
+        styleHist(back_h_leading_offlineLRJ_Et_afterselection,         kRed+1);
+        styleHist(back_h_leading_offlineLRJ_Et_afterEtAndMassselection, kGreen+2);
 
-        p_top->SetTopMargin(0.10);   // was default; add headroom for title
-        p_top->SetBottomMargin(0.02);
-        p_bot->SetTopMargin(0.03);
-        p_bot->SetBottomMargin(0.35);
+        styleHist(back_h_subleading_offlineLRJ_Et_beforeselection,        kBlack);
+        styleHist(back_h_subleading_offlineLRJ_Et_afterEtselection,       kBlue+1);
+        styleHist(back_h_subleading_offlineLRJ_Et_afterselection,         kRed+1);
+        styleHist(back_h_subleading_offlineLRJ_Et_afterEtAndMassselection, kGreen+2);
 
-        p_top->Draw();
-        p_bot->Draw();
-        
-
-        // ----------------------------
-        // TOP pad: overlay + legend (LOG Y)
-        // ----------------------------
-        p_top->cd();
-        p_top->SetLogy(true);
-        
-
-        
-
-
-        const double topMin = 1e-6;
-
-        // include all three in ymax
-        double ymax = std::max({ back_h_leading_offlineLRJ_Mass_beforeselection->GetMaximum(),
-                                back_h_leading_offlineLRJ_Mass_afterselection->GetMaximum(),
-                                back_h_leading_offlineLRJ_Mass_afterEtselection->GetMaximum() });
-
-        back_h_leading_offlineLRJ_Mass_beforeselection->SetMinimum(topMin);
-        back_h_leading_offlineLRJ_Mass_beforeselection->SetMaximum(1.25 * ymax);
-
-        back_h_leading_offlineLRJ_Mass_beforeselection->GetXaxis()->SetLabelSize(0);
-        back_h_leading_offlineLRJ_Mass_beforeselection->GetXaxis()->SetTitleSize(0);
-
-        back_h_leading_offlineLRJ_Mass_beforeselection->Draw("HIST");
-        back_h_leading_offlineLRJ_Mass_afterselection->Draw("HIST SAME");
-        back_h_leading_offlineLRJ_Mass_afterEtselection->Draw("HIST SAME");
-        
-        // ---- Title (top pad) ----
-        TLatex latex_title;
-        latex_title.SetNDC(true);
-        latex_title.SetTextFont(42);
-        latex_title.SetTextSize(0.040);
-        latex_title.SetTextAlign(13); // left-top alignment
-        latex_title.DrawLatex(
-            0.09, 0.965,
-            "QCD Dijet Background: Leading Offline LRJ Mass, Before & After JetTagger Selections"
-        );
-
-
-        // Legend labels
-        const double leadEtThr = jetTagger_10kHz_Threshold_Leading; // assuming this exists and is a double
-        TString leadEtLabel = Form("Lead. LRJ E_{T} > %.1f GeV", leadEtThr);
-
-        TLegend* leg_selections = new TLegend(0.50, 0.60, 0.83, 0.83);
-        leg_selections->SetBorderSize(0);
-        leg_selections->SetFillStyle(0);
-        leg_selections->AddEntry(back_h_leading_offlineLRJ_Mass_beforeselection, "Before selection", "l");
-        leg_selections->AddEntry(back_h_leading_offlineLRJ_Mass_afterselection,  "After Subjet-based E_{T} Selection", "l");
-        leg_selections->AddEntry(back_h_leading_offlineLRJ_Mass_afterEtselection, leadEtLabel, "l");
-        leg_selections->Draw();
+        styleRatio(h_ratio_subjet,         kRed+1,   20);
+        styleRatio(h_ratio_leadEt,         kBlue+1,  24);
+        styleRatio(h_ratio_EtAndMass,      kGreen+2, 21);
+        styleRatio(h_ratio_subl_subjet,    kRed+1,   20);
+        styleRatio(h_ratio_subl_leadEt,    kBlue+1,  24);
+        styleRatio(h_ratio_subl_EtAndMass, kGreen+2, 21);
 
         // ----------------------------
-        // BOTTOM pad: ratio (LOG Y + dynamic range covering BOTH ratios)
+        // Helper: mass canvas with top-overlay + bottom-ratio pads
         // ----------------------------
-        p_bot->cd();
-        p_bot->SetLogy(true);
+        auto makeMassCanvas = [&](
+            const char* cname, const char* saveFile, const char* titleStr, const char* xLabel,
+            TH1F* hBefore, TH1F* hEt, TH1F* hSubjet, TH1F* hEtMass,
+            TH1F* rEt, TH1F* rSubjet, TH1F* rEtMass)
+        {
+            TCanvas* c = new TCanvas(cname, cname, 900, 850);
+            TPad* ptop = new TPad(Form("%s_top",cname),"",0.0,0.30,1.0,1.0);
+            TPad* pbot = new TPad(Form("%s_bot",cname),"",0.0,0.00,1.0,0.30);
+            ptop->SetTopMargin(0.10); ptop->SetBottomMargin(0.02);
+            pbot->SetTopMargin(0.03); pbot->SetBottomMargin(0.35);
+            ptop->Draw(); pbot->Draw();
 
-        // Use one ratio histogram as the "frame" for axes
-        TH1F* h_ratio_frame = (TH1F*)h_ratio_subjet->Clone("h_ratio_frame");
-        h_ratio_frame->Reset("ICES");
-        h_ratio_frame->SetTitle("");
+            ptop->cd(); ptop->SetLogy(true);
+            double ym = std::max({hBefore->GetMaximum(), hEt->GetMaximum(),
+                                  hSubjet->GetMaximum(), hEtMass->GetMaximum()});
+            hBefore->SetMinimum(1e-6); hBefore->SetMaximum(1.5*ym);
+            hBefore->GetXaxis()->SetLabelSize(0); hBefore->GetXaxis()->SetTitleSize(0);
+            hBefore->Draw("HIST");
+            hEt->Draw("HIST SAME");
+            hSubjet->Draw("HIST SAME");
+            hEtMass->Draw("HIST SAME");
 
-        h_ratio_frame->GetYaxis()->SetTitle("After / Before");
-        h_ratio_frame->GetYaxis()->SetNdivisions(505);
-        h_ratio_frame->GetYaxis()->SetTitleSize(0.10);
-        h_ratio_frame->GetYaxis()->SetTitleOffset(0.50);
-        h_ratio_frame->GetYaxis()->SetLabelSize(0.09);
+            TLatex ltx; ltx.SetNDC(true); ltx.SetTextFont(42);
+            ltx.SetTextSize(0.038); ltx.SetTextAlign(13);
+            ltx.DrawLatex(0.09, 0.965, titleStr);
 
-        h_ratio_frame->GetXaxis()->SetTitle("Leading Offline LRJ Mass [GeV]");
-        h_ratio_frame->GetXaxis()->SetTitleSize(0.12);
-        h_ratio_frame->GetXaxis()->SetTitleOffset(1.10);
-        h_ratio_frame->GetXaxis()->SetLabelSize(0.10);
+            TLegend* leg = new TLegend(0.43, 0.53, 0.87, 0.80);
+            leg->SetBorderSize(0); leg->SetFillStyle(0);
+            leg->AddEntry(hBefore,  "Before selection", "l");
+            leg->AddEntry(hEt,      leadEtLabel, "l");
+            leg->AddEntry(hSubjet,  "After Subjet-based E_{T} Sel.", "l");
+            leg->AddEntry(hEtMass,  Form("Lead. E_{T} > %.0f GeV, m_{lead} > %.0f GeV", thr_ET_mass_10kHz_p, thr_mass_min_10kHz_p), "l");
+            leg->Draw();
 
-        // --- Compute dynamic min/max for ratio, considering BOTH ratio hists, ignoring zeros
-        double rmin = 1e99, rmax = -1e99;
-        for (int b = 1; b <= h_ratio_subjet->GetNbinsX(); ++b) {
-            const double r1 = h_ratio_subjet->GetBinContent(b);
-            if (r1 > 0.0) { rmin = std::min(rmin, r1); rmax = std::max(rmax, r1); }
+            pbot->cd(); pbot->SetLogy(true);
+            TH1F* frame = (TH1F*)rSubjet->Clone(Form("%s_frame",cname));
+            frame->Reset("ICES");
+            frame->GetYaxis()->SetTitle("After / Before");
+            frame->GetYaxis()->SetNdivisions(505);
+            frame->GetYaxis()->SetTitleSize(0.10); frame->GetYaxis()->SetTitleOffset(0.50);
+            frame->GetYaxis()->SetLabelSize(0.09);
+            frame->GetXaxis()->SetTitle(xLabel);
+            frame->GetXaxis()->SetTitleSize(0.12); frame->GetXaxis()->SetTitleOffset(1.10);
+            frame->GetXaxis()->SetLabelSize(0.10);
 
-            const double r2 = h_ratio_leadEt->GetBinContent(b);
-            if (r2 > 0.0) { rmin = std::min(rmin, r2); rmax = std::max(rmax, r2); }
-        }
+            double rmn=1e99, rmx=-1e99;
+            for(int b=1; b<=rSubjet->GetNbinsX(); ++b){
+                for(TH1F* r : {rEt,rSubjet,rEtMass}){
+                    double v = r->GetBinContent(b);
+                    if(v>0.0){ rmn=std::min(rmn,v); rmx=std::max(rmx,v); }
+                }
+            }
+            if(rmx<=0.0||rmn>=1e98){ rmn=0.5; rmx=2.0; }
+            frame->SetMinimum(std::max(1e-6, rmn*0.8));
+            frame->SetMaximum(rmx*1.25);
+            frame->Draw("AXIS");
+            rEt->Draw("E1 SAME");
+            rSubjet->Draw("E1 SAME");
+            rEtMass->Draw("E1 SAME");
 
-        // Fallback if everything is zero
-        if (rmax <= 0.0 || rmin >= 1e98) { rmin = 0.5; rmax = 2.0; }
+            TLine* l1r = new TLine(rSubjet->GetXaxis()->GetXmin(), 1.0,
+                                   rSubjet->GetXaxis()->GetXmax(), 1.0);
+            l1r->SetLineStyle(2); l1r->SetLineWidth(2); l1r->SetLineColor(kGray+2);
+            l1r->Draw("SAME");
+            c->SaveAs(saveFile);
+        };
 
-        // Add padding (multiplicative makes sense on log scale)
-        const double padLow  = 0.8;
-        const double padHigh = 1.25;
+        makeMassCanvas(
+            "c_lead_mass",
+            modifiedOutputFileDir + "back_leading_offlineLRJ_mass_before_after_ratio.pdf",
+            "QCD Dijet Background: Leading Offline LRJ Mass, Before & After JetTagger Selections",
+            "Leading Offline LRJ Mass [GeV]",
+            back_h_leading_offlineLRJ_Mass_beforeselection,
+            back_h_leading_offlineLRJ_Mass_afterEtselection,
+            back_h_leading_offlineLRJ_Mass_afterselection,
+            back_h_leading_offlineLRJ_Mass_afterEtAndMassselection,
+            h_ratio_leadEt, h_ratio_subjet, h_ratio_EtAndMass);
 
-        h_ratio_frame->SetMinimum(std::max(1e-6, rmin * padLow));
-        h_ratio_frame->SetMaximum(rmax * padHigh);
+        makeMassCanvas(
+            "c_subl_mass",
+            modifiedOutputFileDir + "back_subleading_offlineLRJ_mass_before_after_ratio.pdf",
+            "QCD Dijet Background: Subleading Offline LRJ Mass, Before & After JetTagger Selections",
+            "Subleading Offline LRJ Mass [GeV]",
+            back_h_subleading_offlineLRJ_Mass_beforeselection,
+            back_h_subleading_offlineLRJ_Mass_afterEtselection,
+            back_h_subleading_offlineLRJ_Mass_afterselection,
+            back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection,
+            h_ratio_subl_leadEt, h_ratio_subl_subjet, h_ratio_subl_EtAndMass);
 
-        h_ratio_frame->Draw("AXIS");          // create axes
-        h_ratio_subjet->Draw("E1 SAME");      // red
-        h_ratio_leadEt->Draw("E1 SAME");      // blue
+        // ----------------------------
+        // Eta canvases (overlay only, log-y)
+        // ----------------------------
+        auto makeEtaCanvas = [&](
+            const char* cname, const char* saveFile, const char* titleStr, const char* xLabel,
+            TH1F* hBefore, TH1F* hEt, TH1F* hSubjet, TH1F* hEtMass)
+        {
+            TCanvas* c = new TCanvas(cname, cname, 800, 700);
+            c->SetTopMargin(0.10); c->SetLeftMargin(0.12); c->SetLogy(true);
+            double ym = std::max({hBefore->GetMaximum(), hEt->GetMaximum(),
+                                  hSubjet->GetMaximum(), hEtMass->GetMaximum()});
+            hBefore->SetMinimum(1e-4); hBefore->SetMaximum(1.5*ym);
+            hBefore->GetXaxis()->SetTitle(xLabel);
+            hBefore->GetYaxis()->SetTitle("Fraction of Events / 0.1");
+            hBefore->Draw("HIST");
+            hEt->Draw("HIST SAME");
+            hSubjet->Draw("HIST SAME");
+            hEtMass->Draw("HIST SAME");
 
-        // line at 1
-        TLine* l1 = new TLine(h_ratio_subjet->GetXaxis()->GetXmin(), 1.0,
-                            h_ratio_subjet->GetXaxis()->GetXmax(), 1.0);
-        l1->SetLineStyle(2);
-        l1->SetLineWidth(2);
-        l1->SetLineColor(kGray + 2);
-        l1->Draw("SAME");
+            TLatex ltx; ltx.SetNDC(true); ltx.SetTextFont(42);
+            ltx.SetTextSize(0.038); ltx.SetTextAlign(13);
+            ltx.DrawLatex(0.12, 0.965, titleStr);
 
-        // save
-        c_mass->SaveAs(modifiedOutputFileDir + "back_leading_offlineLRJ_mass_before_after_ratio.pdf");
+            TLegend* leg = new TLegend(0.33, 0.33, 0.77, 0.57);
+            leg->SetBorderSize(0); leg->SetFillStyle(0);
+            leg->AddEntry(hBefore,  "Before selection", "l");
+            leg->AddEntry(hEt,      leadEtLabel, "l");
+            leg->AddEntry(hSubjet,  "After Subjet-based E_{T} Sel.", "l");
+            leg->AddEntry(hEtMass,  Form("Lead. E_{T} > %.0f GeV, m_{lead} > %.0f GeV", thr_ET_mass_10kHz_p, thr_mass_min_10kHz_p), "l");
+            leg->Draw();
+            c->SaveAs(saveFile);
+        };
+
+        makeEtaCanvas(
+            "c_lead_eta",
+            modifiedOutputFileDir + "back_leading_offlineLRJ_eta_before_after.pdf",
+            "QCD Dijet Background: Leading Offline LRJ #eta, Before & After JetTagger Selections",
+            "Leading Offline LRJ #eta",
+            back_h_leading_offlineLRJ_Eta_beforeselection,
+            back_h_leading_offlineLRJ_Eta_afterEtselection,
+            back_h_leading_offlineLRJ_Eta_afterselection,
+            back_h_leading_offlineLRJ_Eta_afterEtAndMassselection);
+
+        makeEtaCanvas(
+            "c_subl_eta",
+            modifiedOutputFileDir + "back_subleading_offlineLRJ_eta_before_after.pdf",
+            "QCD Dijet Background: Subleading Offline LRJ #eta, Before & After JetTagger Selections",
+            "Subleading Offline LRJ #eta",
+            back_h_subleading_offlineLRJ_Eta_beforeselection,
+            back_h_subleading_offlineLRJ_Eta_afterEtselection,
+            back_h_subleading_offlineLRJ_Eta_afterselection,
+            back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection);
+
+        makeEtaCanvas(
+            "c_lead_Et",
+            modifiedOutputFileDir + "back_leading_offlineLRJ_Et_before_after.pdf",
+            "QCD Dijet Background: Leading Offline LRJ E_{T}, Before & After JetTagger Selections",
+            "Leading Offline LRJ E_{T} [GeV]",
+            back_h_leading_offlineLRJ_Et_beforeselection,
+            back_h_leading_offlineLRJ_Et_afterEtselection,
+            back_h_leading_offlineLRJ_Et_afterselection,
+            back_h_leading_offlineLRJ_Et_afterEtAndMassselection);
+
+        makeEtaCanvas(
+            "c_subl_Et",
+            modifiedOutputFileDir + "back_subleading_offlineLRJ_Et_before_after.pdf",
+            "QCD Dijet Background: Subleading Offline LRJ E_{T}, Before & After JetTagger Selections",
+            "Subleading Offline LRJ E_{T} [GeV]",
+            back_h_subleading_offlineLRJ_Et_beforeselection,
+            back_h_subleading_offlineLRJ_Et_afterEtselection,
+            back_h_subleading_offlineLRJ_Et_afterselection,
+            back_h_subleading_offlineLRJ_Et_afterEtAndMassselection);
 
 
 
@@ -10168,6 +11603,127 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
         subjetBased_ET_Scan_RatesVsEff_vec.push_back(global5.gRate_vsEff_combined);
 
+        // --- Signal: normalize, ratio, style, canvases ---
+        normalizeHist(sig_h_leading_offlineLRJ_Mass_beforeselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Mass_afterEtselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Mass_afterselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Mass_beforeselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Mass_afterEtselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Mass_afterselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Eta_beforeselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Eta_afterEtselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Eta_afterselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Eta_beforeselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Eta_afterEtselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Eta_afterselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Et_beforeselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Et_afterEtselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Et_afterselection);
+        normalizeHist(sig_h_leading_offlineLRJ_Et_afterEtAndMassselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Et_beforeselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Et_afterEtselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Et_afterselection);
+        normalizeHist(sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection);
+
+        TH1F* sig_ratio_subjet         = makeRatio(sig_h_leading_offlineLRJ_Mass_afterselection,           sig_h_leading_offlineLRJ_Mass_beforeselection, "sig_ratio_lead_subjet");
+        TH1F* sig_ratio_leadEt         = makeRatio(sig_h_leading_offlineLRJ_Mass_afterEtselection,         sig_h_leading_offlineLRJ_Mass_beforeselection, "sig_ratio_lead_Et");
+        TH1F* sig_ratio_EtAndMass      = makeRatio(sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection,  sig_h_leading_offlineLRJ_Mass_beforeselection, "sig_ratio_lead_EtMass");
+        TH1F* sig_ratio_subl_subjet    = makeRatio(sig_h_subleading_offlineLRJ_Mass_afterselection,          sig_h_subleading_offlineLRJ_Mass_beforeselection, "sig_ratio_subl_subjet");
+        TH1F* sig_ratio_subl_leadEt    = makeRatio(sig_h_subleading_offlineLRJ_Mass_afterEtselection,        sig_h_subleading_offlineLRJ_Mass_beforeselection, "sig_ratio_subl_Et");
+        TH1F* sig_ratio_subl_EtAndMass = makeRatio(sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection, sig_h_subleading_offlineLRJ_Mass_beforeselection, "sig_ratio_subl_EtMass");
+
+        styleHist(sig_h_leading_offlineLRJ_Mass_beforeselection,         kBlack);
+        styleHist(sig_h_leading_offlineLRJ_Mass_afterEtselection,        kBlue+1);
+        styleHist(sig_h_leading_offlineLRJ_Mass_afterselection,          kRed+1);
+        styleHist(sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_subleading_offlineLRJ_Mass_beforeselection,         kBlack);
+        styleHist(sig_h_subleading_offlineLRJ_Mass_afterEtselection,        kBlue+1);
+        styleHist(sig_h_subleading_offlineLRJ_Mass_afterselection,          kRed+1);
+        styleHist(sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_leading_offlineLRJ_Eta_beforeselection,         kBlack);
+        styleHist(sig_h_leading_offlineLRJ_Eta_afterEtselection,        kBlue+1);
+        styleHist(sig_h_leading_offlineLRJ_Eta_afterselection,          kRed+1);
+        styleHist(sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_subleading_offlineLRJ_Eta_beforeselection,         kBlack);
+        styleHist(sig_h_subleading_offlineLRJ_Eta_afterEtselection,        kBlue+1);
+        styleHist(sig_h_subleading_offlineLRJ_Eta_afterselection,          kRed+1);
+        styleHist(sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_leading_offlineLRJ_Et_beforeselection,         kBlack);
+        styleHist(sig_h_leading_offlineLRJ_Et_afterEtselection,        kBlue+1);
+        styleHist(sig_h_leading_offlineLRJ_Et_afterselection,          kRed+1);
+        styleHist(sig_h_leading_offlineLRJ_Et_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_subleading_offlineLRJ_Et_beforeselection,         kBlack);
+        styleHist(sig_h_subleading_offlineLRJ_Et_afterEtselection,        kBlue+1);
+        styleHist(sig_h_subleading_offlineLRJ_Et_afterselection,          kRed+1);
+        styleHist(sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection, kGreen+2);
+
+        styleRatio(sig_ratio_subjet,         kRed+1,   20);
+        styleRatio(sig_ratio_leadEt,         kBlue+1,  24);
+        styleRatio(sig_ratio_EtAndMass,      kGreen+2, 21);
+        styleRatio(sig_ratio_subl_subjet,    kRed+1,   20);
+        styleRatio(sig_ratio_subl_leadEt,    kBlue+1,  24);
+        styleRatio(sig_ratio_subl_EtAndMass, kGreen+2, 21);
+
+        makeMassCanvas("c_sig_lead_mass",
+            modifiedOutputFileDir + "sig_leading_offlineLRJ_mass_before_after_ratio.pdf",
+            "hh#rightarrow4b Signal: Leading Offline LRJ Mass, Before & After JetTagger Selections",
+            "Leading Offline LRJ Mass [GeV]",
+            sig_h_leading_offlineLRJ_Mass_beforeselection,
+            sig_h_leading_offlineLRJ_Mass_afterEtselection,
+            sig_h_leading_offlineLRJ_Mass_afterselection,
+            sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection,
+            sig_ratio_leadEt, sig_ratio_subjet, sig_ratio_EtAndMass);
+
+        makeMassCanvas("c_sig_subl_mass",
+            modifiedOutputFileDir + "sig_subleading_offlineLRJ_mass_before_after_ratio.pdf",
+            "hh#rightarrow4b Signal: Subleading Offline LRJ Mass, Before & After JetTagger Selections",
+            "Subleading Offline LRJ Mass [GeV]",
+            sig_h_subleading_offlineLRJ_Mass_beforeselection,
+            sig_h_subleading_offlineLRJ_Mass_afterEtselection,
+            sig_h_subleading_offlineLRJ_Mass_afterselection,
+            sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection,
+            sig_ratio_subl_leadEt, sig_ratio_subl_subjet, sig_ratio_subl_EtAndMass);
+
+        makeEtaCanvas("c_sig_lead_eta",
+            modifiedOutputFileDir + "sig_leading_offlineLRJ_eta_before_after.pdf",
+            "hh#rightarrow4b Signal: Leading Offline LRJ #eta, Before & After JetTagger Selections",
+            "Leading Offline LRJ #eta",
+            sig_h_leading_offlineLRJ_Eta_beforeselection,
+            sig_h_leading_offlineLRJ_Eta_afterEtselection,
+            sig_h_leading_offlineLRJ_Eta_afterselection,
+            sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection);
+
+        makeEtaCanvas("c_sig_subl_eta",
+            modifiedOutputFileDir + "sig_subleading_offlineLRJ_eta_before_after.pdf",
+            "hh#rightarrow4b Signal: Subleading Offline LRJ #eta, Before & After JetTagger Selections",
+            "Subleading Offline LRJ #eta",
+            sig_h_subleading_offlineLRJ_Eta_beforeselection,
+            sig_h_subleading_offlineLRJ_Eta_afterEtselection,
+            sig_h_subleading_offlineLRJ_Eta_afterselection,
+            sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection);
+
+        makeEtaCanvas("c_sig_lead_Et",
+            modifiedOutputFileDir + "sig_leading_offlineLRJ_Et_before_after.pdf",
+            "hh#rightarrow4b Signal: Leading Offline LRJ E_{T}, Before & After JetTagger Selections",
+            "Leading Offline LRJ E_{T} [GeV]",
+            sig_h_leading_offlineLRJ_Et_beforeselection,
+            sig_h_leading_offlineLRJ_Et_afterEtselection,
+            sig_h_leading_offlineLRJ_Et_afterselection,
+            sig_h_leading_offlineLRJ_Et_afterEtAndMassselection);
+
+        makeEtaCanvas("c_sig_subl_Et",
+            modifiedOutputFileDir + "sig_subleading_offlineLRJ_Et_before_after.pdf",
+            "hh#rightarrow4b Signal: Subleading Offline LRJ E_{T}, Before & After JetTagger Selections",
+            "Subleading Offline LRJ E_{T} [GeV]",
+            sig_h_subleading_offlineLRJ_Et_beforeselection,
+            sig_h_subleading_offlineLRJ_Et_afterEtselection,
+            sig_h_subleading_offlineLRJ_Et_afterselection,
+            sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection);
+
         if (compute4thConeOR) {
 
         // Et-only combined scan (5 categories OR 4th leading cone jet)
@@ -10187,6 +11743,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             5.0e4, // 50 kHz draw range
             1.0e4  // 10 kHz print/best-point range
         );
+
+        
 
         std::cout << "Best combined (5-cat OR 4th cone jet) point with total rate <= 10 kHz:\n"
                   << " Global eff = " << global6.bestEff << "\n"
@@ -13513,6 +15071,68 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     backJetTaggerSubleadingLRJEtvsPsi_R->SetMinimum(1e-14);
     cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R.pdf");
 
+    // TOB E_T vs. offline LRJ E_T: resolution / calibration view
+    {
+        auto drawTOBvsOffline = [&](TH2F* h, TString path) {
+            if (h->Integral() > 0) h->Scale(1.0 / h->Integral());
+            h->SetMinimum(1e-7);
+            h->Draw("COLZ");
+
+            double xmax = h->GetXaxis()->GetXmax();
+            double ymax = h->GetYaxis()->GetXmax();
+
+            // Pearson correlation coefficient (scale-invariant, safe to call after normalise)
+            double r = h->GetCorrelationFactor(1, 2);
+
+            // Linear fit via TProfile of y vs x
+            TProfile* prof = h->ProfileX(
+                (std::string(h->GetName()) + "_pfx").c_str(), 1, -1, "s");
+            prof->SetMarkerStyle(20); prof->SetMarkerSize(0.5);
+            prof->SetMarkerColor(kBlack); prof->SetLineColor(kBlack);
+            TF1* fitFn = new TF1("linfit", "pol1", 0, xmax);
+            prof->Fit(fitFn, "QN");   // Q=quiet, N=don't draw
+            double slope     = fitFn->GetParameter(1);
+            double intercept = fitFn->GetParameter(0);
+            fitFn->SetLineColor(kBlue); fitFn->SetLineWidth(2);
+            fitFn->Draw("SAME");
+            prof->Draw("SAME");
+
+            // y = x diagonal reference line
+            double rng = std::min(xmax, ymax);
+            TLine* diag = new TLine(0, 0, rng, rng);
+            diag->SetLineColor(kRed); diag->SetLineStyle(2); diag->SetLineWidth(2);
+            diag->Draw("SAME");
+
+            // Legend — top left (3 entries: diagonal label, fit, r value)
+            TLegend leg(0.16, 0.62, 0.61, 0.88);
+            leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
+            leg.AddEntry(diag, "E_{T}^{TOB} = E_{T}^{offline}", "l");
+            leg.AddEntry(fitFn,
+                Form("Fit: y = %.3f x + %.1f GeV", slope, intercept), "l");
+            leg.AddEntry((TObject*)nullptr, Form("r = %.4f", r), "");
+            leg.Draw();
+
+            cLogZ.SaveAs(path);
+            delete prof; delete fitFn;
+        };
+        drawTOBvsOffline(sig_h2_JetTagger_lead_TOBEt_vs_offlineEt,
+            modifiedOutputFileDir + "sig_JetTagger_lead_TOBEt_vs_offlineEt.pdf");
+        drawTOBvsOffline(sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt,
+            modifiedOutputFileDir + "sig_JetTagger_sublead_TOBEt_vs_offlineEt.pdf");
+        drawTOBvsOffline(sig_h2_gFEX_lead_TOBEt_vs_offlineEt,
+            modifiedOutputFileDir + "sig_gFEX_lead_TOBEt_vs_offlineEt.pdf");
+        drawTOBvsOffline(sig_h2_gFEX_sublead_TOBEt_vs_offlineEt,
+            modifiedOutputFileDir + "sig_gFEX_sublead_TOBEt_vs_offlineEt.pdf");
+        drawTOBvsOffline(back_h2_JetTagger_lead_TOBEt_vs_offlineEt,
+            modifiedOutputFileDir + "back_JetTagger_lead_TOBEt_vs_offlineEt.pdf");
+        drawTOBvsOffline(back_h2_JetTagger_sublead_TOBEt_vs_offlineEt,
+            modifiedOutputFileDir + "back_JetTagger_sublead_TOBEt_vs_offlineEt.pdf");
+        drawTOBvsOffline(back_h2_gFEX_lead_TOBEt_vs_offlineEt,
+            modifiedOutputFileDir + "back_gFEX_lead_TOBEt_vs_offlineEt.pdf");
+        drawTOBvsOffline(back_h2_gFEX_sublead_TOBEt_vs_offlineEt,
+            modifiedOutputFileDir + "back_gFEX_sublead_TOBEt_vs_offlineEt.pdf");
+    }
+
     c.cd();
 
     // Computed with deltaR^2 metric
@@ -13615,6 +15235,135 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     backOfflineSubleadingLRJMassvsEt->Scale(1.0 / backOfflineSubleadingLRJMassvsEt->Integral());
     backOfflineSubleadingLRJMassvsEt->SetMinimum(1e-14);
     cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineSubleadingLRJMassvsEt.pdf");
+
+    // === Jet-type comparison plots ===
+    {
+        TLine diagLine(0, 0, 600, 600);
+        diagLine.SetLineColor(kRed);
+        diagLine.SetLineWidth(2);
+
+        // helper: draw, normalise, overlay diagonal, save
+        auto drawJetComp = [&](TH2F* h, const TString& fname) {
+            cLogZ.cd();
+            if (h->Integral() > 0) h->Scale(1.0 / h->Integral());
+            if (fname.Contains("back_")) h->SetMinimum(1e-8);
+            if (fname.Contains("_Mass")) {
+                h->GetXaxis()->SetRangeUser(0, 400);
+                h->GetYaxis()->SetRangeUser(0, 400);
+            }
+            h->Draw("COLZ");
+            diagLine.Draw("same");
+            cLogZ.SaveAs(modifiedOutputFileDir + fname);
+        };
+
+        // Pair 1: Reco vs. Reco+SD — Signal
+        drawJetComp(sig_h2_recoVsRecoSD_leading_Et,      "sig_h2_recoVsRecoSD_leading_Et.pdf");
+        drawJetComp(sig_h2_recoVsRecoSD_subleading_Et,   "sig_h2_recoVsRecoSD_subleading_Et.pdf");
+        drawJetComp(sig_h2_recoVsRecoSD_leading_Mass,    "sig_h2_recoVsRecoSD_leading_Mass.pdf");
+        drawJetComp(sig_h2_recoVsRecoSD_subleading_Mass, "sig_h2_recoVsRecoSD_subleading_Mass.pdf");
+        // Pair 1: Reco vs. Reco+SD — Background
+        drawJetComp(back_h2_recoVsRecoSD_leading_Et,      "back_h2_recoVsRecoSD_leading_Et.pdf");
+        drawJetComp(back_h2_recoVsRecoSD_subleading_Et,   "back_h2_recoVsRecoSD_subleading_Et.pdf");
+        drawJetComp(back_h2_recoVsRecoSD_leading_Mass,    "back_h2_recoVsRecoSD_leading_Mass.pdf");
+        drawJetComp(back_h2_recoVsRecoSD_subleading_Mass, "back_h2_recoVsRecoSD_subleading_Mass.pdf");
+
+        // Pair 2: Reco vs. Truth — Signal
+        drawJetComp(sig_h2_recoVsTruth_leading_Et,      "sig_h2_recoVsTruth_leading_Et.pdf");
+        drawJetComp(sig_h2_recoVsTruth_subleading_Et,   "sig_h2_recoVsTruth_subleading_Et.pdf");
+        drawJetComp(sig_h2_recoVsTruth_leading_Mass,    "sig_h2_recoVsTruth_leading_Mass.pdf");
+        drawJetComp(sig_h2_recoVsTruth_subleading_Mass, "sig_h2_recoVsTruth_subleading_Mass.pdf");
+        // Pair 2: Reco vs. Truth — Background
+        drawJetComp(back_h2_recoVsTruth_leading_Et,      "back_h2_recoVsTruth_leading_Et.pdf");
+        drawJetComp(back_h2_recoVsTruth_subleading_Et,   "back_h2_recoVsTruth_subleading_Et.pdf");
+        drawJetComp(back_h2_recoVsTruth_leading_Mass,    "back_h2_recoVsTruth_leading_Mass.pdf");
+        drawJetComp(back_h2_recoVsTruth_subleading_Mass, "back_h2_recoVsTruth_subleading_Mass.pdf");
+
+        // Pair 3: Truth vs. Truth+SD — Signal
+        drawJetComp(sig_h2_truthVsTruthSD_leading_Et,      "sig_h2_truthVsTruthSD_leading_Et.pdf");
+        drawJetComp(sig_h2_truthVsTruthSD_subleading_Et,   "sig_h2_truthVsTruthSD_subleading_Et.pdf");
+        drawJetComp(sig_h2_truthVsTruthSD_leading_Mass,    "sig_h2_truthVsTruthSD_leading_Mass.pdf");
+        drawJetComp(sig_h2_truthVsTruthSD_subleading_Mass, "sig_h2_truthVsTruthSD_subleading_Mass.pdf");
+        // Pair 3: Truth vs. Truth+SD — Background
+        drawJetComp(back_h2_truthVsTruthSD_leading_Et,      "back_h2_truthVsTruthSD_leading_Et.pdf");
+        drawJetComp(back_h2_truthVsTruthSD_subleading_Et,   "back_h2_truthVsTruthSD_subleading_Et.pdf");
+        drawJetComp(back_h2_truthVsTruthSD_leading_Mass,    "back_h2_truthVsTruthSD_leading_Mass.pdf");
+        drawJetComp(back_h2_truthVsTruthSD_subleading_Mass, "back_h2_truthVsTruthSD_subleading_Mass.pdf");
+    }
+
+    // === E_T vs. Mass TH2F plots per collection ===
+    {
+        auto drawEtVsMass = [&](TH2F* h, const TString& fname) {
+            cLogZ.cd();
+            if (h->Integral() > 0) h->Scale(1.0 / h->Integral());
+            if (fname.Contains("back_")) h->SetMinimum(1e-8);
+            h->Draw("COLZ");
+            cLogZ.SaveAs(modifiedOutputFileDir + fname);
+        };
+        // Signal
+        drawEtVsMass(sig_h2_reco_leading_EtVsMass,       "sig_h2_reco_leading_EtVsMass.pdf");
+        drawEtVsMass(sig_h2_reco_subleading_EtVsMass,    "sig_h2_reco_subleading_EtVsMass.pdf");
+        drawEtVsMass(sig_h2_recoSD_leading_EtVsMass,     "sig_h2_recoSD_leading_EtVsMass.pdf");
+        drawEtVsMass(sig_h2_recoSD_subleading_EtVsMass,  "sig_h2_recoSD_subleading_EtVsMass.pdf");
+        drawEtVsMass(sig_h2_truth_leading_EtVsMass,      "sig_h2_truth_leading_EtVsMass.pdf");
+        drawEtVsMass(sig_h2_truth_subleading_EtVsMass,   "sig_h2_truth_subleading_EtVsMass.pdf");
+        drawEtVsMass(sig_h2_truthSD_leading_EtVsMass,    "sig_h2_truthSD_leading_EtVsMass.pdf");
+        drawEtVsMass(sig_h2_truthSD_subleading_EtVsMass, "sig_h2_truthSD_subleading_EtVsMass.pdf");
+        // Background
+        drawEtVsMass(back_h2_reco_leading_EtVsMass,       "back_h2_reco_leading_EtVsMass.pdf");
+        drawEtVsMass(back_h2_reco_subleading_EtVsMass,    "back_h2_reco_subleading_EtVsMass.pdf");
+        drawEtVsMass(back_h2_recoSD_leading_EtVsMass,     "back_h2_recoSD_leading_EtVsMass.pdf");
+        drawEtVsMass(back_h2_recoSD_subleading_EtVsMass,  "back_h2_recoSD_subleading_EtVsMass.pdf");
+        drawEtVsMass(back_h2_truth_leading_EtVsMass,      "back_h2_truth_leading_EtVsMass.pdf");
+        drawEtVsMass(back_h2_truth_subleading_EtVsMass,   "back_h2_truth_subleading_EtVsMass.pdf");
+        drawEtVsMass(back_h2_truthSD_leading_EtVsMass,    "back_h2_truthSD_leading_EtVsMass.pdf");
+        drawEtVsMass(back_h2_truthSD_subleading_EtVsMass, "back_h2_truthSD_subleading_EtVsMass.pdf");
+    }
+
+    // === 4-collection TH1F overlay plots ===
+    {
+        auto drawOverlay = [&](std::array<TH1F*,4> hists, const TString& fname, const TString& title) {
+            c.cd();
+            const Color_t cols[4] = {kBlack, kBlue, kRed, kGreen+2};
+            const char*    labs[4] = {"Offline Large-R Jet", "Offline SoftDrop Large-R Jet", "Truth Large-R Jet", "Truth SoftDrop Large-R Jet"};
+            TLegend leg(0.62, 0.62, 0.88, 0.88);
+            leg.SetBorderSize(0);
+            double ymax = 0;
+            for (int k = 0; k < 4; ++k) {
+                if (hists[k]->Integral() > 0) hists[k]->Scale(1.0 / hists[k]->Integral());
+                ymax = std::max(ymax, (double)hists[k]->GetMaximum());
+            }
+            for (int k = 0; k < 4; ++k) {
+                hists[k]->SetLineColor(cols[k]);
+                hists[k]->SetLineWidth(2);
+                hists[k]->GetYaxis()->SetRangeUser(0, ymax * 1.3);
+                hists[k]->SetTitle(title);
+                hists[k]->Draw(k == 0 ? "HIST" : "HIST SAME");
+                leg.AddEntry(hists[k], labs[k], "l");
+            }
+            leg.Draw();
+            c.SaveAs(modifiedOutputFileDir + fname);
+        };
+        // Signal leading
+        drawOverlay({sig_h1_reco_leading_Et,   sig_h1_recoSD_leading_Et,   sig_h1_truth_leading_Et,   sig_h1_truthSD_leading_Et},
+                    "sig_leading_Et_overlay.pdf",   "Signal Leading Jet E_{T};E_{T} [GeV];Fraction / 10 GeV");
+        drawOverlay({sig_h1_reco_leading_Mass,  sig_h1_recoSD_leading_Mass,  sig_h1_truth_leading_Mass,  sig_h1_truthSD_leading_Mass},
+                    "sig_leading_Mass_overlay.pdf",  "Signal Leading Jet Mass;Mass [GeV];Fraction / 10 GeV");
+        // Signal subleading
+        drawOverlay({sig_h1_reco_subleading_Et, sig_h1_recoSD_subleading_Et, sig_h1_truth_subleading_Et, sig_h1_truthSD_subleading_Et},
+                    "sig_subleading_Et_overlay.pdf", "Signal Subleading Jet E_{T};E_{T} [GeV];Fraction / 10 GeV");
+        drawOverlay({sig_h1_reco_subleading_Mass,sig_h1_recoSD_subleading_Mass,sig_h1_truth_subleading_Mass,sig_h1_truthSD_subleading_Mass},
+                    "sig_subleading_Mass_overlay.pdf","Signal Subleading Jet Mass;Mass [GeV];Fraction / 10 GeV");
+        // Background leading
+        drawOverlay({back_h1_reco_leading_Et,   back_h1_recoSD_leading_Et,   back_h1_truth_leading_Et,   back_h1_truthSD_leading_Et},
+                    "back_leading_Et_overlay.pdf",   "Background Leading Jet E_{T};E_{T} [GeV];Fraction / 10 GeV");
+        drawOverlay({back_h1_reco_leading_Mass,  back_h1_recoSD_leading_Mass,  back_h1_truth_leading_Mass,  back_h1_truthSD_leading_Mass},
+                    "back_leading_Mass_overlay.pdf",  "Background Leading Jet Mass;Mass [GeV];Fraction / 10 GeV");
+        // Background subleading
+        drawOverlay({back_h1_reco_subleading_Et, back_h1_recoSD_subleading_Et, back_h1_truth_subleading_Et, back_h1_truthSD_subleading_Et},
+                    "back_subleading_Et_overlay.pdf", "Background Subleading Jet E_{T};E_{T} [GeV];Fraction / 10 GeV");
+        drawOverlay({back_h1_reco_subleading_Mass,back_h1_recoSD_subleading_Mass,back_h1_truth_subleading_Mass,back_h1_truthSD_subleading_Mass},
+                    "back_subleading_Mass_overlay.pdf","Background Subleading Jet Mass;Mass [GeV];Fraction / 10 GeV");
+    }
 
     c.cd();
     sigOfflineLeadingLRJMassvsSubjetMult->Draw("COLZ");
@@ -13862,6 +15611,39 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     sig_eff_offlineLRJ10kHz_SubjetBased_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ10kHz_SubjetBased->Clone(Form("eff_LRJ10kHz_SubjetBased_%d", fileIt))));
     sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet->Clone(Form("eff_LRJ10kHz_SubjetBased_1OfflineSubjet_%d", fileIt))));
     sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet->Clone(Form("eff_LRJ10kHz_SubjetBased_GrEq2OfflineSubjet_%d", fileIt))));
+    sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ10kHz_SubjetBased_MassSel->Clone(Form("eff_LRJ10kHz_SubjetBased_MassSel_%d", fileIt))));
+    sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel->Clone(Form("eff_LRJ10kHz_SubjetBased_NoMassSel_%d", fileIt))));
+    sig_eff_ETonly_10kHz_MassSel_vec.push_back(static_cast<TH1F*>(eff_ET_only_10kHz_MassSel->Clone(Form("eff_ETonly_10kHz_MassSel_%d", fileIt))));
+    sig_eff_ETonly_10kHz_NoMassSel_vec.push_back(static_cast<TH1F*>(eff_ET_only_10kHz_NoMassSel->Clone(Form("eff_ETonly_10kHz_NoMassSel_%d", fileIt))));
+    sig_eff_ETmass_10kHz_MassSel_vec.push_back(static_cast<TH1F*>(eff_ET_mass_10kHz_MassSel->Clone(Form("eff_ETmass_10kHz_MassSel_%d", fileIt))));
+    sig_eff_ETmass_10kHz_NoMassSel_vec.push_back(static_cast<TH1F*>(eff_ET_mass_10kHz_NoMassSel->Clone(Form("eff_ETmass_10kHz_NoMassSel_%d", fileIt))));
+    sig_eff_offlineLRJ35kHz_SubjetBased_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ_SubjetBased_35kHz->Clone(Form("eff_LRJ35kHz_SubjetBased_%d", fileIt))));
+    sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel->Clone(Form("eff_LRJ35kHz_SubjetBased_MassSel_%d", fileIt))));
+    sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel->Clone(Form("eff_LRJ35kHz_SubjetBased_NoMassSel_%d", fileIt))));
+    sig_eff_ETonly_35kHz_vec.push_back(static_cast<TH1F*>(eff_ET_only_35kHz->Clone(Form("eff_ETonly_35kHz_%d", fileIt))));
+    sig_eff_ETonly_35kHz_MassSel_vec.push_back(static_cast<TH1F*>(eff_ET_only_35kHz_MassSel->Clone(Form("eff_ETonly_35kHz_MassSel_%d", fileIt))));
+    sig_eff_ETonly_35kHz_NoMassSel_vec.push_back(static_cast<TH1F*>(eff_ET_only_35kHz_NoMassSel->Clone(Form("eff_ETonly_35kHz_NoMassSel_%d", fileIt))));
+    sig_eff_ETmass_35kHz_vec.push_back(static_cast<TH1F*>(eff_ET_mass_35kHz->Clone(Form("eff_ETmass_35kHz_%d", fileIt))));
+    sig_eff_ETmass_35kHz_MassSel_vec.push_back(static_cast<TH1F*>(eff_ET_mass_35kHz_MassSel->Clone(Form("eff_ETmass_35kHz_MassSel_%d", fileIt))));
+    sig_eff_ETmass_35kHz_NoMassSel_vec.push_back(static_cast<TH1F*>(eff_ET_mass_35kHz_NoMassSel->Clone(Form("eff_ETmass_35kHz_NoMassSel_%d", fileIt))));
+    intEff_SubjetBased_10kHz_all_vec.push_back(intEff_SubjetBased_10kHz_all);
+    intEff_SubjetBased_10kHz_massSel_vec.push_back(intEff_SubjetBased_10kHz_massSel);
+    intEff_SubjetBased_10kHz_noMassSel_vec.push_back(intEff_SubjetBased_10kHz_noMassSel);
+    intEff_ETonly_10kHz_all_vec.push_back(intEff_ETonly_10kHz_all);
+    intEff_ETonly_10kHz_massSel_vec.push_back(intEff_ETonly_10kHz_massSel);
+    intEff_ETonly_10kHz_noMassSel_vec.push_back(intEff_ETonly_10kHz_noMassSel);
+    intEff_ETmass_10kHz_all_vec.push_back(intEff_ETmass_10kHz_all);
+    intEff_ETmass_10kHz_massSel_vec.push_back(intEff_ETmass_10kHz_massSel);
+    intEff_ETmass_10kHz_noMassSel_vec.push_back(intEff_ETmass_10kHz_noMassSel);
+    intEff_SubjetBased_35kHz_all_vec.push_back(intEff_SubjetBased_35kHz_all);
+    intEff_SubjetBased_35kHz_massSel_vec.push_back(intEff_SubjetBased_35kHz_massSel);
+    intEff_SubjetBased_35kHz_noMassSel_vec.push_back(intEff_SubjetBased_35kHz_noMassSel);
+    intEff_ETonly_35kHz_all_vec.push_back(intEff_ETonly_35kHz_all);
+    intEff_ETonly_35kHz_massSel_vec.push_back(intEff_ETonly_35kHz_massSel);
+    intEff_ETonly_35kHz_noMassSel_vec.push_back(intEff_ETonly_35kHz_noMassSel);
+    intEff_ETmass_35kHz_all_vec.push_back(intEff_ETmass_35kHz_all);
+    intEff_ETmass_35kHz_massSel_vec.push_back(intEff_ETmass_35kHz_massSel);
+    intEff_ETmass_35kHz_noMassSel_vec.push_back(intEff_ETmass_35kHz_noMassSel);
 
     TH1F* sig_eff_offline_gFEX_LRJ10kHz = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ->Clone();
     sig_eff_offline_gFEX_LRJ10kHz->SetName("eff_gFEX_LRJ_10kHz");
@@ -18423,6 +20205,147 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                     "sig_eff_2way_overlay_subjet_10vs35kHz.pdf",
                     "10 kHz vs 35 kHz");
 
+    // ======= Per-selection-type mass-split plots (with/without offline LRJ mass >= threshold) =======
+    auto makeMassSplitOverlay = [&](TH1F* hAll, TH1F* hMassSel, TH1F* hNoMassSel,
+                                    double intEff_all, double intEff_massSel, double intEff_noMassSel,
+                                    double massThreshold,
+                                    const char* triggerLabel, const char* title,
+                                    const char* fname, const char* rateLabel){
+        if(!hAll || !hMassSel || !hNoMassSel) return;
+        hAll->SetLineColor(kBlack);      hAll->SetMarkerColor(kBlack);      hAll->SetMarkerStyle(20); hAll->SetMarkerSize(1.0);
+        hMassSel->SetLineColor(kBlue+1); hMassSel->SetMarkerColor(kBlue+1); hMassSel->SetMarkerStyle(21); hMassSel->SetMarkerSize(1.0);
+        hNoMassSel->SetLineColor(kRed+1); hNoMassSel->SetMarkerColor(kRed+1); hNoMassSel->SetMarkerStyle(22); hNoMassSel->SetMarkerSize(1.0);
+        hAll->SetAxisRange(0.0, 1.1, "Y");
+        hAll->GetXaxis()->SetTitleOffset(1.1);
+        hAll->GetYaxis()->SetTitleOffset(1.2);
+        TCanvas cMs(Form("cMassSplit_%s", fname), title, 900, 700);
+        hAll->Draw("P");
+        hMassSel->Draw("P SAME");
+        hNoMassSel->Draw("P SAME");
+        sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+        TLegend *legMs = new TLegend(0.30, 0.18, 0.88, 0.44);
+        legMs->SetBorderSize(0); legMs->SetFillStyle(0); legMs->SetTextSize(0.026);
+        legMs->SetHeader(Form("%s, cuts tuned to %s bkg", triggerLabel, rateLabel), "C");
+        legMs->AddEntry(hAll,      Form("All events (#varepsilon_{int} = %.3f)", intEff_all),                                        "lp");
+        legMs->AddEntry(hMassSel,  Form("Lead. offline LRJ mass #geq %.0f GeV (#varepsilon_{int} = %.3f)", massThreshold, intEff_massSel),  "lp");
+        legMs->AddEntry(hNoMassSel, Form("Lead. offline LRJ mass < %.0f GeV (#varepsilon_{int} = %.3f)",  massThreshold, intEff_noMassSel), "lp");
+        legMs->Draw();
+        cMs.SaveAs(rateVsEffFileDir + fname);
+    };
+
+    // 10 kHz: subjet-based
+    makeMassSplitOverlay(sig_eff_offlineLRJ10kHz_SubjetBased,
+                         sig_eff_offlineLRJ10kHz_SubjetBased_MassSel,
+                         sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel,
+                         intEff_SubjetBased_10kHz_all, intEff_SubjetBased_10kHz_massSel, intEff_SubjetBased_10kHz_noMassSel,
+                         offlineLRJMassSel_threshold,
+                         "5-cat subjet-based E_{T} thresholds",
+                         "Subjet-based: offline mass split @ 10 kHz",
+                         "sig_eff_subjetBased_massSplit_10kHz.pdf", "10 kHz");
+    // 10 kHz: ET-only
+    makeMassSplitOverlay(eff_ET_only_10kHz,
+                         eff_ET_only_10kHz_MassSel,
+                         eff_ET_only_10kHz_NoMassSel,
+                         intEff_ETonly_10kHz_all, intEff_ETonly_10kHz_massSel, intEff_ETonly_10kHz_noMassSel,
+                         offlineLRJMassSel_threshold,
+                         Form("Lead. LRJ E_{T} > %.0f GeV only", thr_ET_only_10kHz_p),
+                         "ET-only: offline mass split @ 10 kHz",
+                         "sig_eff_ETonly_massSplit_10kHz.pdf", "10 kHz");
+    // 10 kHz: ET+mass
+    makeMassSplitOverlay(eff_ET_mass_10kHz,
+                         eff_ET_mass_10kHz_MassSel,
+                         eff_ET_mass_10kHz_NoMassSel,
+                         intEff_ETmass_10kHz_all, intEff_ETmass_10kHz_massSel, intEff_ETmass_10kHz_noMassSel,
+                         offlineLRJMassSel_threshold,
+                         Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_10kHz_p, thr_mass_min_10kHz_p),
+                         "ET+mass: offline mass split @ 10 kHz",
+                         "sig_eff_ETmass_massSplit_10kHz.pdf", "10 kHz");
+    // 35 kHz: subjet-based
+    makeMassSplitOverlay(sig_eff_offlineLRJ_SubjetBased_35kHz,
+                         sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel,
+                         sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel,
+                         intEff_SubjetBased_35kHz_all, intEff_SubjetBased_35kHz_massSel, intEff_SubjetBased_35kHz_noMassSel,
+                         offlineLRJMassSel_threshold,
+                         "5-cat subjet-based E_{T} thresholds",
+                         "Subjet-based: offline mass split @ 35 kHz",
+                         "sig_eff_subjetBased_massSplit_35kHz.pdf", "35 kHz");
+    // 35 kHz: ET-only
+    makeMassSplitOverlay(eff_ET_only_35kHz,
+                         eff_ET_only_35kHz_MassSel,
+                         eff_ET_only_35kHz_NoMassSel,
+                         intEff_ETonly_35kHz_all, intEff_ETonly_35kHz_massSel, intEff_ETonly_35kHz_noMassSel,
+                         offlineLRJMassSel_threshold,
+                         Form("Lead. LRJ E_{T} > %.0f GeV only", thr_ET_only_35kHz_p),
+                         "ET-only: offline mass split @ 35 kHz",
+                         "sig_eff_ETonly_massSplit_35kHz.pdf", "35 kHz");
+    // 35 kHz: ET+mass
+    makeMassSplitOverlay(eff_ET_mass_35kHz,
+                         eff_ET_mass_35kHz_MassSel,
+                         eff_ET_mass_35kHz_NoMassSel,
+                         intEff_ETmass_35kHz_all, intEff_ETmass_35kHz_massSel, intEff_ETmass_35kHz_noMassSel,
+                         offlineLRJMassSel_threshold,
+                         Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_35kHz_p, thr_mass_min_35kHz_p),
+                         "ET+mass: offline mass split @ 35 kHz",
+                         "sig_eff_ETmass_massSplit_35kHz.pdf", "35 kHz");
+
+    // ======= New: mass>=threshold vs mass<threshold only (no "all events" curve) =======
+    // Open markers for >= threshold, closed for < threshold
+    auto makeMassSplitOnly = [&](TH1F* hMassSel, TH1F* hNoMassSel,
+                                 double intEff_all, double intEff_massSel, double intEff_noMassSel,
+                                 double massThreshold,
+                                 const char* triggerLabel, const char* title,
+                                 const char* fname, const char* rateLabel){
+        if(!hMassSel || !hNoMassSel) return;
+        hMassSel->SetLineColor(kBlue+1);  hMassSel->SetMarkerColor(kBlue+1);  hMassSel->SetMarkerStyle(24); hMassSel->SetMarkerSize(1.0); // open square
+        hNoMassSel->SetLineColor(kRed+1); hNoMassSel->SetMarkerColor(kRed+1); hNoMassSel->SetMarkerStyle(20); hNoMassSel->SetMarkerSize(1.0); // closed circle
+        hMassSel->SetAxisRange(0.0, 1.1, "Y");
+        hMassSel->GetXaxis()->SetTitleOffset(1.1);
+        hMassSel->GetYaxis()->SetTitleOffset(1.2);
+        TCanvas cMsOnly(Form("cMassSplitOnly_%s", fname), title, 900, 700);
+        hMassSel->Draw("P");
+        hNoMassSel->Draw("P SAME");
+        sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+        TLegend *legMsOnly = new TLegend(0.28, 0.18, 0.90, 0.44);
+        legMsOnly->SetBorderSize(0); legMsOnly->SetFillStyle(0); legMsOnly->SetTextSize(0.026);
+        legMsOnly->SetHeader(Form("%s, cuts tuned to %s bkg", triggerLabel, rateLabel), "C");
+        legMsOnly->AddEntry(hMassSel,   Form("Lead. offline LRJ mass #geq %.0f GeV (#varepsilon_{int} = %.3f)", massThreshold, intEff_massSel),  "lp");
+        legMsOnly->AddEntry(hNoMassSel, Form("Lead. offline LRJ mass < %.0f GeV (#varepsilon_{int} = %.3f)",   massThreshold, intEff_noMassSel), "lp");
+        legMsOnly->AddEntry((TObject*)nullptr, Form("All events: #varepsilon_{int} = %.3f", intEff_all), "");
+        legMsOnly->Draw();
+        cMsOnly.SaveAs(rateVsEffFileDir + fname);
+    };
+
+    makeMassSplitOnly(sig_eff_offlineLRJ10kHz_SubjetBased_MassSel, sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel,
+                      intEff_SubjetBased_10kHz_all, intEff_SubjetBased_10kHz_massSel, intEff_SubjetBased_10kHz_noMassSel,
+                      offlineLRJMassSel_threshold, "5-cat subjet-based E_{T} thresholds",
+                      "Subjet-based: mass>=/<threshold @ 10 kHz",
+                      "sig_eff_subjetBased_massSplitOnly_10kHz.pdf", "10 kHz");
+    makeMassSplitOnly(eff_ET_only_10kHz_MassSel, eff_ET_only_10kHz_NoMassSel,
+                      intEff_ETonly_10kHz_all, intEff_ETonly_10kHz_massSel, intEff_ETonly_10kHz_noMassSel,
+                      offlineLRJMassSel_threshold, Form("Lead. LRJ E_{T} > %.0f GeV only", thr_ET_only_10kHz_p),
+                      "ET-only: mass>=/<threshold @ 10 kHz",
+                      "sig_eff_ETonly_massSplitOnly_10kHz.pdf", "10 kHz");
+    makeMassSplitOnly(eff_ET_mass_10kHz_MassSel, eff_ET_mass_10kHz_NoMassSel,
+                      intEff_ETmass_10kHz_all, intEff_ETmass_10kHz_massSel, intEff_ETmass_10kHz_noMassSel,
+                      offlineLRJMassSel_threshold, Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_10kHz_p, thr_mass_min_10kHz_p),
+                      "ET+mass: mass>=/<threshold @ 10 kHz",
+                      "sig_eff_ETmass_massSplitOnly_10kHz.pdf", "10 kHz");
+    makeMassSplitOnly(sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel, sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel,
+                      intEff_SubjetBased_35kHz_all, intEff_SubjetBased_35kHz_massSel, intEff_SubjetBased_35kHz_noMassSel,
+                      offlineLRJMassSel_threshold, "5-cat subjet-based E_{T} thresholds",
+                      "Subjet-based: mass>=/<threshold @ 35 kHz",
+                      "sig_eff_subjetBased_massSplitOnly_35kHz.pdf", "35 kHz");
+    makeMassSplitOnly(eff_ET_only_35kHz_MassSel, eff_ET_only_35kHz_NoMassSel,
+                      intEff_ETonly_35kHz_all, intEff_ETonly_35kHz_massSel, intEff_ETonly_35kHz_noMassSel,
+                      offlineLRJMassSel_threshold, Form("Lead. LRJ E_{T} > %.0f GeV only", thr_ET_only_35kHz_p),
+                      "ET-only: mass>=/<threshold @ 35 kHz",
+                      "sig_eff_ETonly_massSplitOnly_35kHz.pdf", "35 kHz");
+    makeMassSplitOnly(eff_ET_mass_35kHz_MassSel, eff_ET_mass_35kHz_NoMassSel,
+                      intEff_ETmass_35kHz_all, intEff_ETmass_35kHz_massSel, intEff_ETmass_35kHz_noMassSel,
+                      offlineLRJMassSel_threshold, Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_35kHz_p, thr_mass_min_35kHz_p),
+                      "ET+mass: mass>=/<threshold @ 35 kHz",
+                      "sig_eff_ETmass_massSplitOnly_35kHz.pdf", "35 kHz");
+
     // For mass window applied
     sig_eff_offlineLRJ10kHz_HiggsMassWindow->SetLineColor(kBlack);
     sig_eff_offlineLRJ10kHz_HiggsMassWindow->SetMarkerColor(kBlack);
@@ -18741,6 +20664,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TCanvas c3_Log_Offline = new TCanvas("c3_Log_Offline", "Overlays (log)", 800, 600);
     //c3_Log_Offline.SetLogy();
 
+    TCanvas cUniqueOfflineLRJ_Et   = new TCanvas("cUniqueOfflineLRJ_Et",   "Unique offline LRJ E_{T} overlay",   700, 600);
+    cUniqueOfflineLRJ_Et.SetLeftMargin(0.16); cUniqueOfflineLRJ_Et.SetBottomMargin(0.16); cUniqueOfflineLRJ_Et.SetTicks(1,1);
+    cUniqueOfflineLRJ_Et.SetLogy();
+    TCanvas cUniqueOfflineLRJ_Mass = new TCanvas("cUniqueOfflineLRJ_Mass", "Unique offline LRJ Mass overlay", 700, 600);
+    cUniqueOfflineLRJ_Mass.SetLeftMargin(0.16); cUniqueOfflineLRJ_Mass.SetBottomMargin(0.16); cUniqueOfflineLRJ_Mass.SetTicks(1,1);
+    cUniqueOfflineLRJ_Mass.SetLogy();
+    TLegend* legUniqueOffline = new TLegend(0.42, 0.65, 0.88, 0.88);
+    legUniqueOffline->SetBorderSize(0); legUniqueOffline->SetFillStyle(0); legUniqueOffline->SetTextSize(0.026);
+
     TCanvas c3_Log = new TCanvas("c3_Log", "Overlays (log)", 800, 600);
     c3_Log.SetLogy();
 
@@ -18765,11 +20697,19 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TCanvas c10_Log = new TCanvas("c10_Log", "Overlays (log)", 800, 600);
     c10_Log.SetLogy();
 
+    TCanvas cUniqueLead_Log = new TCanvas("cUniqueLead_Log", "Unique leading LRJ rate vs eff overlay (log)", 700, 600);
+    cUniqueLead_Log.SetLeftMargin(0.16); cUniqueLead_Log.SetBottomMargin(0.16); cUniqueLead_Log.SetTicks(1,1);
+    cUniqueLead_Log.SetLogy();
+
     TCanvas cROC_ET_mass("cROC_ET_mass", "ET + constituent mass ROC overlay", 700, 600);
     cROC_ET_mass.SetLeftMargin(0.16); cROC_ET_mass.SetBottomMargin(0.16); cROC_ET_mass.SetTicks(1, 1);
     cROC_ET_mass.SetLogy();
 
     TCanvas cConsMass = new TCanvas("cConsMass", "Leading LRJ Constituent Mass", 900, 700);
+    cConsMass.SetLogy();
+    TLegend* legConsMass = new TLegend(0.35, 0.55, 0.88, 0.88);
+    legConsMass->SetBorderSize(0); legConsMass->SetFillStyle(0); legConsMass->SetTextSize(0.025);
+    legConsMass->SetHeader("Leading LRJ constituent mass", "C");
     TCanvas c1 = new TCanvas("c1", "Overlays (non-log)", 800, 600);
     TCanvas c2 = new TCanvas("c2", "Overlays (non-log)", 800, 600);
     TCanvas c3 = new TCanvas("c3", "Overlays (non-log)", 800, 600);
@@ -18785,6 +20725,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     TCanvas c13 = new TCanvas("c13", "Overlays (non-log)", 800, 600);
     TCanvas c14 = new TCanvas("c14", "Overlays (non-log)", 800, 600);
     TCanvas c15 = new TCanvas("c15", "Overlays (non-log)", 800, 600);
+
+    // Mass-split overlays: one canvas per selection type × rate (6 total)
+    TCanvas cMassSplit_SubjetBased_10kHz = new TCanvas("cMassSplit_SubjetBased_10kHz", "Mass split subjet-based 10 kHz", 900, 700);
+    TCanvas cMassSplit_ETonly_10kHz      = new TCanvas("cMassSplit_ETonly_10kHz",      "Mass split ET-only 10 kHz",      900, 700);
+    TCanvas cMassSplit_ETmass_10kHz      = new TCanvas("cMassSplit_ETmass_10kHz",      "Mass split ET+mass 10 kHz",      900, 700);
+    TCanvas cMassSplit_SubjetBased_35kHz = new TCanvas("cMassSplit_SubjetBased_35kHz", "Mass split subjet-based 35 kHz", 900, 700);
+    TCanvas cMassSplit_ETonly_35kHz      = new TCanvas("cMassSplit_ETonly_35kHz",      "Mass split ET-only 35 kHz",      900, 700);
+    TCanvas cMassSplit_ETmass_35kHz      = new TCanvas("cMassSplit_ETmass_35kHz",      "Mass split ET+mass 35 kHz",      900, 700);
 
     TCanvas cBar_sigLead  = new TCanvas("cBar_sigLead",  "Signal Leading Subjet Match Frac Overlay",    800, 600);
     TCanvas cBar_sigSub   = new TCanvas("cBar_sigSub",   "Signal Subleading Subjet Match Frac Overlay", 800, 600);
@@ -18854,6 +20802,37 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     leg_10kHz_effs_SubjetBased_OfflineSubjets->SetFillStyle(0);
     leg_10kHz_effs_SubjetBased_OfflineSubjets->SetTextSize(0.025);
     leg_10kHz_effs_SubjetBased_OfflineSubjets->SetHeader("Subjet-based cuts tuned to 10 kHz","C");
+
+    // Legends for mass-split multi-file overlays
+    TLegend *leg_massSplit_SubjetBased_10kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
+    leg_massSplit_SubjetBased_10kHz->SetBorderSize(0); leg_massSplit_SubjetBased_10kHz->SetFillStyle(0); leg_massSplit_SubjetBased_10kHz->SetTextSize(0.018);
+    leg_massSplit_SubjetBased_10kHz->SetHeader(Form("5-cat subjet-based E_{T} thresholds @ 10 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+
+    TLegend *leg_massSplit_ETonly_10kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
+    leg_massSplit_ETonly_10kHz->SetBorderSize(0); leg_massSplit_ETonly_10kHz->SetFillStyle(0); leg_massSplit_ETonly_10kHz->SetTextSize(0.018);
+    leg_massSplit_ETonly_10kHz->SetHeader(Form("Lead. LRJ E_{T}-only threshold @ 10 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+
+    TLegend *leg_massSplit_ETmass_10kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
+    leg_massSplit_ETmass_10kHz->SetBorderSize(0); leg_massSplit_ETmass_10kHz->SetFillStyle(0); leg_massSplit_ETmass_10kHz->SetTextSize(0.018);
+    leg_massSplit_ETmass_10kHz->SetHeader(
+        Form("Trigger: E_{T} > %.0f GeV + const. mass > %.0f GeV @ 10 kHz",
+             thr_ET_mass_10kHz_vec.empty() ? -1.0 : thr_ET_mass_10kHz_vec[0],
+             thr_mass_min_10kHz_vec.empty() ? -1.0 : thr_mass_min_10kHz_vec[0]), "C");
+
+    TLegend *leg_massSplit_SubjetBased_35kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
+    leg_massSplit_SubjetBased_35kHz->SetBorderSize(0); leg_massSplit_SubjetBased_35kHz->SetFillStyle(0); leg_massSplit_SubjetBased_35kHz->SetTextSize(0.018);
+    leg_massSplit_SubjetBased_35kHz->SetHeader(Form("5-cat subjet-based E_{T} thresholds @ 35 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+
+    TLegend *leg_massSplit_ETonly_35kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
+    leg_massSplit_ETonly_35kHz->SetBorderSize(0); leg_massSplit_ETonly_35kHz->SetFillStyle(0); leg_massSplit_ETonly_35kHz->SetTextSize(0.018);
+    leg_massSplit_ETonly_35kHz->SetHeader(Form("Lead. LRJ E_{T}-only threshold @ 35 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+
+    TLegend *leg_massSplit_ETmass_35kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
+    leg_massSplit_ETmass_35kHz->SetBorderSize(0); leg_massSplit_ETmass_35kHz->SetFillStyle(0); leg_massSplit_ETmass_35kHz->SetTextSize(0.018);
+    leg_massSplit_ETmass_35kHz->SetHeader(
+        Form("Trigger: E_{T} > %.0f GeV + const. mass > %.0f GeV @ 35 kHz",
+             thr_ET_mass_35kHz_vec.empty() ? -1.0 : thr_ET_mass_35kHz_vec[0],
+             thr_mass_min_35kHz_vec.empty() ? -1.0 : thr_mass_min_35kHz_vec[0]), "C");
 
     TLegend* legROC_ET_mass = new TLegend(0.45, 0.12, 0.92, 0.52);
     legROC_ET_mass->SetBorderSize(0); legROC_ET_mass->SetFillStyle(0); legROC_ET_mass->SetTextSize(0.022);
@@ -19234,6 +21213,80 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             c3_Log_Offline.SaveAs(overlayOutputFileDir + "leading_offline_LRJ_Mass.pdf");
         }
 
+        // ---- Unique offline LRJ E_T overlay: before (solid) & after (dashed) ----
+        auto normIfNeeded = [](TH1F* h) {
+            if (h->Integral() > 0) h->Scale(1.0 / h->Integral());
+        };
+        normIfNeeded(sig_h_leading_offlineLRJ_Et_before_vec[fileIt]);
+        normIfNeeded(back_h_leading_offlineLRJ_Et_before_vec[fileIt]);
+        normIfNeeded(sig_h_leading_offlineLRJ_Et_unique_vec[fileIt]);
+        normIfNeeded(back_h_leading_offlineLRJ_Et_unique_vec[fileIt]);
+
+        // Signal: per-file color, solid = before, dashed = after
+        sig_h_leading_offlineLRJ_Et_before_vec[fileIt]->SetLineColor(color);
+        sig_h_leading_offlineLRJ_Et_before_vec[fileIt]->SetLineStyle(1); sig_h_leading_offlineLRJ_Et_before_vec[fileIt]->SetLineWidth(2);
+        sig_h_leading_offlineLRJ_Et_unique_vec[fileIt]->SetLineColor(color);
+        sig_h_leading_offlineLRJ_Et_unique_vec[fileIt]->SetLineStyle(2); sig_h_leading_offlineLRJ_Et_unique_vec[fileIt]->SetLineWidth(2);
+        // Background: same color, dotted = before, dot-dash = after
+        back_h_leading_offlineLRJ_Et_before_vec[fileIt]->SetLineColor(color);
+        back_h_leading_offlineLRJ_Et_before_vec[fileIt]->SetLineStyle(3); back_h_leading_offlineLRJ_Et_before_vec[fileIt]->SetLineWidth(2);
+        back_h_leading_offlineLRJ_Et_unique_vec[fileIt]->SetLineColor(color);
+        back_h_leading_offlineLRJ_Et_unique_vec[fileIt]->SetLineStyle(4); back_h_leading_offlineLRJ_Et_unique_vec[fileIt]->SetLineWidth(2);
+
+        cUniqueOfflineLRJ_Et.cd();
+        if (fileIt == 0) {
+            sig_h_leading_offlineLRJ_Et_before_vec[fileIt]->SetMinimum(1e-5);
+            sig_h_leading_offlineLRJ_Et_before_vec[fileIt]->Draw("HIST");
+        } else {
+            sig_h_leading_offlineLRJ_Et_before_vec[fileIt]->Draw("HIST SAME");
+        }
+        sig_h_leading_offlineLRJ_Et_unique_vec[fileIt]->Draw("HIST SAME");
+        back_h_leading_offlineLRJ_Et_before_vec[fileIt]->Draw("HIST SAME");
+        back_h_leading_offlineLRJ_Et_unique_vec[fileIt]->Draw("HIST SAME");
+        if (fileIt == 0) {
+            legUniqueOffline->AddEntry(sig_h_leading_offlineLRJ_Et_before_vec[fileIt],
+                (legLabelSig_SampleInfoOnly + " (all)").c_str(), "l");
+            legUniqueOffline->AddEntry(sig_h_leading_offlineLRJ_Et_unique_vec[fileIt],
+                (legLabelSig_SampleInfoOnly + " (unique)").c_str(), "l");
+            legUniqueOffline->AddEntry(back_h_leading_offlineLRJ_Et_before_vec[fileIt],
+                "Background (all)", "l");
+            legUniqueOffline->AddEntry(back_h_leading_offlineLRJ_Et_unique_vec[fileIt],
+                "Background (unique)", "l");
+        }
+        if (fileIt == (backgroundRootFileNames.size() - 1)) {
+            legUniqueOffline->Draw();
+            cUniqueOfflineLRJ_Et.SaveAs(overlayOutputFileDir + "unique_leading_offline_LRJ_Et.pdf");
+        }
+
+        // ---- Unique offline LRJ Mass overlay ----
+        normIfNeeded(sig_h_leading_offlineLRJ_Mass_before_vec[fileIt]);
+        normIfNeeded(back_h_leading_offlineLRJ_Mass_before_vec[fileIt]);
+        normIfNeeded(sig_h_leading_offlineLRJ_Mass_unique_vec[fileIt]);
+        normIfNeeded(back_h_leading_offlineLRJ_Mass_unique_vec[fileIt]);
+
+        sig_h_leading_offlineLRJ_Mass_before_vec[fileIt]->SetLineColor(color);
+        sig_h_leading_offlineLRJ_Mass_before_vec[fileIt]->SetLineStyle(1); sig_h_leading_offlineLRJ_Mass_before_vec[fileIt]->SetLineWidth(2);
+        sig_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->SetLineColor(color);
+        sig_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->SetLineStyle(2); sig_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->SetLineWidth(2);
+        back_h_leading_offlineLRJ_Mass_before_vec[fileIt]->SetLineColor(color);
+        back_h_leading_offlineLRJ_Mass_before_vec[fileIt]->SetLineStyle(3); back_h_leading_offlineLRJ_Mass_before_vec[fileIt]->SetLineWidth(2);
+        back_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->SetLineColor(color);
+        back_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->SetLineStyle(4); back_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->SetLineWidth(2);
+
+        cUniqueOfflineLRJ_Mass.cd();
+        if (fileIt == 0) {
+            sig_h_leading_offlineLRJ_Mass_before_vec[fileIt]->SetMinimum(1e-5);
+            sig_h_leading_offlineLRJ_Mass_before_vec[fileIt]->Draw("HIST");
+        } else {
+            sig_h_leading_offlineLRJ_Mass_before_vec[fileIt]->Draw("HIST SAME");
+        }
+        sig_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->Draw("HIST SAME");
+        back_h_leading_offlineLRJ_Mass_before_vec[fileIt]->Draw("HIST SAME");
+        back_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->Draw("HIST SAME");
+        if (fileIt == (backgroundRootFileNames.size() - 1)) {
+            legUniqueOffline->Draw();
+            cUniqueOfflineLRJ_Mass.SaveAs(overlayOutputFileDir + "unique_leading_offline_LRJ_Mass.pdf");
+        }
 
         // Subleading JetTagger E_T distribution
         c2_Log.cd();
@@ -19547,6 +21600,192 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             c15.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased_OfflineSubjets.pdf");
         }
 
+        // --- Mass-split multi-file overlays (mass >= threshold = open markers, < threshold = closed markers) ---
+        // Helper: configures a histogram for a given file in the overlay (color per file, marker style fixed by caller)
+        auto setupMassSplitHist = [&](TH1F* h, int markerStyle){
+            h->SetLineColor(color); h->SetMarkerColor(color);
+            h->SetMarkerStyle(markerStyle); h->SetMarkerSize(0.8);
+            h->SetAxisRange(0.0, 1.1, "Y");
+        };
+        // Label used in legend entries (config info)
+        std::string msLegConfig = Form("IO: %s, Seed: %s, N_{IO}: %u, rMerge: %s",
+            inputObjectType.c_str(), seedObjectType.c_str(),
+            nInputObjectsAlgorithmConfiguration, rMergeValue.c_str());
+
+        // SubjetBased 10 kHz
+        if(sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec.size() > fileIt &&
+           sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel_vec.size() > fileIt){
+            cMassSplit_SubjetBased_10kHz.cd();
+            setupMassSplitHist(sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec[fileIt],  24); // open circle
+            setupMassSplitHist(sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel_vec[fileIt], 20); // closed circle
+            leg_massSplit_SubjetBased_10kHz->AddEntry(sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec[fileIt],
+                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
+                     offlineLRJMassSel_threshold,
+                     (intEff_SubjetBased_10kHz_all_vec.size()>fileIt   ? intEff_SubjetBased_10kHz_all_vec[fileIt]   : 0.),
+                     (intEff_SubjetBased_10kHz_massSel_vec.size()>fileIt ? intEff_SubjetBased_10kHz_massSel_vec[fileIt] : 0.),
+                     (intEff_SubjetBased_10kHz_noMassSel_vec.size()>fileIt? intEff_SubjetBased_10kHz_noMassSel_vec[fileIt]: 0.),
+                     msLegConfig.c_str()), "lp");
+            leg_massSplit_SubjetBased_10kHz->AddEntry(sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel_vec[fileIt],
+                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
+            if(fileIt == 0){
+                sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
+            } else {
+                sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
+            }
+            if(fileIt == (backgroundRootFileNames.size()-1)){
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                leg_massSplit_SubjetBased_10kHz->Draw();
+                cMassSplit_SubjetBased_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_10kHz_overlay.pdf");
+            }
+        }
+
+        // ET-only 10 kHz
+        if(sig_eff_ETonly_10kHz_MassSel_vec.size() > fileIt &&
+           sig_eff_ETonly_10kHz_NoMassSel_vec.size() > fileIt){
+            cMassSplit_ETonly_10kHz.cd();
+            setupMassSplitHist(sig_eff_ETonly_10kHz_MassSel_vec[fileIt],  24);
+            setupMassSplitHist(sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt], 20);
+            leg_massSplit_ETonly_10kHz->AddEntry(sig_eff_ETonly_10kHz_MassSel_vec[fileIt],
+                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
+                     offlineLRJMassSel_threshold,
+                     (intEff_ETonly_10kHz_all_vec.size()>fileIt    ? intEff_ETonly_10kHz_all_vec[fileIt]    : 0.),
+                     (intEff_ETonly_10kHz_massSel_vec.size()>fileIt  ? intEff_ETonly_10kHz_massSel_vec[fileIt]  : 0.),
+                     (intEff_ETonly_10kHz_noMassSel_vec.size()>fileIt ? intEff_ETonly_10kHz_noMassSel_vec[fileIt] : 0.),
+                     msLegConfig.c_str()), "lp");
+            leg_massSplit_ETonly_10kHz->AddEntry(sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt],
+                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
+            if(fileIt == 0){
+                sig_eff_ETonly_10kHz_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            } else {
+                sig_eff_ETonly_10kHz_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            }
+            if(fileIt == (backgroundRootFileNames.size()-1)){
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                leg_massSplit_ETonly_10kHz->Draw();
+                cMassSplit_ETonly_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETonly_10kHz_overlay.pdf");
+            }
+        }
+
+        // ET+mass 10 kHz
+        if(sig_eff_ETmass_10kHz_MassSel_vec.size() > fileIt &&
+           sig_eff_ETmass_10kHz_NoMassSel_vec.size() > fileIt){
+            cMassSplit_ETmass_10kHz.cd();
+            setupMassSplitHist(sig_eff_ETmass_10kHz_MassSel_vec[fileIt],  24);
+            setupMassSplitHist(sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt], 20);
+            leg_massSplit_ETmass_10kHz->AddEntry(sig_eff_ETmass_10kHz_MassSel_vec[fileIt],
+                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
+                     offlineLRJMassSel_threshold,
+                     (intEff_ETmass_10kHz_all_vec.size()>fileIt    ? intEff_ETmass_10kHz_all_vec[fileIt]    : 0.),
+                     (intEff_ETmass_10kHz_massSel_vec.size()>fileIt  ? intEff_ETmass_10kHz_massSel_vec[fileIt]  : 0.),
+                     (intEff_ETmass_10kHz_noMassSel_vec.size()>fileIt ? intEff_ETmass_10kHz_noMassSel_vec[fileIt] : 0.),
+                     msLegConfig.c_str()), "lp");
+            leg_massSplit_ETmass_10kHz->AddEntry(sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt],
+                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
+            if(fileIt == 0){
+                sig_eff_ETmass_10kHz_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            } else {
+                sig_eff_ETmass_10kHz_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            }
+            if(fileIt == (backgroundRootFileNames.size()-1)){
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                leg_massSplit_ETmass_10kHz->Draw();
+                cMassSplit_ETmass_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETmass_10kHz_overlay.pdf");
+            }
+        }
+
+        // SubjetBased 35 kHz
+        if(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec.size() > fileIt &&
+           sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec.size() > fileIt){
+            cMassSplit_SubjetBased_35kHz.cd();
+            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],  24);
+            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt], 20);
+            leg_massSplit_SubjetBased_35kHz->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],
+                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
+                     offlineLRJMassSel_threshold,
+                     (intEff_SubjetBased_35kHz_all_vec.size()>fileIt    ? intEff_SubjetBased_35kHz_all_vec[fileIt]    : 0.),
+                     (intEff_SubjetBased_35kHz_massSel_vec.size()>fileIt  ? intEff_SubjetBased_35kHz_massSel_vec[fileIt]  : 0.),
+                     (intEff_SubjetBased_35kHz_noMassSel_vec.size()>fileIt ? intEff_SubjetBased_35kHz_noMassSel_vec[fileIt] : 0.),
+                     msLegConfig.c_str()), "lp");
+            leg_massSplit_SubjetBased_35kHz->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt],
+                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
+            if(fileIt == 0){
+                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
+            } else {
+                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
+            }
+            if(fileIt == (backgroundRootFileNames.size()-1)){
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                leg_massSplit_SubjetBased_35kHz->Draw();
+                cMassSplit_SubjetBased_35kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_35kHz_overlay.pdf");
+            }
+        }
+
+        // ET-only 35 kHz
+        if(sig_eff_ETonly_35kHz_MassSel_vec.size() > fileIt &&
+           sig_eff_ETonly_35kHz_NoMassSel_vec.size() > fileIt){
+            cMassSplit_ETonly_35kHz.cd();
+            setupMassSplitHist(sig_eff_ETonly_35kHz_MassSel_vec[fileIt],  24);
+            setupMassSplitHist(sig_eff_ETonly_35kHz_NoMassSel_vec[fileIt], 20);
+            leg_massSplit_ETonly_35kHz->AddEntry(sig_eff_ETonly_35kHz_MassSel_vec[fileIt],
+                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
+                     offlineLRJMassSel_threshold,
+                     (intEff_ETonly_35kHz_all_vec.size()>fileIt    ? intEff_ETonly_35kHz_all_vec[fileIt]    : 0.),
+                     (intEff_ETonly_35kHz_massSel_vec.size()>fileIt  ? intEff_ETonly_35kHz_massSel_vec[fileIt]  : 0.),
+                     (intEff_ETonly_35kHz_noMassSel_vec.size()>fileIt ? intEff_ETonly_35kHz_noMassSel_vec[fileIt] : 0.),
+                     msLegConfig.c_str()), "lp");
+            leg_massSplit_ETonly_35kHz->AddEntry(sig_eff_ETonly_35kHz_NoMassSel_vec[fileIt],
+                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
+            if(fileIt == 0){
+                sig_eff_ETonly_35kHz_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_ETonly_35kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            } else {
+                sig_eff_ETonly_35kHz_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETonly_35kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            }
+            if(fileIt == (backgroundRootFileNames.size()-1)){
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                leg_massSplit_ETonly_35kHz->Draw();
+                cMassSplit_ETonly_35kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETonly_35kHz_overlay.pdf");
+            }
+        }
+
+        // ET+mass 35 kHz
+        if(sig_eff_ETmass_35kHz_MassSel_vec.size() > fileIt &&
+           sig_eff_ETmass_35kHz_NoMassSel_vec.size() > fileIt){
+            cMassSplit_ETmass_35kHz.cd();
+            setupMassSplitHist(sig_eff_ETmass_35kHz_MassSel_vec[fileIt],  24);
+            setupMassSplitHist(sig_eff_ETmass_35kHz_NoMassSel_vec[fileIt], 20);
+            leg_massSplit_ETmass_35kHz->AddEntry(sig_eff_ETmass_35kHz_MassSel_vec[fileIt],
+                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
+                     offlineLRJMassSel_threshold,
+                     (intEff_ETmass_35kHz_all_vec.size()>fileIt    ? intEff_ETmass_35kHz_all_vec[fileIt]    : 0.),
+                     (intEff_ETmass_35kHz_massSel_vec.size()>fileIt  ? intEff_ETmass_35kHz_massSel_vec[fileIt]  : 0.),
+                     (intEff_ETmass_35kHz_noMassSel_vec.size()>fileIt ? intEff_ETmass_35kHz_noMassSel_vec[fileIt] : 0.),
+                     msLegConfig.c_str()), "lp");
+            leg_massSplit_ETmass_35kHz->AddEntry(sig_eff_ETmass_35kHz_NoMassSel_vec[fileIt],
+                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
+            if(fileIt == 0){
+                sig_eff_ETmass_35kHz_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_ETmass_35kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            } else {
+                sig_eff_ETmass_35kHz_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETmass_35kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            }
+            if(fileIt == (backgroundRootFileNames.size()-1)){
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                leg_massSplit_ETmass_35kHz->Draw();
+                cMassSplit_ETmass_35kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETmass_35kHz_overlay.pdf");
+            }
+        }
+
         // --- Subjet match-fraction bar chart overlays ---
         {
             std::string legLabel = Form("IO: %s, Seed: %s, d_{search} = %s, subjet E_{T} > %g GeV",
@@ -19734,6 +21973,41 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             c8_Log.SaveAs(overlayOutputFileDir + "sublead_ET_Scan_RatesVsEff.pdf");
         }
 
+        // ---- Unique leading LRJ E_T rate vs. efficiency overlay ----
+        cUniqueLead_Log.cd();
+        unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt]->SetLineColor(color);
+        unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt]->SetMarkerColor(color);
+        unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt]->SetMarkerStyle(24);
+        unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt]->SetMarkerSize(0.8);
+        if (fileIt == 0) {
+            unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt]->Draw("AP");
+            unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt]->GetXaxis()->SetLimits(0.0, 1.0);
+            unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt]->GetYaxis()->SetRangeUser(50.0, 5e4);
+        } else {
+            unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt]->Draw("P SAME");
+        }
+        { // mark 10 kHz unique rate point per file
+            auto best10k = FindBestPointBelowRate(unique_lead_LRJ_ET_Scan_RatesVsEff_vec[fileIt], 1e4);
+            double bestEff = best10k.first;
+            double ymin = gPad->GetUymin();
+            TLine *vline10k = new TLine(bestEff, ymin, bestEff, 1e4);
+            vline10k->SetLineColor(color);
+            vline10k->SetLineStyle(2);
+            vline10k->SetLineWidth(2);
+            vline10k->Draw("SAME");
+        }
+        if (fileIt == (backgroundRootFileNames.size() - 1)) {
+            double xmin = gPad->GetUxmin();
+            double xmax = gPad->GetUxmax();
+            TLine *hline10k = new TLine(xmin, 1e4, xmax, 1e4);
+            hline10k->SetLineColor(kGray + 2);
+            hline10k->SetLineStyle(2);
+            hline10k->SetLineWidth(2);
+            hline10k->Draw("SAME");
+            legSigOnly->Draw();
+            cUniqueLead_Log.SaveAs(overlayOutputFileDir + "unique_lead_LRJ_ET_Scan_RatesVsEff.pdf");
+        }
+
         c9_Log.cd();
         if(color == kYellow) color = kOrange;
         // FIXME need to fix labels to actually indicate if ggF or whatever (in-progress)
@@ -19873,14 +22147,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             hSigMass->SetLineColor(color);  hSigMass->SetLineStyle(1);  hSigMass->SetLineWidth(2);
             hBackMass->SetLineColor(color); hBackMass->SetLineStyle(2); hBackMass->SetLineWidth(2);
             if (fileIt == 0) {
+                hBackMass->SetMinimum(1e-5);
                 hBackMass->Draw("HIST");
                 hSigMass->Draw("HIST SAME");
             } else {
                 hBackMass->Draw("HIST SAME");
                 hSigMass->Draw("HIST SAME");
             }
+            legConsMass->AddEntry(hSigMass,  Form("%s (sig)",  legLabelSig.c_str()), "l");
+            legConsMass->AddEntry(hBackMass, Form("%s (bkg)",  legLabelBkg.c_str()), "l");
             if (fileIt == backgroundRootFileNames.size() - 1) {
-                leg->Draw();
+                legConsMass->Draw();
                 cConsMass.SaveAs(overlayOutputFileDir + "leading_LRJ_ConstituentMass_overlay.pdf");
             }
         }
@@ -19946,7 +22223,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             h->GetYaxis()->SetTitleOffset(1.2);
             if (i == 0) h->Draw("P");
             else        h->Draw("P SAME");
-            legIO->AddEntry(h, Form("N_{IO} = %u", nInputObjects_vec[i]), "lp");
+            legIO->AddEntry(h, Form("N_{IO} = %u, E_{T} > %.0f GeV, m > %.0f GeV",
+                nInputObjects_vec[i], thr_ET_mass_10kHz_vec[i], thr_mass_min_10kHz_vec[i]), "lp");
         }
         legIO->Draw();
         cEtMassIO.SaveAs(overlayOutputFileDir + "sig_eff_ET_mass_10kHz_overlay.pdf");
@@ -20262,9 +22540,9 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
 
 
                                                     // ggF hh->4b mass test num IOs
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_32_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_64_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_32_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_64_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
 
                                                     // ggF hh->4b weighted midpoint
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec20GeV_v3.root",
@@ -20283,6 +22561,18 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
                                                     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep0_mec20GeV_v3.root",
                                                     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep1_mec25GeV_v3.root",*/
 
+                                                    // VBF hh->4b
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_hh_bbbb_vbf_novhh_cvv1_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+
+                                                    // mass ttbar & ggF hh->4b seed optimization comparison
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.44_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.44_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+
+                                                    // New jet types
+                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_NewJetTypes/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
                                                         };
     std::vector<std::string > backgroundRootFileNames = {
                                                         // for FEX comparison (ggF)
@@ -20370,19 +22660,29 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MinEtSeedOpt20/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
 
                                                         // JZ (dijet) mass test num ios
-                                                        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_32_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
-                                                        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_64_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
-                                                        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec20GeV_v3.root",
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_32_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_64_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec25GeV_v3.root",
+                                                        
+                                                        // JZ (dijet) mass test - seed pos recalc comparison
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.44_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.44_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
 
                                                         // JZ (dijet)
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep0_mec20GeV_v3.root",
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep0_mec20GeV_v3.root",
                                                         //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm1_mep1_mec25GeV_v3.root",
+
+                                                        // New jet types
+                                                        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_NewJetTypes/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec25GeV_v3.root",
                                                         };
-    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_ggF_VaryNumIOs/";
+    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_UniqueRate_1File/";
     gSystem->mkdir(overlayOutputFileDir);
-    gSystem->RedirectOutput("debug.log", "w");
+    gSystem->RedirectOutput("debug_ggf_128IOs.log", "w");
     gErrorIgnoreLevel = kError;
     std::cout << "number of signal files: " << signalRootFileNames.size() << " number of background files: " << backgroundRootFileNames.size() << "\n";
     bool categorySubjetEtScan_8 = false;

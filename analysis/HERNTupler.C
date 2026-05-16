@@ -289,9 +289,21 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     TTree* recoAntiKt10UFOCSSKJets = new TTree("recoAntiKt10UFOCSSKJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* leadingRecoAntiKt10UFOCSSKJets = new TTree("leadingRecoAntiKt10UFOCSSKJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* subleadingRecoAntiKt10UFOCSSKJets = new TTree("subleadingRecoAntiKt10UFOCSSKJets", "Tree storing event-wise Et, Eta, Phi");
+    TTree* recoAntiKt10UFOCSSKSoftDropJets = new TTree("recoAntiKt10UFOCSSKSoftDropJets", "Tree storing event-wise Et, Eta, Phi");
+    TTree* leadingRecoAntiKt10UFOCSSKSoftDropJets = new TTree("leadingRecoAntiKt10UFOCSSKSoftDropJets", "Tree storing event-wise Et, Eta, Phi");
+    TTree* subleadingRecoAntiKt10UFOCSSKSoftDropJets = new TTree("subleadingRecoAntiKt10UFOCSSKSoftDropJets", "Tree storing event-wise Et, Eta, Phi");
+    TTree* antiKt10TruthJetsTree = new TTree("antiKt10TruthJetsTree", "Tree storing event-wise Et, Eta, Phi");
+    TTree* leadingAntiKt10TruthJetsTree = new TTree("leadingAntiKt10TruthJetsTree", "Tree storing event-wise Et, Eta, Phi");
+    TTree* subleadingAntiKt10TruthJetsTree = new TTree("subleadingAntiKt10TruthJetsTree", "Tree storing event-wise Et, Eta, Phi");
+    TTree* antiKt10TruthSoftDropJetsTree = new TTree("antiKt10TruthSoftDropJetsTree", "Tree storing event-wise Et, Eta, Phi");
+    TTree* leadingAntiKt10TruthSoftDropJetsTree = new TTree("leadingAntiKt10TruthSoftDropJetsTree", "Tree storing event-wise Et, Eta, Phi");
+    TTree* subleadingAntiKt10TruthSoftDropJetsTree = new TTree("subleadingAntiKt10TruthSoftDropJetsTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* truthAntiKt4TruthDressedWZJets = new TTree("truthAntiKt4TruthDressedWZJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* leadingTruthAntiKt4TruthDressedWZJets = new TTree("leadingTruthAntiKt4TruthDressedWZJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* subleadingTruthAntiKt4TruthDressedWZJets = new TTree("subleadingTruthAntiKt4TruthDressedWZJets", "Tree storing event-wise Et, Eta, Phi");
+    TTree* gFexMETTree             = new TTree("gFexMETTree",             "Tree storing event-wise gFEX MET quantities");
+    TTree* metTruthTree            = new TTree("metTruthTree",            "Tree storing event-wise truth MET quantities");
+    TTree* metCoreAntiKt4EMTopoTree= new TTree("metCoreAntiKt4EMTopoTree","Tree storing event-wise reco core MET quantities (AntiKt4EMTopo)");
     /*TTree* recoAntiKt10LCTopoJets = new TTree("recoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* leadingRecoAntiKt10LCTopoJets = new TTree("leadingRecoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* subleadingRecoAntiKt10LCTopoJets = new TTree("recoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");*/
@@ -390,11 +402,44 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     std::vector<double> recoAntiKt10LRJLeadingEtValues, recoAntiKt10LRJLeadingEtaValues, recoAntiKt10LRJLeadingPhiValues, recoAntiKt10LRJLeadingMassValues;
     std::vector<double> recoAntiKt10LRJSubleadingEtValues, recoAntiKt10LRJSubleadingEtaValues, recoAntiKt10LRJSubleadingPhiValues, recoAntiKt10LRJSubleadingMassValues;
 
+    // Reco AntiKt10 UFOCSSK SoftDrop jets vectors
+    std::vector<unsigned int> recoAntiKt10UFOCSSKSDEtIndexValues;
+    std::vector<double> recoAntiKt10UFOCSSKSDEtValues, recoAntiKt10UFOCSSKSDEtaValues, recoAntiKt10UFOCSSKSDPhiValues, recoAntiKt10UFOCSSKSDMassValues;
+    std::vector<double> recoAntiKt10UFOCSSKSDLeadingEtValues, recoAntiKt10UFOCSSKSDLeadingEtaValues, recoAntiKt10UFOCSSKSDLeadingPhiValues, recoAntiKt10UFOCSSKSDLeadingMassValues;
+    std::vector<double> recoAntiKt10UFOCSSKSDSubleadingEtValues, recoAntiKt10UFOCSSKSDSubleadingEtaValues, recoAntiKt10UFOCSSKSDSubleadingPhiValues, recoAntiKt10UFOCSSKSDSubleadingMassValues;
+
+    // AntiKt10 Truth jets vectors
+    std::vector<unsigned int> antiKt10TruthEtIndexValues;
+    std::vector<double> antiKt10TruthEtValues, antiKt10TruthEtaValues, antiKt10TruthPhiValues, antiKt10TruthMassValues;
+    std::vector<double> antiKt10TruthLeadingEtValues, antiKt10TruthLeadingEtaValues, antiKt10TruthLeadingPhiValues, antiKt10TruthLeadingMassValues;
+    std::vector<double> antiKt10TruthSubleadingEtValues, antiKt10TruthSubleadingEtaValues, antiKt10TruthSubleadingPhiValues, antiKt10TruthSubleadingMassValues;
+
+    // AntiKt10 Truth SoftDrop jets vectors
+    std::vector<unsigned int> antiKt10TruthSDEtIndexValues;
+    std::vector<double> antiKt10TruthSDEtValues, antiKt10TruthSDEtaValues, antiKt10TruthSDPhiValues, antiKt10TruthSDMassValues;
+    std::vector<double> antiKt10TruthSDLeadingEtValues, antiKt10TruthSDLeadingEtaValues, antiKt10TruthSDLeadingPhiValues, antiKt10TruthSDLeadingMassValues;
+    std::vector<double> antiKt10TruthSDSubleadingEtValues, antiKt10TruthSDSubleadingEtaValues, antiKt10TruthSDSubleadingPhiValues, antiKt10TruthSDSubleadingMassValues;
+
     // Truth WZ Antikt4 jets vectors
     std::vector<unsigned int> truthAntiKt4WZSRJEtIndexValues;
     std::vector<double> truthAntiKt4WZSRJEtValues, truthAntiKt4WZSRJEtaValues, truthAntiKt4WZSRJPhiValues, truthAntiKt4WZSRJMassValues;
     std::vector<double> truthAntiKt4WZSRJLeadingEtValues, truthAntiKt4WZSRJLeadingEtaValues, truthAntiKt4WZSRJLeadingPhiValues, truthAntiKt4WZSRJLeadingMassValues;
     std::vector<double> truthAntiKt4WZSRJSubleadingEtValues, truthAntiKt4WZSRJSubleadingEtaValues, truthAntiKt4WZSRJSubleadingPhiValues, truthAntiKt4WZSRJSubleadingMassValues;
+
+    // gFEX MET quantities (scalar per event)
+    double gMHX = 0.0, gMHY = 0.0;                 // hard term (L1_gMHTComponentsJwoj)
+    double gMSX = 0.0, gMSY = 0.0;                 // soft term (L1_gMSTComponentsJwoj)
+    double gMETX = 0.0, gMETY = 0.0;               // total MET components (L1_gMETComponentsJwoj)
+    double gMET = 0.0, gSumET = 0.0;               // scalar MET and SumET (L1_gScalarEJwoj)
+    // Reference MET quantities (scalar per event)
+    double metTruthNonIntX = 0.0, metTruthNonIntY = 0.0;   // MET_Truth["NonInt"]
+    double metTruthNonIntSumET = 0.0, metTruthNonInt = 0.0;
+    double metTruthIntX = 0.0, metTruthIntY = 0.0;         // MET_Truth["Int"]
+    double metTruthIntSumET = 0.0, metTruthInt = 0.0;
+    double metTruthIntOutX = 0.0, metTruthIntOutY = 0.0;   // MET_Truth["IntOut"]
+    double metTruthIntOutSumET = 0.0, metTruthIntOut = 0.0;
+    double metCoreX = 0.0, metCoreY = 0.0;         // MET_Core_AntiKt4EMTopo (total of container)
+    double metCoreSumET = 0.0, metCore = 0.0;
 
     // In time anti-kt 4 truth jets vectors
     std::vector<unsigned int> inTimeAntiKt4TruthSRJEtIndexValues;
@@ -678,6 +723,63 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     subleadingRecoAntiKt10UFOCSSKJets->Branch("Phi", &recoAntiKt10LRJSubleadingPhiValues);
     subleadingRecoAntiKt10UFOCSSKJets->Branch("Mass", &recoAntiKt10LRJSubleadingMassValues);
 
+    // recoAntiKt10UFOCSSKSoftDropJets
+    recoAntiKt10UFOCSSKSoftDropJets->Branch("EtIndex", &recoAntiKt10UFOCSSKSDEtIndexValues);
+    recoAntiKt10UFOCSSKSoftDropJets->Branch("Et", &recoAntiKt10UFOCSSKSDEtValues);
+    recoAntiKt10UFOCSSKSoftDropJets->Branch("Eta", &recoAntiKt10UFOCSSKSDEtaValues);
+    recoAntiKt10UFOCSSKSoftDropJets->Branch("Phi", &recoAntiKt10UFOCSSKSDPhiValues);
+    recoAntiKt10UFOCSSKSoftDropJets->Branch("Mass", &recoAntiKt10UFOCSSKSDMassValues);
+
+    // leadingRecoAntiKt10UFOCSSKSoftDropJets
+    leadingRecoAntiKt10UFOCSSKSoftDropJets->Branch("Et", &recoAntiKt10UFOCSSKSDLeadingEtValues);
+    leadingRecoAntiKt10UFOCSSKSoftDropJets->Branch("Eta", &recoAntiKt10UFOCSSKSDLeadingEtaValues);
+    leadingRecoAntiKt10UFOCSSKSoftDropJets->Branch("Phi", &recoAntiKt10UFOCSSKSDLeadingPhiValues);
+    leadingRecoAntiKt10UFOCSSKSoftDropJets->Branch("Mass", &recoAntiKt10UFOCSSKSDLeadingMassValues);
+
+    // subleadingRecoAntiKt10UFOCSSKSoftDropJets
+    subleadingRecoAntiKt10UFOCSSKSoftDropJets->Branch("Et", &recoAntiKt10UFOCSSKSDSubleadingEtValues);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJets->Branch("Eta", &recoAntiKt10UFOCSSKSDSubleadingEtaValues);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJets->Branch("Phi", &recoAntiKt10UFOCSSKSDSubleadingPhiValues);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJets->Branch("Mass", &recoAntiKt10UFOCSSKSDSubleadingMassValues);
+
+    // antiKt10TruthJetsTree
+    antiKt10TruthJetsTree->Branch("EtIndex", &antiKt10TruthEtIndexValues);
+    antiKt10TruthJetsTree->Branch("Et", &antiKt10TruthEtValues);
+    antiKt10TruthJetsTree->Branch("Eta", &antiKt10TruthEtaValues);
+    antiKt10TruthJetsTree->Branch("Phi", &antiKt10TruthPhiValues);
+    antiKt10TruthJetsTree->Branch("Mass", &antiKt10TruthMassValues);
+
+    // leadingAntiKt10TruthJetsTree
+    leadingAntiKt10TruthJetsTree->Branch("Et", &antiKt10TruthLeadingEtValues);
+    leadingAntiKt10TruthJetsTree->Branch("Eta", &antiKt10TruthLeadingEtaValues);
+    leadingAntiKt10TruthJetsTree->Branch("Phi", &antiKt10TruthLeadingPhiValues);
+    leadingAntiKt10TruthJetsTree->Branch("Mass", &antiKt10TruthLeadingMassValues);
+
+    // subleadingAntiKt10TruthJetsTree
+    subleadingAntiKt10TruthJetsTree->Branch("Et", &antiKt10TruthSubleadingEtValues);
+    subleadingAntiKt10TruthJetsTree->Branch("Eta", &antiKt10TruthSubleadingEtaValues);
+    subleadingAntiKt10TruthJetsTree->Branch("Phi", &antiKt10TruthSubleadingPhiValues);
+    subleadingAntiKt10TruthJetsTree->Branch("Mass", &antiKt10TruthSubleadingMassValues);
+
+    // antiKt10TruthSoftDropJetsTree
+    antiKt10TruthSoftDropJetsTree->Branch("EtIndex", &antiKt10TruthSDEtIndexValues);
+    antiKt10TruthSoftDropJetsTree->Branch("Et", &antiKt10TruthSDEtValues);
+    antiKt10TruthSoftDropJetsTree->Branch("Eta", &antiKt10TruthSDEtaValues);
+    antiKt10TruthSoftDropJetsTree->Branch("Phi", &antiKt10TruthSDPhiValues);
+    antiKt10TruthSoftDropJetsTree->Branch("Mass", &antiKt10TruthSDMassValues);
+
+    // leadingAntiKt10TruthSoftDropJetsTree
+    leadingAntiKt10TruthSoftDropJetsTree->Branch("Et", &antiKt10TruthSDLeadingEtValues);
+    leadingAntiKt10TruthSoftDropJetsTree->Branch("Eta", &antiKt10TruthSDLeadingEtaValues);
+    leadingAntiKt10TruthSoftDropJetsTree->Branch("Phi", &antiKt10TruthSDLeadingPhiValues);
+    leadingAntiKt10TruthSoftDropJetsTree->Branch("Mass", &antiKt10TruthSDLeadingMassValues);
+
+    // subleadingAntiKt10TruthSoftDropJetsTree
+    subleadingAntiKt10TruthSoftDropJetsTree->Branch("Et", &antiKt10TruthSDSubleadingEtValues);
+    subleadingAntiKt10TruthSoftDropJetsTree->Branch("Eta", &antiKt10TruthSDSubleadingEtaValues);
+    subleadingAntiKt10TruthSoftDropJetsTree->Branch("Phi", &antiKt10TruthSDSubleadingPhiValues);
+    subleadingAntiKt10TruthSoftDropJetsTree->Branch("Mass", &antiKt10TruthSDSubleadingMassValues);
+
     // truthAntiKt4TruthDressedWZJets
     truthAntiKt4TruthDressedWZJets->Branch("EtIndex", &truthAntiKt4WZSRJEtIndexValues);
     truthAntiKt4TruthDressedWZJets->Branch("Et", &truthAntiKt4WZSRJEtValues);
@@ -696,6 +798,34 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     subleadingTruthAntiKt4TruthDressedWZJets->Branch("Eta", &truthAntiKt4WZSRJSubleadingEtaValues);
     subleadingTruthAntiKt4TruthDressedWZJets->Branch("Phi", &truthAntiKt4WZSRJSubleadingPhiValues);
     subleadingTruthAntiKt4TruthDressedWZJets->Branch("Mass", &truthAntiKt4WZSRJSubleadingMassValues);
+
+    // gFexMETTree branches (one scalar value per event)
+    gFexMETTree->Branch("gMHX",   &gMHX);
+    gFexMETTree->Branch("gMHY",   &gMHY);
+    gFexMETTree->Branch("gMSX",   &gMSX);
+    gFexMETTree->Branch("gMSY",   &gMSY);
+    gFexMETTree->Branch("gMETX",  &gMETX);
+    gFexMETTree->Branch("gMETY",  &gMETY);
+    gFexMETTree->Branch("gMET",   &gMET);
+    gFexMETTree->Branch("gSumET", &gSumET);
+
+    metTruthTree->Branch("metTruthNonIntX",     &metTruthNonIntX);
+    metTruthTree->Branch("metTruthNonIntY",     &metTruthNonIntY);
+    metTruthTree->Branch("metTruthNonIntSumET", &metTruthNonIntSumET);
+    metTruthTree->Branch("metTruthNonInt",      &metTruthNonInt);
+    metTruthTree->Branch("metTruthIntX",        &metTruthIntX);
+    metTruthTree->Branch("metTruthIntY",        &metTruthIntY);
+    metTruthTree->Branch("metTruthIntSumET",    &metTruthIntSumET);
+    metTruthTree->Branch("metTruthInt",         &metTruthInt);
+    metTruthTree->Branch("metTruthIntOutX",     &metTruthIntOutX);
+    metTruthTree->Branch("metTruthIntOutY",     &metTruthIntOutY);
+    metTruthTree->Branch("metTruthIntOutSumET", &metTruthIntOutSumET);
+    metTruthTree->Branch("metTruthIntOut",      &metTruthIntOut);
+
+    metCoreAntiKt4EMTopoTree->Branch("metCoreX",     &metCoreX);
+    metCoreAntiKt4EMTopoTree->Branch("metCoreY",     &metCoreY);
+    metCoreAntiKt4EMTopoTree->Branch("metCoreSumET", &metCoreSumET);
+    metCoreAntiKt4EMTopoTree->Branch("metCore",      &metCore);
 
     int higgsPassEventCounter = 0;
     namespace fs = std::filesystem;
@@ -1025,9 +1155,55 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 continue;
             }*/
 
+            // gFEX MET containers
+            const DataVector<xAOD::gFexGlobalRoI_v1>* L1_gMHTComponentsJwoj = nullptr;
+            if (!event.retrieve(L1_gMHTComponentsJwoj, "L1_gMHTComponentsJwoj").isSuccess()) {
+                std::cerr << "Failed to retrieve gFEX MET hard term" << std::endl;
+            }
+            const DataVector<xAOD::gFexGlobalRoI_v1>* L1_gMSTComponentsJwoj = nullptr;
+            if (!event.retrieve(L1_gMSTComponentsJwoj, "L1_gMSTComponentsJwoj").isSuccess()) {
+                std::cerr << "Failed to retrieve gFEX MET soft term" << std::endl;
+            }
+            const DataVector<xAOD::gFexGlobalRoI_v1>* L1_gMETComponentsJwoj = nullptr;
+            if (!event.retrieve(L1_gMETComponentsJwoj, "L1_gMETComponentsJwoj").isSuccess()) {
+                std::cerr << "Failed to retrieve gFEX total MET" << std::endl;
+            }
+            const DataVector<xAOD::gFexGlobalRoI_v1>* L1_gScalarEJwoj = nullptr;
+            if (!event.retrieve(L1_gScalarEJwoj, "L1_gScalarEJwoj").isSuccess()) {
+                std::cerr << "Failed to retrieve gFEX scalar MET/SumET" << std::endl;
+            }
+
+            // Reference MET containers
+            const xAOD::MissingETContainer* MET_Truth = nullptr;
+            if (!event.retrieve(MET_Truth, "MET_Truth").isSuccess()) {
+                std::cerr << "Failed to retrieve MET_Truth" << std::endl;
+            }
+            const xAOD::MissingETContainer* MET_Core_AntiKt4EMTopo = nullptr;
+            if (!event.retrieve(MET_Core_AntiKt4EMTopo, "MET_Core_AntiKt4EMTopo").isSuccess()) {
+                std::cerr << "Failed to retrieve MET_Core_AntiKt4EMTopo" << std::endl;
+            }
+
             const xAOD::JetContainer* AntiKt10UFOCSSKJets = nullptr;
             if (!event.retrieve(AntiKt10UFOCSSKJets, "AntiKt10UFOCSSKJets").isSuccess()) {
                 cerr << "Failed to retrieve reco Antik10 UFOCSSK jets" << endl;
+                continue;
+            }
+
+            const xAOD::JetContainer* AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets = nullptr;
+            if (!event.retrieve(AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets, "AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets").isSuccess()) {
+                cerr << "Failed to retrieve reco AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets" << endl;
+                continue;
+            }
+
+            const xAOD::JetContainer* AntiKt10TruthJets = nullptr;
+            if (!event.retrieve(AntiKt10TruthJets, "AntiKt10TruthJets").isSuccess()) {
+                cerr << "Failed to retrieve reco AntiKt10TruthJets" << endl;
+                continue;
+            }
+
+            const xAOD::JetContainer* AntiKt10TruthSoftDropBeta100Zcut10Jets = nullptr;
+            if (!event.retrieve(AntiKt10TruthSoftDropBeta100Zcut10Jets, "AntiKt10TruthSoftDropBeta100Zcut10Jets").isSuccess()) {
+                cerr << "Failed to retrieve reco AntiKt10TruthSoftDropBeta100Zcut10Jets" << endl;
                 continue;
             }
 
@@ -1079,6 +1255,45 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             recoAntiKt10LRJSubleadingEtaValues.clear();
             recoAntiKt10LRJSubleadingPhiValues.clear();
             recoAntiKt10LRJSubleadingMassValues.clear();
+            recoAntiKt10UFOCSSKSDEtIndexValues.clear();
+            recoAntiKt10UFOCSSKSDEtValues.clear();
+            recoAntiKt10UFOCSSKSDEtaValues.clear();
+            recoAntiKt10UFOCSSKSDPhiValues.clear();
+            recoAntiKt10UFOCSSKSDMassValues.clear();
+            recoAntiKt10UFOCSSKSDLeadingEtValues.clear();
+            recoAntiKt10UFOCSSKSDLeadingEtaValues.clear();
+            recoAntiKt10UFOCSSKSDLeadingPhiValues.clear();
+            recoAntiKt10UFOCSSKSDLeadingMassValues.clear();
+            recoAntiKt10UFOCSSKSDSubleadingEtValues.clear();
+            recoAntiKt10UFOCSSKSDSubleadingEtaValues.clear();
+            recoAntiKt10UFOCSSKSDSubleadingPhiValues.clear();
+            recoAntiKt10UFOCSSKSDSubleadingMassValues.clear();
+            antiKt10TruthEtIndexValues.clear();
+            antiKt10TruthEtValues.clear();
+            antiKt10TruthEtaValues.clear();
+            antiKt10TruthPhiValues.clear();
+            antiKt10TruthMassValues.clear();
+            antiKt10TruthLeadingEtValues.clear();
+            antiKt10TruthLeadingEtaValues.clear();
+            antiKt10TruthLeadingPhiValues.clear();
+            antiKt10TruthLeadingMassValues.clear();
+            antiKt10TruthSubleadingEtValues.clear();
+            antiKt10TruthSubleadingEtaValues.clear();
+            antiKt10TruthSubleadingPhiValues.clear();
+            antiKt10TruthSubleadingMassValues.clear();
+            antiKt10TruthSDEtIndexValues.clear();
+            antiKt10TruthSDEtValues.clear();
+            antiKt10TruthSDEtaValues.clear();
+            antiKt10TruthSDPhiValues.clear();
+            antiKt10TruthSDMassValues.clear();
+            antiKt10TruthSDLeadingEtValues.clear();
+            antiKt10TruthSDLeadingEtaValues.clear();
+            antiKt10TruthSDLeadingPhiValues.clear();
+            antiKt10TruthSDLeadingMassValues.clear();
+            antiKt10TruthSDSubleadingEtValues.clear();
+            antiKt10TruthSDSubleadingEtaValues.clear();
+            antiKt10TruthSDSubleadingPhiValues.clear();
+            antiKt10TruthSDSubleadingMassValues.clear();
             truthAntiKt4WZSRJEtIndexValues.clear();
             truthAntiKt4WZSRJEtValues.clear();
             truthAntiKt4WZSRJEtaValues.clear();
@@ -1381,7 +1596,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 gepBasicClustersEtaValues.push_back(gepBasicClusterEta);
                 gepBasicClustersPhiValues.push_back(gepBasicClusterPhi);
 
-                if (gepBasicClusterEt < 0) continue; // don't store to digitized memories
+                if (gepBasicClusterEt <= 0) continue; // don't store to digitized memories
 
                 // Digitize each variable
                 int phi_bin = digitize(gepBasicClusterPhi, phi_bit_length_, phi_min_, phi_max_);
@@ -1474,7 +1689,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepCellsTowersEtaValues.push_back(gepCellsTowersEtaValue);
                     gepCellsTowersPhiValues.push_back(gepCellsTowersPhiValue);
 
-                    if (gepCellsTowersEtValue < 0) continue; // keep your existing rule
+                    if (gepCellsTowersEtValue <= 0) continue; // keep your existing rule
 
                     // Digitize
                     int phi_bin = digitize(gepCellsTowersPhiValue, phi_bit_length_, phi_min_, phi_max_);
@@ -1555,7 +1770,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepCellsTowersSKEtaValues.push_back(gepCellsTowersSKEtaValue);
                     gepCellsTowersSKPhiValues.push_back(gepCellsTowersSKPhiValue);
 
-                    if (gepCellsTowersSKEtValue < 0) continue; // keep your existing rule
+                    if (gepCellsTowersSKEtValue <= 0) continue; // keep your existing rule
 
                     // Digitize
                     int phi_bin = digitize(gepCellsTowersSKPhiValue, phi_bit_length_, phi_min_, phi_max_);
@@ -1597,7 +1812,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 caloTopoTowerEtaValues.push_back(cluster->eta());
                 caloTopoTowerPhiValues.push_back(cluster->phi());
 
-                if (et < 0) continue; // don't store to digitized memories
+                if (et <= 0) continue; // don't store to digitized memories
 
                 // Digitize each variable
                 int phi_bin = digitize(cluster->phi(), phi_bit_length_, phi_min_, phi_max_);
@@ -1637,7 +1852,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 topo422EtaValues.push_back(cluster->eta());
                 topo422PhiValues.push_back(cluster->phi());
 
-                if (et < 0) continue; // FIXME for now don't store negative Et to digitized memories
+                if (et <= 0) continue; // FIXME for now don't store negative Et to digitized memories
                 // Digitize each variable
                 int phi_bin = digitize(cluster->phi(), phi_bit_length_, phi_min_, phi_max_);
                 int eta_bin = digitize(cluster->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
@@ -1704,7 +1919,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepWTAConeCellsTowersJetsPhiValues.push_back(WTAConeCellsTowersJetsPhi);
                     gepWTAConeCellsTowersJetsNConstituentsValues.push_back(WTAConeCellsTowersJetsNConstituents);
 
-                    if (WTAConeCellsTowersJetspT < 0) continue;
+                    if (WTAConeCellsTowersJetspT <= 0) continue;
 
                     int phi_bin = digitize(WTAConeCellsTowersJetsPhi, phi_bit_length_, phi_min_, phi_max_);
                     int eta_bin = digitize(WTAConeCellsTowersJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
@@ -1770,7 +1985,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepWTAConeCellsTowersSKJetsPhiValues.push_back(WTAConeCellsTowersSKJetsPhi);
                     gepWTAConeCellsTowersSKJetsNConstituentsValues.push_back(WTAConeCellsTowersSKJetsNConstituents);
 
-                    if (WTAConeCellsTowersSKJetspT < 0) continue; // don't want to skip over  == 0 Et cone jets 
+                    if (WTAConeCellsTowersSKJetspT <= 0) continue; // don't want to skip over  == 0 Et cone jets 
 
                     int phi_bin = digitize(WTAConeCellsTowersSKJetsPhi, phi_bit_length_, phi_min_, phi_max_);
                     int eta_bin = digitize(WTAConeCellsTowersSKJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
@@ -1836,7 +2051,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepWTAConeGEPBasicClustersJetsPhiValues.push_back(coneWTAGEPBasicClustersJetsPhi);
                     gepWTAConeGEPBasicClustersJetsNConstituentsValues.push_back(coneWTAGEPBasicClustersJetsNConstituents);
 
-                    if (coneWTAGEPBasicClustersJetspT < 0) continue;
+                    if (coneWTAGEPBasicClustersJetspT <= 0) continue;
 
                     int phi_bin = digitize(coneWTAGEPBasicClustersJetsPhi, phi_bit_length_, phi_min_, phi_max_);
                     int eta_bin = digitize(coneWTAGEPBasicClustersJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
@@ -1899,7 +2114,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepWTAConeGEPBasicClustersSKJetsPhiValues.push_back(coneWTAGEPBasicClustersSKJetsPhi);
                     gepWTAConeGEPBasicClustersSKJetsNConstituentsValues.push_back(coneWTAGEPBasicClustersSKJetsNConstituents);
 
-                    if (coneWTAGEPBasicClustersSKJetspT < 0) continue;
+                    if (coneWTAGEPBasicClustersSKJetspT <= 0) continue;
 
                     int phi_bin = digitize(coneWTAGEPBasicClustersSKJetsPhi, phi_bit_length_, phi_min_, phi_max_);
                     int eta_bin = digitize(coneWTAGEPBasicClustersSKJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
@@ -1955,7 +2170,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 jFexSRJEtaValues.push_back(jet->eta());
                 jFexSRJPhiValues.push_back(jet->phi());
 
-                if (et < 0) continue; // FIXME
+                if (et <= 0) continue; // FIXME
 
                 // Digitize each variable
                 int phi_bin = digitize(jet->phi(), phi_bit_length_, phi_min_, phi_max_);
@@ -2069,7 +2284,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 gFexSRJEtaValues.push_back(jet->eta());
                 gFexSRJPhiValues.push_back(jet->phi());
 
-                if (et < 0) continue;
+                if (et <= 0) continue;
 
                 // Digitize each variable
                 int phi_bin = digitize(jet->phi(), phi_bit_length_, phi_min_, phi_max_);
@@ -2157,6 +2372,79 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 gFexLRJSubleadingPhiValues.push_back(subleading->phi());
             }
 
+            // --- gFEX MET ---
+            gMHX = 0.0; gMHY = 0.0;
+            gMSX = 0.0; gMSY = 0.0;
+            gMETX = 0.0; gMETY = 0.0;
+            gMET = 0.0; gSumET = 0.0;
+            metTruthNonIntX = 0.0; metTruthNonIntY = 0.0; metTruthNonIntSumET = 0.0; metTruthNonInt = 0.0;
+            metTruthIntX    = 0.0; metTruthIntY    = 0.0; metTruthIntSumET    = 0.0; metTruthInt    = 0.0;
+            metTruthIntOutX = 0.0; metTruthIntOutY = 0.0; metTruthIntOutSumET = 0.0; metTruthIntOut = 0.0;
+            metCoreX  = 0.0; metCoreY  = 0.0; metCoreSumET  = 0.0; metCore  = 0.0;
+
+            if (L1_gMHTComponentsJwoj) {
+                for (size_t i = 0; i < L1_gMHTComponentsJwoj->size(); ++i) {
+                    const auto& mht = (*L1_gMHTComponentsJwoj)[i];
+                    gMHX = mht->METquantityOne() / 1000.0;
+                    gMHY = mht->METquantityTwo() / 1000.0;
+                }
+            }
+            if (L1_gMSTComponentsJwoj) {
+                for (size_t i = 0; i < L1_gMSTComponentsJwoj->size(); ++i) {
+                    const auto& mst = (*L1_gMSTComponentsJwoj)[i];
+                    gMSX = mst->METquantityOne() / 1000.0;
+                    gMSY = mst->METquantityTwo() / 1000.0;
+                }
+            }
+            if (L1_gMETComponentsJwoj) {
+                for (size_t i = 0; i < L1_gMETComponentsJwoj->size(); ++i) {
+                    const auto& metTotal = (*L1_gMETComponentsJwoj)[i];
+                    gMETX = metTotal->METquantityOne() / 1000.0;
+                    gMETY = metTotal->METquantityTwo() / 1000.0;
+                }
+            }
+            if (L1_gScalarEJwoj) {
+                for (size_t i = 0; i < L1_gScalarEJwoj->size(); ++i) {
+                    const auto& metScalar = (*L1_gScalarEJwoj)[i];
+                    gMET   = metScalar->METquantityOne() / 1000.0;
+                    gSumET = metScalar->SumEt() / 1000.0;
+                }
+            }
+
+            // --- MET_Truth ---
+            if (MET_Truth) {
+                auto fillTruthTerm = [&](const std::string& key,
+                                         double& mx, double& my, double& sumet, double& mag) {
+                    auto it = MET_Truth->find(key);
+                    if (it != MET_Truth->end()) {
+                        const xAOD::MissingET* m = *it;
+                        mx    = m->mpx()   / 1000.0;
+                        my    = m->mpy()   / 1000.0;
+                        sumet = m->sumet() / 1000.0;
+                        mag   = std::sqrt(mx * mx + my * my);
+                    }
+                };
+                fillTruthTerm("NonInt", metTruthNonIntX, metTruthNonIntY, metTruthNonIntSumET, metTruthNonInt);
+                fillTruthTerm("Int",    metTruthIntX,    metTruthIntY,    metTruthIntSumET,    metTruthInt);
+                fillTruthTerm("IntOut", metTruthIntOutX, metTruthIntOutY, metTruthIntOutSumET, metTruthIntOut);
+            }
+
+            // --- MET_Core_AntiKt4EMTopo (sum all terms in container) ---
+            // NOTE: key name(s) inside this container may need verification against the sample.
+            // Summing mpx/mpy over all terms gives the total core MET.
+            if (MET_Core_AntiKt4EMTopo) {
+                for (const auto* metTerm : *MET_Core_AntiKt4EMTopo) {
+                    std::cout << "MET_Core_AntiKt4EMTopo term: " << metTerm->name() << "\n";
+                    metCoreX     += metTerm->mpx()   / 1000.0;
+                    std::cout << "metCoreX: " << metCoreX << "\n";
+                    metCoreY     += metTerm->mpy()   / 1000.0;
+                    std::cout << "metCoreY: " << metCoreY << "\n";
+                    metCoreSumET += metTerm->sumet() / 1000.0;
+                    std::cout << "metCoreSumET: " << metCoreY << "\n";
+                }
+                metCore = std::sqrt(metCoreX * metCoreX + metCoreY * metCoreY);
+                std::cout << "metCore: " << metCore << "\n";
+            }
 
             std::vector<std::pair<size_t, double>> hltJetEtWithIndex;
             for (size_t i = 0; i < HLT_AntiKt4EMTopoJets_subjesIS->size(); ++i) {
@@ -2283,6 +2571,107 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 recoAntiKt10LRJSubleadingMassValues.push_back(subleading->m() / 1000.0);
             }
 
+            // AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets
+            std::vector<std::pair<size_t, double>> recoSDJetEtWithIndex;
+            for (size_t i = 0; i < AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets->size(); ++i) {
+                const auto& jet = (*AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets)[i];
+                double et = jet->e() / (1000.0 * cosh(jet->eta()));
+                recoSDJetEtWithIndex.emplace_back(i, et);
+            }
+            std::sort(recoSDJetEtWithIndex.begin(), recoSDJetEtWithIndex.end(),
+                    [](const std::pair<size_t, double>& a, const std::pair<size_t, double>& b) {
+                        return a.second > b.second;
+                    });
+            for (const auto& [index, et] : recoSDJetEtWithIndex) {
+                const auto& jet = (*AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets)[index];
+                recoAntiKt10UFOCSSKSDEtIndexValues.push_back(static_cast<unsigned int>(index));
+                recoAntiKt10UFOCSSKSDEtValues.push_back(et);
+                recoAntiKt10UFOCSSKSDEtaValues.push_back(jet->eta());
+                recoAntiKt10UFOCSSKSDPhiValues.push_back(jet->phi());
+                recoAntiKt10UFOCSSKSDMassValues.push_back(jet->m() / 1000.0);
+            }
+            if (!recoSDJetEtWithIndex.empty()) {
+                const auto& leading = (*AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets)[recoSDJetEtWithIndex[0].first];
+                recoAntiKt10UFOCSSKSDLeadingEtValues.push_back(recoAntiKt10UFOCSSKSDEtValues[0]);
+                recoAntiKt10UFOCSSKSDLeadingEtaValues.push_back(leading->eta());
+                recoAntiKt10UFOCSSKSDLeadingPhiValues.push_back(leading->phi());
+                recoAntiKt10UFOCSSKSDLeadingMassValues.push_back(leading->m() / 1000.0);
+            }
+            if (recoSDJetEtWithIndex.size() > 1) {
+                const auto& subleading = (*AntiKt10UFOCSSKSoftDropBeta100Zcut10Jets)[recoSDJetEtWithIndex[1].first];
+                recoAntiKt10UFOCSSKSDSubleadingEtValues.push_back(recoAntiKt10UFOCSSKSDEtValues[1]);
+                recoAntiKt10UFOCSSKSDSubleadingEtaValues.push_back(subleading->eta());
+                recoAntiKt10UFOCSSKSDSubleadingPhiValues.push_back(subleading->phi());
+                recoAntiKt10UFOCSSKSDSubleadingMassValues.push_back(subleading->m() / 1000.0);
+            }
+
+            // AntiKt10TruthJets
+            std::vector<std::pair<size_t, double>> truthLRJEtWithIndex;
+            for (size_t i = 0; i < AntiKt10TruthJets->size(); ++i) {
+                const auto& jet = (*AntiKt10TruthJets)[i];
+                double et = jet->e() / (1000.0 * cosh(jet->eta()));
+                truthLRJEtWithIndex.emplace_back(i, et);
+            }
+            std::sort(truthLRJEtWithIndex.begin(), truthLRJEtWithIndex.end(),
+                    [](const std::pair<size_t, double>& a, const std::pair<size_t, double>& b) {
+                        return a.second > b.second;
+                    });
+            for (const auto& [index, et] : truthLRJEtWithIndex) {
+                const auto& jet = (*AntiKt10TruthJets)[index];
+                antiKt10TruthEtIndexValues.push_back(static_cast<unsigned int>(index));
+                antiKt10TruthEtValues.push_back(et);
+                antiKt10TruthEtaValues.push_back(jet->eta());
+                antiKt10TruthPhiValues.push_back(jet->phi());
+                antiKt10TruthMassValues.push_back(jet->m() / 1000.0);
+            }
+            if (!truthLRJEtWithIndex.empty()) {
+                const auto& leading = (*AntiKt10TruthJets)[truthLRJEtWithIndex[0].first];
+                antiKt10TruthLeadingEtValues.push_back(antiKt10TruthEtValues[0]);
+                antiKt10TruthLeadingEtaValues.push_back(leading->eta());
+                antiKt10TruthLeadingPhiValues.push_back(leading->phi());
+                antiKt10TruthLeadingMassValues.push_back(leading->m() / 1000.0);
+            }
+            if (truthLRJEtWithIndex.size() > 1) {
+                const auto& subleading = (*AntiKt10TruthJets)[truthLRJEtWithIndex[1].first];
+                antiKt10TruthSubleadingEtValues.push_back(antiKt10TruthEtValues[1]);
+                antiKt10TruthSubleadingEtaValues.push_back(subleading->eta());
+                antiKt10TruthSubleadingPhiValues.push_back(subleading->phi());
+                antiKt10TruthSubleadingMassValues.push_back(subleading->m() / 1000.0);
+            }
+
+            // AntiKt10TruthSoftDropBeta100Zcut10Jets
+            std::vector<std::pair<size_t, double>> truthSDLRJEtWithIndex;
+            for (size_t i = 0; i < AntiKt10TruthSoftDropBeta100Zcut10Jets->size(); ++i) {
+                const auto& jet = (*AntiKt10TruthSoftDropBeta100Zcut10Jets)[i];
+                double et = jet->e() / (1000.0 * cosh(jet->eta()));
+                truthSDLRJEtWithIndex.emplace_back(i, et);
+            }
+            std::sort(truthSDLRJEtWithIndex.begin(), truthSDLRJEtWithIndex.end(),
+                    [](const std::pair<size_t, double>& a, const std::pair<size_t, double>& b) {
+                        return a.second > b.second;
+                    });
+            for (const auto& [index, et] : truthSDLRJEtWithIndex) {
+                const auto& jet = (*AntiKt10TruthSoftDropBeta100Zcut10Jets)[index];
+                antiKt10TruthSDEtIndexValues.push_back(static_cast<unsigned int>(index));
+                antiKt10TruthSDEtValues.push_back(et);
+                antiKt10TruthSDEtaValues.push_back(jet->eta());
+                antiKt10TruthSDPhiValues.push_back(jet->phi());
+                antiKt10TruthSDMassValues.push_back(jet->m() / 1000.0);
+            }
+            if (!truthSDLRJEtWithIndex.empty()) {
+                const auto& leading = (*AntiKt10TruthSoftDropBeta100Zcut10Jets)[truthSDLRJEtWithIndex[0].first];
+                antiKt10TruthSDLeadingEtValues.push_back(antiKt10TruthSDEtValues[0]);
+                antiKt10TruthSDLeadingEtaValues.push_back(leading->eta());
+                antiKt10TruthSDLeadingPhiValues.push_back(leading->phi());
+                antiKt10TruthSDLeadingMassValues.push_back(leading->m() / 1000.0);
+            }
+            if (truthSDLRJEtWithIndex.size() > 1) {
+                const auto& subleading = (*AntiKt10TruthSoftDropBeta100Zcut10Jets)[truthSDLRJEtWithIndex[1].first];
+                antiKt10TruthSDSubleadingEtValues.push_back(antiKt10TruthSDEtValues[1]);
+                antiKt10TruthSDSubleadingEtaValues.push_back(subleading->eta());
+                antiKt10TruthSDSubleadingPhiValues.push_back(subleading->phi());
+                antiKt10TruthSDSubleadingMassValues.push_back(subleading->m() / 1000.0);
+            }
 
             // Temporary vector to hold (index, Et) for sorting
             std::vector<std::pair<size_t, double>> truthWZJetEtWithIndex;
@@ -2371,9 +2760,21 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             recoAntiKt10UFOCSSKJets->Fill();
             leadingRecoAntiKt10UFOCSSKJets->Fill();
             subleadingRecoAntiKt10UFOCSSKJets->Fill();
+            recoAntiKt10UFOCSSKSoftDropJets->Fill();
+            leadingRecoAntiKt10UFOCSSKSoftDropJets->Fill();
+            subleadingRecoAntiKt10UFOCSSKSoftDropJets->Fill();
+            antiKt10TruthJetsTree->Fill();
+            leadingAntiKt10TruthJetsTree->Fill();
+            subleadingAntiKt10TruthJetsTree->Fill();
+            antiKt10TruthSoftDropJetsTree->Fill();
+            leadingAntiKt10TruthSoftDropJetsTree->Fill();
+            subleadingAntiKt10TruthSoftDropJetsTree->Fill();
             truthAntiKt4TruthDressedWZJets->Fill();
             leadingTruthAntiKt4TruthDressedWZJets->Fill();
             subleadingTruthAntiKt4TruthDressedWZJets->Fill();
+            gFexMETTree->Fill();
+            metTruthTree->Fill();
+            metCoreAntiKt4EMTopoTree->Fill();
         } // loop through events
         std::cout << "for jz: " << jzSlice << " these many events passed: " << passedEventsCounter << " out of: " << event.getEntries() << "\n";
         std::cout << " these many events skipped due to empty truth container: " << skippedEventsEmptyTruth << " these many events skipped due to pt hard < pt pileup: " << skippedEventsHSTP << "\n";
@@ -2427,16 +2828,28 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     recoAntiKt10UFOCSSKJets->Write("", TObject::kOverwrite);
     leadingRecoAntiKt10UFOCSSKJets->Write("", TObject::kOverwrite);
     subleadingRecoAntiKt10UFOCSSKJets->Write("", TObject::kOverwrite);
+    recoAntiKt10UFOCSSKSoftDropJets->Write("", TObject::kOverwrite);
+    leadingRecoAntiKt10UFOCSSKSoftDropJets->Write("", TObject::kOverwrite);
+    subleadingRecoAntiKt10UFOCSSKSoftDropJets->Write("", TObject::kOverwrite);
+    antiKt10TruthJetsTree->Write("", TObject::kOverwrite);
+    leadingAntiKt10TruthJetsTree->Write("", TObject::kOverwrite);
+    subleadingAntiKt10TruthJetsTree->Write("", TObject::kOverwrite);
+    antiKt10TruthSoftDropJetsTree->Write("", TObject::kOverwrite);
+    leadingAntiKt10TruthSoftDropJetsTree->Write("", TObject::kOverwrite);
+    subleadingAntiKt10TruthSoftDropJetsTree->Write("", TObject::kOverwrite);
     truthAntiKt4TruthDressedWZJets->Write("", TObject::kOverwrite);
     leadingTruthAntiKt4TruthDressedWZJets->Write("", TObject::kOverwrite);
     subleadingTruthAntiKt4TruthDressedWZJets->Write("", TObject::kOverwrite);
+    gFexMETTree->Write("", TObject::kOverwrite);
+    metTruthTree->Write("", TObject::kOverwrite);
+    metCoreAntiKt4EMTopoTree->Write("", TObject::kOverwrite);
     outputFile->Close();
     std::cout << "Processing complete." << endl;
     //std::cout << "higgsPassEventCounter: " << higgsPassEventCounter << "\n";
 } // ntupler function
 
 // processes all jzSlices + signal
-void LRJNTupler(){
+void HERNTupler(){
     //gSystem->Load("libxAODRootAccess");
     //xAOD::Init().ignore();
     
@@ -2457,8 +2870,8 @@ void LRJNTupler(){
             etaAltRange = 98;
         }
         //nTupler(true, "VBF_hh_bbbb", etaAltRange, algoVersion); // call for signal (hh->4b VBF)
-        nTupler(true, "ggF_hh_bbbb", etaAltRange, algoVersion); // call for signal (hh->4b ggF)
-        //nTupler(true, "ZvvHbb", etaAltRange, algoVersion); // call for signal Z -> nu nu H -> bb
+        //nTupler(true, "ggF_hh_bbbb", etaAltRange, algoVersion); // call for signal (hh->4b ggF)
+        nTupler(true, "ZvvHbb", etaAltRange, algoVersion); // call for signal Z -> nu nu H -> bb
         //nTupler(true, "ttbar_had", etaAltRange, algoVersion); // call for sigal ttbar fully hadronic decays
         //nTupler(true, "Zprime_ttbar", etaAltRange, algoVersion); // call for signal Zprime -> ttbar (hadronic), flat in pT
     }

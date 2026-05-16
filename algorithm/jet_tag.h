@@ -1,7 +1,7 @@
 #ifndef _JET_TAG_H_
 #define _JET_TAG_H_
-#include "/home/larsonma/LargeRadiusJets/algorithm/helperFunctions.h"
-#include "/home/larsonma/LargeRadiusJets/algorithm/constants.h"
+#include "/home/larsonma/GEPHadronicEventReconstruction/algorithm/helperFunctions.h"
+#include "/home/larsonma/GEPHadronicEventReconstruction/algorithm/constants.h"
 #include <iostream>
 #include <array>
 #include <bitset>

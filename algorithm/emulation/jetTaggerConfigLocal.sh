@@ -11,17 +11,19 @@ set -euo pipefail
 #rMergeCuts=(0.001 2) 
 algoVersions=(3)
 #rMergeCuts=(1.75 1.875 2.0) 
-rMergeCuts=(2.0) 
+rMergeCuts=(2) 
 #rMergeCuts=(1.25 1.75)
 rSquaredCuts=(1.21)
 nIOs=(128)
 nSeeds=(2)
-signals=(true)
+signals=(true false)
 puSuppression=(true)
 #vbfBools=(true false)
 #signalStrings=("Zprime_ttbar")
 #signalStrings=("VBF_hh_bbbb_cvv0" "VBF_hh_bbbb_cvv1" "ggF_hh_bbbb" "ZvvHbb" "ttbar_had" "Zprime_ttbar")
 signalStrings=("ggF_hh_bbbb")
+#signalStrings=("VBF_hh_bbbb_cvv1")
+
 #signalStrings=("ttbar_had")
 #signalStrings=("ggF_hh_bbbb")
 
@@ -34,19 +36,19 @@ condor=false
 
 # ---- new algorithm behaviour parameters ----
 enableEtWeightedMidpoints=(false)
-minEtSeedPosOptimizations=(false)
+minEtSeedPosOptimizations=(false true)
 minEtSeedPosOptimizationCuts=(25.0)
 
 # ---- paths ----
-inputLUTFilePath="/home/larsonma/LargeRadiusJets/algorithm/emulation/LUT_Constants_Generation/LUTs/"
-constants_base="/home/larsonma/LargeRadiusJets/algorithm/emulation/LUT_Constants_Generation/constants/"
-dest_dir="/home/larsonma/LargeRadiusJets/algorithm/emulation/UsedConstantsLUTs/"
-src_cc="/home/larsonma/LargeRadiusJets/algorithm/emulation/jetTaggerEmulation.cc"
+inputLUTFilePath="/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/LUTs/"
+constants_base="/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/constants/"
+dest_dir="/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/UsedConstantsLUTs/"
+src_cc="/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/jetTaggerEmulation.cc"
 
 # helper function to generate correct LUT names for each algorithm configuration
 make_input_LUT_file_name() {
   local rMerge="$1" r2="$2" type="$3"
-  local base="${4:-/home/larsonma/LargeRadiusJets/algorithm/emulation/LUT_Constants_Generation/LUTs/}"
+  local base="${4:-/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/LUTs/}"
   # match C++: setprecision(4) for rMerge, setprecision(3) for R2 (no std::fixed)
   local rMergeFmt r2Fmt
   rMergeFmt=$(printf "%.4g" "$rMerge")
@@ -57,7 +59,7 @@ make_input_LUT_file_name() {
 # helper function to generate correct constants file names for each algorithm configuration
 make_input_constants_file_name() {
   local rMerge="$1" nIOs="$2" nSeeds="$3" r2="$4" vers="$5"
-  local base="${6:-/home/larsonma/LargeRadiusJets/algorithm/emulation/LUT_Constants_Generation/constants/}"
+  local base="${6:-/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/constants/}"
   # Match C++ setprecision behavior (no fixed): 4 sig figs for rMerge, 3 for R2
   local rMergeFmt r2Fmt
   rMergeFmt=$(printf "%.4g" "$rMerge")

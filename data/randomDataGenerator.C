@@ -53,7 +53,7 @@ void write_file(const char* path, int nEvents, int nPackets) {
 }
 
 int main() {
-    write_file("/home/larsonma/LargeRadiusJets/data/RandomMemPrints/seeds/random_seeds.dat",  N_EVENTS, N_SEEDS);
-    write_file("/home/larsonma/LargeRadiusJets/data/RandomMemPrints/inputObjects/random_inputObjects.dat", N_EVENTS, N_INPUTS);
+    write_file("/home/larsonma/GEPHadronicEventReconstruction/data/RandomMemPrints/seeds/random_seeds.dat",  N_EVENTS, N_SEEDS);
+    write_file("/home/larsonma/GEPHadronicEventReconstruction/data/RandomMemPrints/inputObjects/random_inputObjects.dat", N_EVENTS, N_INPUTS);
     return 0;
 }

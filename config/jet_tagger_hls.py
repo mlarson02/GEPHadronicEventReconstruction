@@ -44,23 +44,23 @@ cfg.set_value(section='hls', key='syn.top', value='jet_tag')
 # Add design files
 cfg.set_values(section='hls', key='syn.file', values=[
     
-    #'/home/larsonma/LargeRadiusJets/algorithm/jet_tagger_top.h',
-    #'/home/larsonma/LargeRadiusJets/algorithm/jet_tagger_top.cc',
-    '/home/larsonma/LargeRadiusJets/algorithm/jet_tag.h',
-    '/home/larsonma/LargeRadiusJets/algorithm/jet_tag.cc',
-    '/home/larsonma/LargeRadiusJets/algorithm/helperFunctions.h',
-    '/home/larsonma/LargeRadiusJets/data/LUTs/deltaR2Cut.h',
-    '/home/larsonma/LargeRadiusJets/algorithm/constants.h'
+    #'/home/larsonma/GEPHadronicEventReconstruction/algorithm/jet_tagger_top.h',
+    #'/home/larsonma/GEPHadronicEventReconstruction/algorithm/jet_tagger_top.cc',
+    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/jet_tag.h',
+    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/jet_tag.cc',
+    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/helperFunctions.h',
+    '/home/larsonma/GEPHadronicEventReconstruction/data/LUTs/deltaR2Cut.h',
+    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/constants.h'
 ])
 
 # Add testbench and data files
 cfg.set_values(section='hls', key='tb.file', values=[
-    '/home/larsonma/LargeRadiusJets/algorithm/testbench/jet_tagger_testbench.cpp',
-    '/home/larsonma/LargeRadiusJets/algorithm/fileRead.h',
-    '/home/larsonma/LargeRadiusJets/data/MemPrints/gFex/mc21_14TeV_hh_bbbb_vbf_novhh_gfex_smallrj.dat',
-    '/home/larsonma/LargeRadiusJets/data/MemPrints/gFex/mc21_14TeV_jj_JZ3_gfex_smallrj.dat',
-    '/home/larsonma/LargeRadiusJets/data/MemPrints/CaloTopo_422/mc21_14TeV_hh_bbbb_vbf_novhh_topo422.dat',
-    '/home/larsonma/LargeRadiusJets/data/MemPrints/CaloTopo_422/mc21_14TeV_jj_JZ3_topo422.dat'
+    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/testbench/jet_tagger_testbench.cpp',
+    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/fileRead.h',
+    '/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/gFex/mc21_14TeV_hh_bbbb_vbf_novhh_gfex_smallrj.dat',
+    '/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/gFex/mc21_14TeV_jj_JZ3_gfex_smallrj.dat',
+    '/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/CaloTopo_422/mc21_14TeV_hh_bbbb_vbf_novhh_topo422.dat',
+    '/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/CaloTopo_422/mc21_14TeV_jj_JZ3_topo422.dat'
 ])
 
 # Manually strip unwanted settings and add cosim waveform config

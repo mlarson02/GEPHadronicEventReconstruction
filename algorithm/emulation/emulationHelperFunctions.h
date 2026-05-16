@@ -150,7 +150,7 @@ unsigned int calculate_lut_max_size(double cut,
 
 // Returns input NTuple file name given parameters
 std::string makeInputFileName(bool signalBool, std::string signalString,
-                              std::string inputRootFilePath = "/home/larsonma/LargeRadiusJets/data/inputNTuples/") {
+                              std::string inputRootFilePath = "/home/larsonma/GEPHadronicEventReconstruction/data/inputNTuples/") {
     std::ostringstream ss;
     
     if (signalBool) {
@@ -181,7 +181,7 @@ std::string makeOutputFileName(double rMergeCut,
                                bool enableEtWeightedMidpoint = false,
                                bool minEtSeedPosOptimization = true,
                                double minEtSeedPosOptimizationCut = 20.0,
-                               std::string outputRootFilePath = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_MassTestNumIOs/") {
+                               std::string outputRootFilePath = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_NewJetTypes/") {
     gSystem->mkdir(outputRootFilePath.c_str()); 
     std::string usePUSuppress;
     if(useSKObjects){
@@ -225,7 +225,7 @@ std::string makeOutputTextFileName(double rMergeCut,
                                std::string seedObjectType,
                                bool useSKObjects,
                                unsigned int algoVersion,
-                               std::string outputTextFilePath = "/home/larsonma/LargeRadiusJets/data/MemPrintsEmulation/") {
+                               std::string outputTextFilePath = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsEmulation/") {
     std::string usePUSuppress;
     if(useSKObjects){
         usePUSuppress = "SK";
@@ -256,7 +256,7 @@ std::string makeOutputTextFileName(double rMergeCut,
 std::string makeInputLUTFileName(double rMergeCut,
                                  double RSquaredCut,
                                  std::string LUTType,
-                                 std::string inputLUTFilePath = "/home/larsonma/LargeRadiusJets/algorithm/emulation/LUT_Constants_Generation/LUTs/") {
+                                 std::string inputLUTFilePath = "/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/LUTs/") {
     std::ostringstream ss;
     ss << inputLUTFilePath << "LUT_" << LUTType << "_rMerge_" << std::setprecision(4) << rMergeCut << "_"
        << "R2_" << std::setprecision(3) << RSquaredCut << ".h";
@@ -270,7 +270,7 @@ std::string makeInputConstantsFileName(double rMergeCut,
                                        unsigned int nSeeds,
                                        double RSquaredCut,
                                        unsigned int algoVersion,
-                                       std::string constantsFilePath = "/home/larsonma/LargeRadiusJets/algorithm/emulation/LUT_Constants_Generation/constants/") {
+                                       std::string constantsFilePath = "/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/constants/") {
     std::ostringstream ss;
     ss << constantsFilePath << "constants_rMerge_" << std::setprecision(4) << rMergeCut << "_"
        << "R2_" << std::setprecision(3) << RSquaredCut << "_IOs_" << NIOs << "_"

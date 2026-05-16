@@ -246,7 +246,7 @@ void callNTupleMaker(const bool signalBool, const bool vbfBool = true) {
     std::string fileName;
 
     
-    fileName = "/home/larsonma/LargeRadiusJets/data/MemPrintsAOD/CaloTopo_422/";
+    fileName = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsAOD/CaloTopo_422/";
     if (signalBool){
         if (vbfBool) fileName += "mc21_14TeV_hh_bbbb_vbf_novhh_topo422.dat";
         else fileName += "mc21_14TeV_HHbbbb_HLLHC_topo422.dat";
@@ -270,7 +270,7 @@ void callNTupleMaker(const bool signalBool, const bool vbfBool = true) {
     else fileName += "mc21_14TeV_jj_JZ3_calotopotowers.dat";
     fileNames.push_back(fileName);
 
-    fileName = "/home/larsonma/LargeRadiusJets/data/MemPrintsAOD/gFex/";
+    fileName = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsAOD/gFex/";
     if (signalBool){
         if (vbfBool) fileName += "mc21_14TeV_hh_bbbb_vbf_novhh_gfex_smallrj.dat";
         else fileName += "mc21_14TeV_HHbbbb_HLLHC_gfex_smallrj.dat";
@@ -278,7 +278,7 @@ void callNTupleMaker(const bool signalBool, const bool vbfBool = true) {
     else fileName += "mc21_14TeV_jj_JZ3_gfex_smallrj.dat";
     fileNames.push_back(fileName);
 
-    fileName = "/home/larsonma/LargeRadiusJets/data/MemPrintsAOD/jFex/";
+    fileName = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsAOD/jFex/";
     if (signalBool){
         if (vbfBool) fileName += "mc21_14TeV_hh_bbbb_vbf_novhh_jfex_smallrj.dat";
         else fileName += "mc21_14TeV_HHbbbb_HLLHC_jfex_smallrj.dat";

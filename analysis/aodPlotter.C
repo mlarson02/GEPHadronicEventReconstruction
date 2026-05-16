@@ -78,11 +78,11 @@ void process_xaod() {
         if (signalBool) {
             fileDir = lxplusBool ?
                 "/data/larsonma/LargeRadiusJets/datasets/Signal_HHbbbb/mc21_14TeV.537540.MGPy8EG_hh_bbbb_vbf_novhh_5fs_l1cvv1cv1.recon.AOD.e8557_s4422_r16130" :
-                "/home/larsonma/LargeRadiusJets/datasets/Signal_HHbbbb/mc21_14TeV.537540.MGPy8EG_hh_bbbb_vbf_novhh_5fs_l1cvv1cv1.recon.AOD.e8557_s4422_r16130";
+                "/home/larsonma/GEPHadronicEventReconstruction/datasets/Signal_HHbbbb/mc21_14TeV.537540.MGPy8EG_hh_bbbb_vbf_novhh_5fs_l1cvv1cv1.recon.AOD.e8557_s4422_r16130";
         } else {
             fileDir = lxplusBool ?
                 "/data/larsonma/LargeRadiusJets/datasets/Background_jj_JZ3/mc21_14TeV.537540.MGPy8EG_hh_bbbb_vbf_novhh_5fs_l1cvv1cv1.recon.AOD.e8557_s4422_r16130" :
-                "/home/larsonma/LargeRadiusJets/datasets/Background_jj_JZ3/mc21_14TeV.537540.MGPy8EG_hh_bbbb_vbf_novhh_5fs_l1cvv1cv1.recon.AOD.e8557_s4422_r16130";
+                "/home/larsonma/GEPHadronicEventReconstruction/datasets/Background_jj_JZ3/mc21_14TeV.537540.MGPy8EG_hh_bbbb_vbf_novhh_5fs_l1cvv1cv1.recon.AOD.e8557_s4422_r16130";
         }
         }
     

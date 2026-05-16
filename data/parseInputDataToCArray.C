@@ -38,7 +38,7 @@ static inline std::string find_last_hex_token(const std::string& line) {
 
 int main() {
     const bool physicsOrRandom = false;
-    const char* INPUT_PATH  = (physicsOrRandom) ? "/home/larsonma/LargeRadiusJets/data/MemPrints/GEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_gepbasicclusters.dat" : "/home/larsonma/LargeRadiusJets/data/RandomMemPrints/inputObjects/random_inputObjects.dat";
+    const char* INPUT_PATH  = (physicsOrRandom) ? "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/GEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_gepbasicclusters.dat" : "/home/larsonma/GEPHadronicEventReconstruction/data/RandomMemPrints/inputObjects/random_inputObjects.dat";
     std::ifstream in(INPUT_PATH);
     if (!in) {
         std::cerr << "[ERROR] Cannot open input: " << INPUT_PATH << "\n";

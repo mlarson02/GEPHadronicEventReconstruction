@@ -1182,6 +1182,104 @@ double FindThrForRate(const TH1* hRateVsThr, double targetHz) {
 }
 
 
+// -----------------------------------------------------------------------------
+// MakeUniqueRateVsEff
+//
+// Computes a "unique" rate-vs-efficiency curve for a leading LRJ E_T trigger.
+// An event contributes to the UNIQUE rate only if it passes the LRJ threshold
+// AND fails all three baseline triggers simultaneously:
+//   - leading WTA cone jet E_T  < thr_singleJet  (single-jet baseline)
+//   - 4th leading cone jet E_T  < thr_multiJet   (multi-jet baseline)
+//   - H_T                       < thr_HT          (H_T baseline)
+//
+// Inputs (per-event flat vectors, one entry per event):
+//   back_leadLRJEt  – leading JetTagger LRJ E_T [GeV]
+//   back_leadConeEt – leading WTA cone jet E_T [GeV]
+//   back_4thConeEt  – 4th leading WTA cone jet E_T [GeV] (0 if <4 jets)
+//   back_HT         – H_T sum [GeV]
+//   back_weight     – event weight [Hz equivalent, as used for rate]
+//   sig_*           – same quantities for signal events (unweighted)
+//   scanBins        – bin edges for the LRJ E_T threshold scan
+//   thr_singleJet, thr_multiJet, thr_HT – baseline thresholds [GeV]
+// -----------------------------------------------------------------------------
+RateEffOut MakeUniqueRateVsEff(
+    const std::vector<double>& back_leadLRJEt,
+    const std::vector<double>& back_leadConeEt,
+    const std::vector<double>& back_4thConeEt,
+    const std::vector<double>& back_HT,
+    const std::vector<double>& back_weight,
+    const std::vector<double>& sig_leadLRJEt,
+    const std::vector<double>& sig_leadConeEt,
+    const std::vector<double>& sig_4thConeEt,
+    const std::vector<double>& sig_HT,
+    const std::vector<double>& scanBins,
+    double thr_singleJet,
+    double thr_multiJet,
+    double thr_HT)
+{
+    const int nb = (int)scanBins.size() - 1;
+
+    // Build signal and background histograms filtered to events that fail all baselines
+    TH1D* hSigUnique = new TH1D("hSigUnique_lrj", "Unique signal;Leading LRJ E_{T} [GeV];Events",
+                                 nb, scanBins.data());
+    TH1D* hBkgUnique = new TH1D("hBkgUnique_lrj", "Unique background;Leading LRJ E_{T} [GeV];Events",
+                                 nb, scanBins.data());
+    hSigUnique->SetDirectory(nullptr);
+    hBkgUnique->SetDirectory(nullptr);
+
+    // "Fails all baselines" predicate
+    auto failsAllBaselines = [&](double leadCone, double fourthCone, double ht) {
+        return (leadCone < thr_singleJet) && (fourthCone < thr_multiJet) && (ht < thr_HT);
+    };
+
+    for (size_t i = 0; i < back_leadLRJEt.size(); ++i) {
+        if (failsAllBaselines(back_leadConeEt[i], back_4thConeEt[i], back_HT[i]))
+            hBkgUnique->Fill(back_leadLRJEt[i], back_weight[i]);
+    }
+    for (size_t i = 0; i < sig_leadLRJEt.size(); ++i) {
+        if (failsAllBaselines(sig_leadConeEt[i], sig_4thConeEt[i], sig_HT[i]))
+            hSigUnique->Fill(sig_leadLRJEt[i]);
+    }
+
+    // Cumulative from high threshold down → passing rate/eff for threshold scan
+    auto* hSigCum = hSigUnique->GetCumulative(false, "hSigUnique_cumul");
+    auto* hBkgCum = hBkgUnique->GetCumulative(false, "hBkgUnique_cumul");
+
+    // Total signal events (no baseline filter) for denominator — efficiency is
+    // "fraction of all signal events uniquely selected by the LRJ trigger"
+    const double totalSig = (double)sig_leadLRJEt.size();
+
+    auto* hEff = (TH1*)hSigCum->Clone("hUniqueEff_vsThr");
+    hEff->SetTitle(";Leading JetTagger LRJ E_{T} threshold [GeV];Unique Signal Efficiency");
+    for (int ib = 1; ib <= nb; ++ib) {
+        double eff = (totalSig > 0 ? hSigCum->GetBinContent(ib) / totalSig : 0.0);
+        hEff->SetBinContent(ib, std::clamp(eff, 0.0, 1.0));
+        hEff->SetBinError(ib, 0.0);
+    }
+
+    auto* hRate = (TH1*)hBkgCum->Clone("hUniqueRate_vsThr");
+    hRate->SetTitle(";Leading JetTagger LRJ E_{T} threshold [GeV];Unique Background Rate [Hz]");
+
+    // Use TGraph (not TGraphErrors): on a log-y axis ROOT silently drops any
+    // TGraphErrors point whose lower error bar reaches ≤ 0, which would hide the
+    // low-rate, low-efficiency tail where MC statistics are sparse.
+    auto* g = new TGraph(nb);
+    g->SetName("gUniqueRate_vsEff");
+    g->SetTitle("Unique Trigger Rate vs Signal Efficiency;"
+                "Signal (hh#rightarrow4b) Efficiency;Unique Background Rate [Hz]");
+    for (int ib = 1; ib <= nb; ++ib) {
+        g->SetPoint(ib - 1, hEff->GetBinContent(ib), hRate->GetBinContent(ib));
+    }
+
+    delete hSigUnique;
+    delete hBkgUnique;
+    delete hSigCum;
+    delete hBkgCum;
+
+    return {hEff, hRate, g};
+}
+
+
 // ---------- Draw ONE event to a canvas and save ----------
 void DrawEventDisplay(const EventDisplayInputs& ev,
                       TCanvas& c,
@@ -1899,6 +1997,7 @@ struct GlobalRateEffOut5 {
   // thresholds at best point
   //  (0) 0/1-subjet selection, leading Et scan
   double bestEtCut_0_lead;
+  double bestMassCut_0_lead = 0.0; // non-zero only in Cat0Mass variant
   //  (1) 0/1-subjet selection, subleading Et scan
   double bestEtCut_0_sub;
   //  (2) >=2 lead subjets, leading Et vs mass
@@ -1941,6 +2040,7 @@ namespace {
 
     // thresholds
     double etCut0_lead;
+    double massCut0_lead = 0.0; // non-zero only in Cat0Mass variant
     double etCut0_sub;
 
     double etCut_lead2;
@@ -2583,6 +2683,225 @@ GlobalRateEffOut5 MakeCombinedRateVsEff_AllFive_NSubjetiness(
       out.bestEtCut_3D_sub    = gp.etCut_3D_sub;
       out.bestMassCut_3D_lead = gp.massCut_3D_lead;
       out.bestMassCut_3D_sub  = gp.massCut_3D_sub;
+
+      for (int c = 0; c < 5; ++c) {
+        out.bestEff_cat[c]  = gp.eff_cat[c];
+        out.bestEff_tot[c]  = gp.eff_tot[c];
+        out.bestRate_cat[c] = gp.rate_cat[c];
+      }
+    }
+  }
+
+  return out;
+}
+
+// Variant of MakeCombinedRateVsEff_AllFive_NSubjetiness that also applies a
+// 2D (ET + constituent mass) scan to category 0 (1 cone subjet on both LRJs).
+GlobalRateEffOut5 MakeCombinedRateVsEff_AllFive_NSubjetiness_Cat0Mass(
+    const RateEff2DOut& out2D_cat0,  // 2D: leading Et vs constituent mass (cat0: 1 lead & 1 subl subjet)
+    const RateEffOut&   out1_subEt,  // 1D: subleading Et (cat1: 0/1 subjets) — disabled in combination
+    const RateEff2DOut& out2D_cat2,  // 2D: leading Et vs mass  (cat2: lead>=2, subl<2)
+    const RateEff2DOut& out2D_cat3,  // 2D: subleading Et vs mass (cat3: subl>=2, lead<2)
+    const RateEff2DOut& out2D_cat4,  // 2D: subleading Et vs avg mass (cat4: both>=2)
+    TH2* sig2D_cat0,                 // signal hist for cat0 (Et, constituent mass)
+    TH1* sig1_subEt,                 // signal hist for cat1 (disabled)
+    TH2* sig2D_cat2,                 // signal hist for cat2 (Et, mass)
+    TH2* sig2D_cat3,                 // signal hist for cat3 (Et, mass)
+    TH2* sig2D_cat4,                 // signal hist for cat4 (Et, avg mass)
+    double maxRateHz,
+    double maxRateHzPrint)
+{
+  const double minRateHz = 500.0;
+
+  if (!sig2D_cat0 || !sig1_subEt || !sig2D_cat2 || !sig2D_cat3 || !sig2D_cat4)
+    throw std::runtime_error("MakeCombinedRateVsEff_AllFive_NSubjetiness_Cat0Mass: null signal hist");
+
+  if (!out2D_cat0.hEff_vsThr_vsR || !out2D_cat0.hRate_vsThr_vsR ||
+      !out1_subEt.hEff_vsThr      || !out1_subEt.hRate_vsThr      ||
+      !out2D_cat2.hEff_vsThr_vsR  || !out2D_cat2.hRate_vsThr_vsR  ||
+      !out2D_cat3.hEff_vsThr_vsR  || !out2D_cat3.hRate_vsThr_vsR  ||
+      !out2D_cat4.hEff_vsThr_vsR  || !out2D_cat4.hRate_vsThr_vsR)
+    throw std::runtime_error("MakeCombinedRateVsEff_AllFive_NSubjetiness_Cat0Mass: null RateEff hist");
+
+  // --- Signal fractions -------------------------------------------------------
+  const int nb0x = out2D_cat0.hEff_vsThr_vsR->GetNbinsX();
+  const int nb0y = out2D_cat0.hEff_vsThr_vsR->GetNbinsY();
+  const int nb1  = out1_subEt.hEff_vsThr->GetNbinsX();
+  const int nb2x = out2D_cat2.hEff_vsThr_vsR->GetNbinsX();
+  const int nb2y = out2D_cat2.hEff_vsThr_vsR->GetNbinsY();
+  const int nb3x = out2D_cat3.hEff_vsThr_vsR->GetNbinsX();
+  const int nb3y = out2D_cat3.hEff_vsThr_vsR->GetNbinsY();
+  const int nb4x = out2D_cat4.hEff_vsThr_vsR->GetNbinsX();
+  const int nb4y = out2D_cat4.hEff_vsThr_vsR->GetNbinsY();
+
+  const double nSig0 = sig2D_cat0->Integral(1, nb0x, 1, nb0y);
+  const double nSig1 = sig1_subEt ->Integral(1, nb1);
+  const double nSig2 = sig2D_cat2 ->Integral(1, nb2x, 1, nb2y);
+  const double nSig3 = sig2D_cat3 ->Integral(1, nb3x, 1, nb3y);
+  const double nSig4 = sig2D_cat4 ->Integral(1, nb4x, 1, nb4y);
+  const double totalSig = nSig0 + nSig1 + nSig2 + nSig3 + nSig4;
+
+  std::cout << "[Cat0Mass] nSig cat0,1,2,3,4: "
+            << nSig0 << " , " << nSig1 << " , "
+            << nSig2 << " , " << nSig3 << " , " << nSig4 << "\n"
+            << "[Cat0Mass] totalSig: " << totalSig << "\n";
+
+  if (totalSig <= 0.0)
+    throw std::runtime_error("MakeCombinedRateVsEff_AllFive_NSubjetiness_Cat0Mass: totalSig <= 0");
+
+  const double frac0 = nSig0 / totalSig;
+  const double frac1 = nSig1 / totalSig;
+  const double frac2 = nSig2 / totalSig;
+  const double frac3 = nSig3 / totalSig;
+  const double frac4 = nSig4 / totalSig;
+
+  // --- Build per-category frontiers -------------------------------------------
+  auto front0_raw = BuildFrontier2D(out2D_cat0, maxRateHz); // 2D for cat0
+  auto front1_raw = BuildFrontier1D(out1_subEt, maxRateHz);
+  auto front2_raw = BuildFrontier2D(out2D_cat2, maxRateHz);
+  auto front3_raw = BuildFrontier2D(out2D_cat3, maxRateHz);
+  auto front4_raw = BuildFrontier2D(out2D_cat4, maxRateHz);
+
+  auto front0 = FilterFrontierByRate(front0_raw, minRateHz, maxRateHz);
+  auto front1 = FilterFrontierByRate(front1_raw, minRateHz, maxRateHz);
+  auto front2 = FilterFrontierByRate(front2_raw, minRateHz, maxRateHz);
+  auto front3 = FilterFrontierByRate(front3_raw, minRateHz, maxRateHz);
+  auto front4 = FilterFrontierByRate(front4_raw, minRateHz, maxRateHz);
+
+  std::cout << "[Cat0Mass] filtered (" << minRateHz << "–" << maxRateHz << " Hz) frontier sizes: "
+            << "cat0=" << front0.size() << ", cat1=" << front1.size()
+            << ", cat2=" << front2.size() << ", cat3=" << front3.size()
+            << ", cat4=" << front4.size() << "\n";
+
+  // Disable cat1 (same convention as original function)
+  front1.clear();
+  front1.push_back(Cat1DPoint{0.0, 0.0, 0.0, 0.0});
+
+  if (front0.empty()) front0.push_back(Cat2DPoint{0.0, 0.0, 0.0, 0.0, 0.0});
+  if (front2.empty()) front2.push_back(Cat2DPoint{0.0, 0.0, 0.0, 0.0, 0.0});
+  if (front3.empty()) front3.push_back(Cat2DPoint{0.0, 0.0, 0.0, 0.0, 0.0});
+  if (front4.empty()) front4.push_back(Cat2DPoint{0.0, 0.0, 0.0, 0.0, 0.0});
+
+  // --- Enumerate combinations -------------------------------------------------
+  std::vector<GlobalPoint> globalFrontier;
+
+  for (const auto& p0 : front0) {
+    const double eff0   = p0.eff_cat;
+    const double rate0  = p0.rate_cat;
+    const double err0   = p0.err_cat;
+    const double etCut0 = p0.thrEt;
+    const double mCut0  = p0.thrMass;
+
+    for (const auto& p1 : front1) {
+      const double eff1   = p1.eff_cat;
+      const double rate1  = p1.rate_cat;
+      const double err1   = p1.err_cat;
+      const double etCut1 = p1.thrEt;
+
+      const double rate01 = rate0 + rate1;
+      if (rate01 > maxRateHz) break;
+
+      for (const auto& p2 : front2) {
+        const double eff2   = p2.eff_cat;
+        const double rate2  = p2.rate_cat;
+        const double err2   = p2.err_cat;
+        const double etCut2 = p2.thrEt;
+        const double mCut2  = p2.thrMass;
+
+        const double rate012 = rate01 + rate2;
+        if (rate012 > maxRateHz) break;
+
+        for (const auto& p3 : front3) {
+          const double eff3   = p3.eff_cat;
+          const double rate3  = p3.rate_cat;
+          const double err3   = p3.err_cat;
+          const double etCut3 = p3.thrEt;
+          const double mCut3  = p3.thrMass;
+
+          const double rate0123 = rate012 + rate3;
+          if (rate0123 > maxRateHz) break;
+
+          for (const auto& p4 : front4) {
+            const double eff4   = p4.eff_cat;
+            const double rate4  = p4.rate_cat;
+            const double err4   = p4.err_cat;
+            const double etCut4 = p4.thrEt;
+            const double mCut4  = p4.thrMass;
+
+            const double rateTot = rate0123 + rate4;
+            if (rateTot > maxRateHz) break;
+
+            const double eff0_tot = eff0 * frac0;
+            const double eff1_tot = eff1 * frac1;
+            const double eff2_tot = eff2 * frac2;
+            const double eff3_tot = eff3 * frac3;
+            const double eff4_tot = eff4 * frac4;
+
+            const double effTot = eff0_tot + eff1_tot + eff2_tot + eff3_tot + eff4_tot;
+            const double errTot = std::sqrt(err0*err0 + err1*err1 +
+                                            err2*err2 + err3*err3 + err4*err4);
+
+            GlobalPoint gp;
+            gp.eff = effTot;
+
+            gp.eff_cat[0] = eff0; gp.eff_cat[1] = eff1;
+            gp.eff_cat[2] = eff2; gp.eff_cat[3] = eff3; gp.eff_cat[4] = eff4;
+
+            gp.eff_tot[0] = eff0_tot; gp.eff_tot[1] = eff1_tot;
+            gp.eff_tot[2] = eff2_tot; gp.eff_tot[3] = eff3_tot; gp.eff_tot[4] = eff4_tot;
+
+            gp.rate        = rateTot;
+            gp.rate_cat[0] = rate0; gp.rate_cat[1] = rate1;
+            gp.rate_cat[2] = rate2; gp.rate_cat[3] = rate3; gp.rate_cat[4] = rate4;
+
+            gp.rateErr = errTot;
+
+            gp.etCut0_lead   = etCut0; gp.massCut0_lead = mCut0;
+            gp.etCut0_sub    = etCut1;
+            gp.etCut_lead2   = etCut2; gp.massCut_lead2   = mCut2;
+            gp.etCut_sub2    = etCut3; gp.massCut_sub2    = mCut3;
+            gp.etCut_3D_sub  = etCut4; gp.massCut_3D_lead = mCut4;
+
+            UpdateGlobalFrontier(globalFrontier, gp);
+          }
+        }
+      }
+    }
+  }
+
+  std::cout << "[Cat0Mass] global frontier size: " << globalFrontier.size() << "\n";
+
+  // --- Build output -----------------------------------------------------------
+  auto* gCombined = new TGraphErrors(globalFrontier.size());
+  gCombined->SetName("gRate_vsEff_all5_cat0mass_frontier");
+  gCombined->SetTitle("Combined Trigger Rate vs Signal Efficiency (Cat0 ET+mass);"
+                      "Signal Efficiency;Total Estimated Background Rate [Hz]");
+
+  GlobalRateEffOut5 out{};
+  out.gRate_vsEff_combined    = gCombined;
+  out.fractionEventsPerCat[0] = frac0;
+  out.fractionEventsPerCat[1] = frac1;
+  out.fractionEventsPerCat[2] = frac2;
+  out.fractionEventsPerCat[3] = frac3;
+  out.fractionEventsPerCat[4] = frac4;
+
+  for (size_t i = 0; i < globalFrontier.size(); ++i) {
+    const auto& gp = globalFrontier[i];
+    gCombined->SetPoint(i, gp.eff, gp.rate);
+    gCombined->SetPointError(i, 0.0, gp.rateErr);
+
+    if (gp.rate > maxRateHzPrint) continue;
+
+    if (gp.eff > out.bestEff) {
+      out.bestEff  = gp.eff;
+      out.bestRate = gp.rate;
+
+      out.bestEtCut_0_lead   = gp.etCut0_lead;
+      out.bestMassCut_0_lead = gp.massCut0_lead;
+      out.bestEtCut_0_sub    = gp.etCut0_sub;
+      out.bestEtCut_lead2    = gp.etCut_lead2;  out.bestMassCut_lead2   = gp.massCut_lead2;
+      out.bestEtCut_sub2     = gp.etCut_sub2;   out.bestMassCut_sub2    = gp.massCut_sub2;
+      out.bestEtCut_3D_sub   = gp.etCut_3D_sub; out.bestMassCut_3D_lead = gp.massCut_3D_lead;
 
       for (int c = 0; c < 5; ++c) {
         out.bestEff_cat[c]  = gp.eff_cat[c];

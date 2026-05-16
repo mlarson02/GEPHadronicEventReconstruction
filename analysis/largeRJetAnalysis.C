@@ -8784,151 +8784,151 @@ void analyze_files(std::vector<std::string > backgroundFileNames, std::vector<st
 
 void callAnalyzer(unsigned int jzSlice = 3, bool overlayThreeFiles = false){
     std::vector<std::string > backgroundFilenames;
-    std::vector<std::string > signalFilenames = {/*"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p0sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p5sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p0sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p5sig_SeedPosRecalcWeighted.dat"*/
+    std::vector<std::string > signalFilenames = {/*"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p0sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p5sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p0sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p5sig_SeedPosRecalcWeighted.dat"*/
         
         
         
         
         
-                                                /*"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p5sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p5sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_0p001sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_1p5sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_2p5sig_SeedPosRecalcWeighted.dat",
-                                                 "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_3p5sig_SeedPosRecalcWeighted.dat"*/
+                                                /*"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p5sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p5sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_0p001sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_1p5sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_2p5sig_SeedPosRecalcWeighted.dat",
+                                                 "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_3p5sig_SeedPosRecalcWeighted.dat"*/
 
 
                                                 // Files without seedPosRecalc
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj64_0p001sig.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_0p001sig.dat"
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj64_0p001sig.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_0p001sig.dat"
                                                 // Files with seedPosRecalc
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig_SeedPosRecalcWeighted.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig_SeedPosRecalcWeighted.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p0sig_SeedPosRecalcWeighted.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p5sig_SeedPosRecalcWeighted.dat"
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig_SeedPosRecalcWeighted.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig_SeedPosRecalcWeighted.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p0sig_SeedPosRecalcWeighted.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p5sig_SeedPosRecalcWeighted.dat"
 
                                                 // Files with fixed seedPosRecalc
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig_SeedPosRecalcWeighted.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig_SeedPosRecalcWeighted.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p0sig_SeedPosRecalcWeighted.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p5sig_SeedPosRecalcWeighted.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p0sig_SeedPosRecalcWeighted.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p5sig_SeedPosRecalcWeighted.dat"
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p001sig_SeedPosRecalcWeighted.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig_SeedPosRecalcWeighted.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p0sig_SeedPosRecalcWeighted.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p5sig_SeedPosRecalcWeighted.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p0sig_SeedPosRecalcWeighted.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p5sig_SeedPosRecalcWeighted.dat"
 
 
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig.dat"
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p5sig.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p0sig.dat"
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig.dat"
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p5sig.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_3p0sig.dat"
                                                 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p01sig.dat",
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_1p5sig.dat",
-                                                // "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p81_maxObj128_2p0sig.dat",
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_2p5sig.dat",
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_3p5sig.dat",
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_4p5sig.dat"
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_1p5sig.dat"
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_0p01sig.dat",
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_1p5sig.dat",
+                                                // "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p81_maxObj128_2p0sig.dat",
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_2p5sig.dat",
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_3p5sig.dat",
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_4p5sig.dat"
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_1p5sig.dat"
                                                  ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p25sig.dat",
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig.dat",
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p75sig.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p0sig.dat"
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p25sig.dat",
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p5sig.dat",
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_1p75sig.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_2p0sig.dat"
 
 
 
-        //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p81_maxObj128_sig_noecut_ecutVal4.dat",
-                                                 //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_sig_noecut_ecutVal4.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p21_maxObj128_sig_noecut_ecutVal4.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexSeedCalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p81_maxObj128_sig_noecut_ecutVal4.dat"
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p81_maxObj256_sig_noecut_ecutVal4.dat",
-                                                // "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_sig_noecut_ecutVal4.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p21_maxObj256_sig_noecut_ecutVal4.dat",
-                                                //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj256_sig_noecut_ecutVal4.dat"
-        /*"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p21_maxObj128_sig_noecut_ecutVal4.dat",
-                                               "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj128_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p69_maxObj128_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p96_maxObj128_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p21_maxObj256_sig_noecut_ecutVal4.dat",
-                                               "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj256_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p69_maxObj256_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p96_maxObj256_sig_noecut_ecutVal4.dat"*/
+        //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p81_maxObj128_sig_noecut_ecutVal4.dat",
+                                                 //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_sig_noecut_ecutVal4.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p21_maxObj128_sig_noecut_ecutVal4.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexSeedCalc/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p81_maxObj128_sig_noecut_ecutVal4.dat"
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p81_maxObj256_sig_noecut_ecutVal4.dat",
+                                                // "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_sig_noecut_ecutVal4.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p21_maxObj256_sig_noecut_ecutVal4.dat",
+                                                //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj256_sig_noecut_ecutVal4.dat"
+        /*"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p21_maxObj128_sig_noecut_ecutVal4.dat",
+                                               "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj128_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p69_maxObj128_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p96_maxObj128_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p21_maxObj256_sig_noecut_ecutVal4.dat",
+                                               "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj256_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p69_maxObj256_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p96_maxObj256_sig_noecut_ecutVal4.dat"*/
                                                 
-                                                /*"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p64_maxObj128_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p64_maxObj128_sig_ecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj128_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_sig_ecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj512_sig_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj512_sig_noecut_ecutVal4.dat"*/
+                                                /*"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p64_maxObj128_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut0p64_maxObj128_sig_ecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj128_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj128_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_sig_ecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj256_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p0_maxObj512_sig_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_hh_bbbb_vbf_novhh_largeRnSeeds2_r2Cut1p44_maxObj512_sig_noecut_ecutVal4.dat"*/
                                                 };
-    if (jzSlice == 2) backgroundFilenames = {"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ2_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_JZ2_SeedPosRecalcWeighted.dat"};                                    
-    else if (jzSlice == 3) backgroundFilenames = {/*"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p0back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p5back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p0back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p5back_SeedPosRecalcWeighted.dat"*/
+    if (jzSlice == 2) backgroundFilenames = {"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ2_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_JZ2_SeedPosRecalcWeighted.dat"};                                    
+    else if (jzSlice == 3) backgroundFilenames = {/*"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p0back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p5back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p0back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p5back_SeedPosRecalcWeighted.dat"*/
         
         
         
         
-        /*"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p5back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p5back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_0p001back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_1p5back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_2p5back_SeedPosRecalcWeighted.dat",
-                                                     "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_3p5back_SeedPosRecalcWeighted.dat"*/
+        /*"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p5back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p5back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_0p001back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_1p5back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_2p5back_SeedPosRecalcWeighted.dat",
+                                                     "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcWeighted/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_3p5back_SeedPosRecalcWeighted.dat"*/
                                                     
                                                     
                                                      // Files without seedPosRecalc
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj64_0p001back.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_0p001back.dat"
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj64_0p001back.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_0p001back.dat"
 
                                                     // Files with seedPosRecalc
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_SeedPosRecalcWeighted.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back_SeedPosRecalcWeighted.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p0back_SeedPosRecalcWeighted.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p5back_SeedPosRecalcWeighted.dat"
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_SeedPosRecalcWeighted.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back_SeedPosRecalcWeighted.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p0back_SeedPosRecalcWeighted.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p5back_SeedPosRecalcWeighted.dat"
 
                                                     // Files with fixed seedPosRecalc
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_JZ3_SeedPosRecalcWeighted.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back_JZ3_SeedPosRecalcWeighted.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p0back_JZ3_SeedPosRecalcWeighted.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p5back_JZ3_SeedPosRecalcWeighted.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p0back_JZ3_SeedPosRecalcWeighted.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p5back_JZ3_SeedPosRecalcWeighted.dat"
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_JZ3_SeedPosRecalcWeighted.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back_JZ3_SeedPosRecalcWeighted.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p0back_JZ3_SeedPosRecalcWeighted.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p5back_JZ3_SeedPosRecalcWeighted.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p0back_JZ3_SeedPosRecalcWeighted.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalcFIXED/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p5back_JZ3_SeedPosRecalcWeighted.dat"
 
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back.dat"
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p5back.dat",
-                                                    //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p0back.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back.dat"
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p5back.dat",
+                                                    //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClusters/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_3p0back.dat",
          ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                                                        //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj128_1p5back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj256_1p5back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p01back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_1p5back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj128_2p0back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_2p5back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_3p5back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_4p5back.dat"
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_1p5back.dat"
+                                                        //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj128_1p5back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj256_1p5back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_0p01back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_1p5back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj128_2p0back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_2p5back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_3p5back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_4p5back.dat"
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsrMergeScan/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_1p5back.dat"
                                                       ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p25back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p75back.dat",
-                                                      //  "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p0back.dat"
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p25back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p5back.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_1p75back.dat",
+                                                      //  "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexWeightedSeedPosition/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_2p0back.dat"
 
 
 
@@ -8937,48 +8937,48 @@ void callAnalyzer(unsigned int jzSlice = 3, bool overlayThreeFiles = false){
 
 
 
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj128_back_noecut_ecutVal4.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_back_noecut_ecutVal4.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p21_maxObj128_back_noecut_ecutVal4.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsjFexSeedCalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj128_back_noecut_ecutVal4.dat"
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj256_back_noecut_ecutVal4.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_back_noecut_ecutVal4.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p21_maxObj256_back_noecut_ecutVal4.dat",
-                                                      //"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj256_back_noecut_ecutVal4.dat"
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj128_back_noecut_ecutVal4.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_back_noecut_ecutVal4.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p21_maxObj128_back_noecut_ecutVal4.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsjFexSeedCalc/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj128_back_noecut_ecutVal4.dat"
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p81_maxObj256_back_noecut_ecutVal4.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_back_noecut_ecutVal4.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p21_maxObj256_back_noecut_ecutVal4.dat",
+                                                      //"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj256_back_noecut_ecutVal4.dat"
         
         
         
-        /*"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p21_maxObj128_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj128_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p69_maxObj128_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p96_maxObj128_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p21_maxObj256_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj256_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p69_maxObj256_back_noecut_ecutVal4.dat",
-                                                "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p96_maxObj256_back_noecut_ecutVal4.dat"*/
-                                                    /*"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p64_maxObj128_back_noecut_ecutVal4.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p64_maxObj128_back_ecut_ecutVal4.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_back_noecut_ecutVal4.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj128_back_noecut_ecutVal4.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_back_ecut_ecutVal4.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_back_noecut_ecutVal4.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj512_back_noecut_ecutVal4.dat",
-                                                    "/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj512_back_noecut_ecutVal4.dat"*/
+        /*"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p21_maxObj128_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj128_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p69_maxObj128_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p96_maxObj128_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p21_maxObj256_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj256_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p69_maxObj256_back_noecut_ecutVal4.dat",
+                                                "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMergedjFexSeeds/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p96_maxObj256_back_noecut_ecutVal4.dat"*/
+                                                    /*"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p64_maxObj128_back_noecut_ecutVal4.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut0p64_maxObj128_back_ecut_ecutVal4.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj128_back_noecut_ecutVal4.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj128_back_noecut_ecutVal4.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_back_ecut_ecutVal4.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj256_back_noecut_ecutVal4.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p0_maxObj512_back_noecut_ecutVal4.dat",
+                                                    "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsNoSeedEnergyMerged/mc21_14TeV_jj_JZ3_largeRnSeeds2_r2Cut1p44_maxObj512_back_noecut_ecutVal4.dat"*/
                                                     };
-    else if (jzSlice == 4) backgroundFilenames = {"/home/larsonma/LargeRadiusJets/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ4_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_JZ4_SeedPosRecalcWeighted.dat"};
+    else if (jzSlice == 4) backgroundFilenames = {"/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/largeRJetsGEPBasicClustersSeedPosRecalc/mc21_14TeV_jj_JZ4_largeRnSeeds2_r2Cut1p0_maxObj128_0p001back_JZ4_SeedPosRecalcWeighted.dat"};
 
     //const std::string signalLargeRJetDataFileName = "/eos/home-m/mlarson/LargeRadiusJets/MemPrints/largeRJets/mc21_14TeV_hh_bbbb_vbf_novhh_largeR.dat";
     //const std::string backgroundLargeRJetDataFileName = "/eos/home-m/mlarson/LargeRadiusJets/MemPrints/largeRJets/mc21_14TeV_jj_JZ3_largeR.dat";
     constexpr bool vbfBool = true;
     std::string signalRootFileName;
-    if (vbfBool) signalRootFileName = "/home/larsonma/LargeRadiusJets/data/daodNtuples/mc21_14TeV_hh_bbbb_vbf_novhh_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
-    else signalRootFileName = "/home/larsonma/LargeRadiusJets/data/daodNtuples/mc21_14TeV_HHbbbb_HLLHC_DAOD_NTUPLE_GEP.root";
+    if (vbfBool) signalRootFileName = "/home/larsonma/GEPHadronicEventReconstruction/data/daodNtuples/mc21_14TeV_hh_bbbb_vbf_novhh_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    else signalRootFileName = "/home/larsonma/GEPHadronicEventReconstruction/data/daodNtuples/mc21_14TeV_HHbbbb_HLLHC_DAOD_NTUPLE_GEP.root";
     std::string backgroundRootFileName;
-    if (jzSlice == 2) backgroundRootFileName = "/home/larsonma/LargeRadiusJets/data/daodNtuples/mc21_14TeV_jj_JZ2_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
-    else if (jzSlice == 3) backgroundRootFileName = "/home/larsonma/LargeRadiusJets/data/daodNtuples/mc21_14TeV_jj_JZ3_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
-    else if (jzSlice == 4) backgroundRootFileName = "/home/larsonma/LargeRadiusJets/data/daodNtuples/mc21_14TeV_jj_JZ4_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    if (jzSlice == 2) backgroundRootFileName = "/home/larsonma/GEPHadronicEventReconstruction/data/daodNtuples/mc21_14TeV_jj_JZ2_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    else if (jzSlice == 3) backgroundRootFileName = "/home/larsonma/GEPHadronicEventReconstruction/data/daodNtuples/mc21_14TeV_jj_JZ3_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    else if (jzSlice == 4) backgroundRootFileName = "/home/larsonma/GEPHadronicEventReconstruction/data/daodNtuples/mc21_14TeV_jj_JZ4_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
 
     analyze_files(backgroundFilenames, signalFilenames, signalRootFileName, backgroundRootFileName, jzSlice, overlayThreeFiles);
     gSystem->Exit(0);
