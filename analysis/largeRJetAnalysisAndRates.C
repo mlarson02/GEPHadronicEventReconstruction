@@ -16,238 +16,43 @@ int colors[] = {
     kSpring+5      // light green-yellow
 };
 
-std::map<std::string, std::string> legendMap = {
-    {"Seeds2_r2Cut0p64_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 0.64, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut0p81_maxObj128_1p5back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 128, rMergeCut = 1.5"},
-    
-    {"Seeds2_r2Cut0p81_maxObj256_1p5back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 256, rMergeCut = 1.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_0p01back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut Disabled"},
-
-    {"Seeds2_r2Cut1p0_maxObj64_0p001back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 64"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_0p001back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128"},
-
-    {"Seeds2_r2Cut1p0_maxObj256_0p001back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 256"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_0p001back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut Disabled"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_1p5back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut  = 1.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_2p0back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut  = 2.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_2p5back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut  = 2.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_3p0back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut  = 3.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_3p5back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut  = 3.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj256_0p001back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut Disabled"},
-
-    {"Seeds2_r2Cut1p0_maxObj256_1p5back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut  = 1.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj256_2p5back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut  = 2.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj256_3p5back_SeedPosRecalcWeighted",
-    "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut  = 3.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_1p25back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 1.25"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_1p5back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 1.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_1p75back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 1.75"},
-    
-    {"Seeds2_r2Cut1p0_maxObj256_1p5back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut = 1.5"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_1p5back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, rMergeCut = 1.5"},
-    
-    {"Seeds2_r2Cut1p44_maxObj256_1p5back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 256, rMergeCut = 1.5"},
-
-    {"Seeds2_r2Cut0p81_maxObj128_2p0back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 128, rMergeCut = 2.0"},
-    
-    {"Seeds2_r2Cut0p81_maxObj256_2p0back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 256, rMergeCut = 2.0"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_2p0back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 2.0"},
-    
-    {"Seeds2_r2Cut1p0_maxObj256_2p0back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut = 2.0"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_2p0back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, rMergeCut = 2.0"},
-    
-    {"Seeds2_r2Cut1p44_maxObj256_2p0back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 256, rMergeCut = 2.0"},
-
-    {"Seeds2_r2Cut0p81_maxObj128_2p5back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 128, rMergeCut = 2.5"},
-    
-    {"Seeds2_r2Cut0p81_maxObj256_2p5back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 256, rMergeCut = 2.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_2p5back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 2.5"},
-    
-    {"Seeds2_r2Cut1p0_maxObj256_2p5back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut = 2.5"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_2p5back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, rMergeCut = 2.5"},
-    
-    {"Seeds2_r2Cut1p44_maxObj256_2p5back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 256, rMergeCut = 2.5"},
-
-    {"Seeds2_r2Cut0p81_maxObj128_3p0back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 128, rMergeCut = 3.0"},
-    
-    {"Seeds2_r2Cut0p81_maxObj256_3p0back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 256, rMergeCut = 3.0"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_3p0back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 3.0"},
-    
-    {"Seeds2_r2Cut1p0_maxObj256_3p0back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut = 3.0"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_3p0back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, rMergeCut = 3.0"},
-    
-    {"Seeds2_r2Cut1p44_maxObj256_3p0back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 256, rMergeCut = 3.0"},
-
-    {"Seeds2_r2Cut0p81_maxObj128_3p5back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 128, rMergeCut = 3.5"},
-    
-    {"Seeds2_r2Cut0p81_maxObj256_3p5back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 256, rMergeCut = 3.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_3p5back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 3.5"},
-    
-    {"Seeds2_r2Cut1p0_maxObj256_3p5back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut = 3.5"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_3p5back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, rMergeCut = 3.5"},
-    
-    {"Seeds2_r2Cut1p44_maxObj256_3p5back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 256, rMergeCut = 3.5"},
-
-    {"Seeds2_r2Cut0p81_maxObj128_4p0back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 128, rMergeCut = 4.0"},
-    
-    {"Seeds2_r2Cut0p81_maxObj256_4p0back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 256, rMergeCut = 4.0"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_4p0back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 4.0"},
-    
-    {"Seeds2_r2Cut1p0_maxObj256_4p0back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut = 4.0"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_4p0back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, rMergeCut = 4.0"},
-    
-    {"Seeds2_r2Cut1p44_maxObj256_4p0back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 256, rMergeCut = 4.0"},
-
-    {"Seeds2_r2Cut0p81_maxObj128_4p5back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 128, rMergeCut = 4.5"},
-    
-    {"Seeds2_r2Cut0p81_maxObj256_4p5back",
-        "R^{2}_{cut} = 0.81, N_{IO} = 256, rMergeCut = 4.5"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_4p5back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, rMergeCut = 4.5"},
-    
-    {"Seeds2_r2Cut1p0_maxObj256_4p5back",
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, rMergeCut = 4.5"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_4p5back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, rMergeCut = 4.5"},
-    
-    {"Seeds2_r2Cut1p44_maxObj256_4p5back",
-        "R^{2}_{cut} = 1.44, N_{IO} = 256, rMergeCut = 4.5"},
-
-    {"Seeds2_r2Cut0p81_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 0.81, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut0p81_maxObj256_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 0.81, N_{IO} = 256, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p21_maxObj256_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.21, N_{IO} = 256, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p44_maxObj256_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.44, N_{IO} = 256, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p69_maxObj256_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.69, N_{IO} = 256, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p96_maxObj256_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.96, N_{IO} = 256, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p21_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.21, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p69_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.69, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p96_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.96, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut0p64_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 0.64, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut0p64_maxObj128_back_ecut_ecutVal4", 
-    "R^{2}_{cut} = 0.64, N_{IO} = 128, IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p0_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.0, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p44_maxObj128_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.44, N_{IO} = 128, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p0_maxObj256_back_ecut_ecutVal4", 
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, IO E_{cut}"},
-        
-    {"Seeds2_r2Cut1p0_maxObj256_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.0, N_{IO} = 256, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p0_maxObj512_back_noecut_ecutVal4", 
-        "R^{2}_{cut} = 1.0, N_{IO} = 512, No IO E_{cut}"},
-
-    {"Seeds2_r2Cut1p44_maxObj512_back_noecut_ecutVal4", 
-    "R^{2}_{cut} = 1.44, N_{IO} = 512, No IO E_{cut}"}
-};
+// Generates the algorithm-configuration → ROOT legend label map.
+// Keys are substrings of ntuple file names; the pattern is:
+//   Seeds2_r2Cut{R2}_maxObj{N}_{MERGE}[_SeedPosRecalcWeighted]
+// where R2 ∈ {0p64,0p81,1p0,1p21,1p44,1p69,1p96}, N ∈ {64,128,256,512},
+// and MERGE is one of the numeric rMerge suffixes, "back_noecut_ecutVal4", etc.
+std::map<std::string, std::string> buildLegendMap() {
+    std::map<std::string, std::string> m;
+    // "1p25" → "1.25"
+    auto pFmt = [](const char* s) {
+        std::string r(s); std::replace(r.begin(), r.end(), 'p', '.'); return r;
+    };
+    const char* r2vals[]  = {"0p64","0p81","1p0","1p21","1p44","1p69","1p96"};
+    int         nObjs[]   = {64, 128, 256, 512};
+    const char* rmerges[] = {"1p25","1p5","1p75","2p0","2p5","3p0","3p5","4p0","4p5"};
+    for (const char* r2 : r2vals) {
+        std::string r2d = pFmt(r2);
+        for (int n : nObjs) {
+            std::string base   = "Seeds2_r2Cut" + std::string(r2) + "_maxObj" + std::to_string(n);
+            std::string prefix = "R^{2}_{cut} = " + r2d + ", N_{IO} = " + std::to_string(n);
+            // Disabled-merge entries: 0p001back shows N_IO only; _SeedPosRecalcWeighted or 0p01back label it explicitly
+            m[base + "_0p001back"]                            = prefix;
+            m[base + "_0p001back_SeedPosRecalcWeighted"]      = prefix + ", rMergeCut Disabled";
+            m[base + "_0p01back"]                             = prefix + ", rMergeCut Disabled";
+            // Numeric-merge entries (with and without weighted-seed-position variant)
+            for (const char* rm : rmerges) {
+                std::string entry = prefix + ", rMergeCut = " + pFmt(rm);
+                m[base + "_" + rm + "back"]                       = entry;
+                m[base + "_" + rm + "back_SeedPosRecalcWeighted"] = entry;
+            }
+            // IO energy-cut variants
+            m[base + "_back_noecut_ecutVal4"] = prefix + ", No IO E_{cut}";
+            m[base + "_back_ecut_ecutVal4"]   = prefix + ", IO E_{cut}";
+        }
+    }
+    return m;
+}
+std::map<std::string, std::string> legendMap = buildLegendMap();
 
 void analyze_files(std::vector<std::string > signalRootFileNames, std::vector<std::string > backgroundRootFileNames, TString overlayOutputFileDir, bool overlayThreeFiles, double subjetEtThreshold, bool categorySubjetEtScan_8, bool substructure5CategoryScan = false, bool leadingLRJSubjetScan = false, bool compute4thConeOR = false) {
 SetPlotStyle();
@@ -2276,6 +2081,57 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         "back_h2_gFEX_sublead_TOBEt_vs_offlineEt",
         "Background;Offline Subleading LRJ E_{T} [GeV];gFEX Subleading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
+
+    // JetTagger TOB constituent mass vs. reference mass (offline / truth / truth+SD)
+    // x: reference mass, y: constituent mass (both 0–400 GeV, 40×40 bins of 10 GeV)
+    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_offlineMass = new TH2F(
+        "sig_h2_JetTagger_lead_ConstituentMass_vs_offlineMass",
+        "Signal;Offline Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass = new TH2F(
+        "sig_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass",
+        "Signal;Offline Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_truthMass = new TH2F(
+        "sig_h2_JetTagger_lead_ConstituentMass_vs_truthMass",
+        "Signal;Truth Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_truthMass = new TH2F(
+        "sig_h2_JetTagger_sublead_ConstituentMass_vs_truthMass",
+        "Signal;Truth Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass = new TH2F(
+        "sig_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass",
+        "Signal;Truth SoftDrop Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass = new TH2F(
+        "sig_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass",
+        "Signal;Truth SoftDrop Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_offlineMass = new TH2F(
+        "back_h2_JetTagger_lead_ConstituentMass_vs_offlineMass",
+        "Background;Offline Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass = new TH2F(
+        "back_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass",
+        "Background;Offline Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_truthMass = new TH2F(
+        "back_h2_JetTagger_lead_ConstituentMass_vs_truthMass",
+        "Background;Truth Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_truthMass = new TH2F(
+        "back_h2_JetTagger_sublead_ConstituentMass_vs_truthMass",
+        "Background;Truth Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass = new TH2F(
+        "back_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass",
+        "Background;Truth SoftDrop Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
+    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass = new TH2F(
+        "back_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass",
+        "Background;Truth SoftDrop Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
+        40, 0, 400, 40, 0, 400);
 
     TH2F *sigJetTaggerLeadingLRJEtvsSubleadingLRJEt = new TH2F("sigJetTaggerLeadingLRJEtvsSubleadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; JetTagger Subleading LRJ E_{T} [GeV]", 
                         52, 0, 1040,  //x axis
@@ -6450,6 +6306,25 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                         clamp800(gFexLRJSubleadingEtValuesSignal->at(0)));
             }
         }
+        // JetTagger constituent mass vs. reference mass (signal)
+        if (sig_lead_constituent_mass > 0.0)
+            sig_h2_JetTagger_lead_ConstituentMass_vs_offlineMass->Fill(
+                recoAntiKt10LRJLeadingMassValuesSignal->at(0), sig_lead_constituent_mass);
+        if (recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0 && sig_subl_constituent_mass > 0.0)
+            sig_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass->Fill(
+                recoAntiKt10LRJSubleadingMassValuesSignal->at(0), sig_subl_constituent_mass);
+        if (antiKt10TruthLeadingEtValuesSignal->size() > 0 && sig_lead_constituent_mass > 0.0)
+            sig_h2_JetTagger_lead_ConstituentMass_vs_truthMass->Fill(
+                antiKt10TruthLeadingMassValuesSignal->at(0), sig_lead_constituent_mass);
+        if (antiKt10TruthSubleadingEtValuesSignal->size() > 0 && sig_subl_constituent_mass > 0.0)
+            sig_h2_JetTagger_sublead_ConstituentMass_vs_truthMass->Fill(
+                antiKt10TruthSubleadingMassValuesSignal->at(0), sig_subl_constituent_mass);
+        if (antiKt10TruthSDLeadingEtValuesSignal->size() > 0 && sig_lead_constituent_mass > 0.0)
+            sig_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass->Fill(
+                antiKt10TruthSDLeadingMassValuesSignal->at(0), sig_lead_constituent_mass);
+        if (antiKt10TruthSDSubleadingEtValuesSignal->size() > 0 && sig_subl_constituent_mass > 0.0)
+            sig_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass->Fill(
+                antiKt10TruthSDSubleadingMassValuesSignal->at(0), sig_subl_constituent_mass);
         if(recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0){
             sigOfflineSubleadingLRJMassvsEt->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0), recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
             sigOfflineSubleadingLRJMassvsLeadingLRJMass->Fill(recoAntiKt10LRJLeadingMassValuesSignal->at(0), recoAntiKt10LRJSubleadingMassValuesSignal->at(0));
@@ -8657,7 +8532,26 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                         clamp800(gFexLRJSubleadingEtValuesBack->at(0)), backgroundEventWeight);
             }
         }
-        
+        // JetTagger constituent mass vs. reference mass (background)
+        if (back_lead_constituent_mass > 0.0)
+            back_h2_JetTagger_lead_ConstituentMass_vs_offlineMass->Fill(
+                recoAntiKt10LRJLeadingMassValuesBack->at(0), back_lead_constituent_mass, backgroundEventWeight);
+        if (recoAntiKt10LRJSubleadingEtValuesBack->size() > 0 && back_subl_constituent_mass > 0.0)
+            back_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass->Fill(
+                recoAntiKt10LRJSubleadingMassValuesBack->at(0), back_subl_constituent_mass, backgroundEventWeight);
+        if (antiKt10TruthLeadingEtValuesBack->size() > 0 && back_lead_constituent_mass > 0.0)
+            back_h2_JetTagger_lead_ConstituentMass_vs_truthMass->Fill(
+                antiKt10TruthLeadingMassValuesBack->at(0), back_lead_constituent_mass, backgroundEventWeight);
+        if (antiKt10TruthSubleadingEtValuesBack->size() > 0 && back_subl_constituent_mass > 0.0)
+            back_h2_JetTagger_sublead_ConstituentMass_vs_truthMass->Fill(
+                antiKt10TruthSubleadingMassValuesBack->at(0), back_subl_constituent_mass, backgroundEventWeight);
+        if (antiKt10TruthSDLeadingEtValuesBack->size() > 0 && back_lead_constituent_mass > 0.0)
+            back_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass->Fill(
+                antiKt10TruthSDLeadingMassValuesBack->at(0), back_lead_constituent_mass, backgroundEventWeight);
+        if (antiKt10TruthSDSubleadingEtValuesBack->size() > 0 && back_subl_constituent_mass > 0.0)
+            back_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass->Fill(
+                antiKt10TruthSDSubleadingMassValuesBack->at(0), back_subl_constituent_mass, backgroundEventWeight);
+
         backOfflineLeadingLRJMass->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
         if(recoAntiKt10LRJSubleadingEtValuesBack->size() > 0){
             backOfflineSubleadingLRJMassvsEt->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), recoAntiKt10LRJSubleadingMassValuesBack->at(0), backgroundEventWeight);
@@ -12372,6 +12266,19 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     leg_Psi_R->AddEntry(sig_h_LRJ_Et, "Signal", "l");
     leg_Psi_R->AddEntry(back_h_LRJ_Et, "Background", "l");
 
+    // Normalize both histograms, set sig=kRed / back=kBlue, overlay, save.
+    // Captures leg and modifiedOutputFileDir from enclosing scope.
+    auto drawSigBack = [&](TH1* sig, TH1* back, TCanvas& can, const TString& fname) {
+        if (sig ->Integral() > 0) sig ->Scale(1.0 / sig ->Integral());
+        if (back->Integral() > 0) back->Scale(1.0 / back->Integral());
+        sig ->SetLineColor(kRed);
+        back->SetLineColor(kBlue);
+        back->Draw("HIST");
+        sig ->Draw("HIST SAME");
+        leg->Draw();
+        can.SaveAs(modifiedOutputFileDir + fname);
+    };
+
     TLegend *legEffb = new TLegend(0.8,0.2,0.95,0.35);
     legEffb->SetTextSize(0.025);
 
@@ -15073,7 +14980,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
     // TOB E_T vs. offline LRJ E_T: resolution / calibration view
     {
-        auto drawTOBvsOffline = [&](TH2F* h, TString path) {
+        auto drawTOBvsOffline = [&](TH2F* h, TString path, TString diagLabel) {
             if (h->Integral() > 0) h->Scale(1.0 / h->Integral());
             h->SetMinimum(1e-7);
             h->Draw("COLZ");
@@ -15106,7 +15013,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             // Legend — top left (3 entries: diagonal label, fit, r value)
             TLegend leg(0.16, 0.62, 0.61, 0.88);
             leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
-            leg.AddEntry(diag, "E_{T}^{TOB} = E_{T}^{offline}", "l");
+            leg.AddEntry(diag, diagLabel, "l");
             leg.AddEntry(fitFn,
                 Form("Fit: y = %.3f x + %.1f GeV", slope, intercept), "l");
             leg.AddEntry((TObject*)nullptr, Form("r = %.4f", r), "");
@@ -15116,21 +15023,66 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
             delete prof; delete fitFn;
         };
         drawTOBvsOffline(sig_h2_JetTagger_lead_TOBEt_vs_offlineEt,
-            modifiedOutputFileDir + "sig_JetTagger_lead_TOBEt_vs_offlineEt.pdf");
+            modifiedOutputFileDir + "sig_JetTagger_lead_TOBEt_vs_offlineEt.pdf",
+            "Leading JetTagger Large-R Jet E_{T} = Leading Offline Large-R Jet E_{T}");
         drawTOBvsOffline(sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt,
-            modifiedOutputFileDir + "sig_JetTagger_sublead_TOBEt_vs_offlineEt.pdf");
+            modifiedOutputFileDir + "sig_JetTagger_sublead_TOBEt_vs_offlineEt.pdf",
+            "Subleading JetTagger Large-R Jet E_{T} = Subleading Offline Large-R Jet E_{T}");
         drawTOBvsOffline(sig_h2_gFEX_lead_TOBEt_vs_offlineEt,
-            modifiedOutputFileDir + "sig_gFEX_lead_TOBEt_vs_offlineEt.pdf");
+            modifiedOutputFileDir + "sig_gFEX_lead_TOBEt_vs_offlineEt.pdf",
+            "Leading gFEX Large-R Jet E_{T} = Leading Offline Large-R Jet E_{T}");
         drawTOBvsOffline(sig_h2_gFEX_sublead_TOBEt_vs_offlineEt,
-            modifiedOutputFileDir + "sig_gFEX_sublead_TOBEt_vs_offlineEt.pdf");
+            modifiedOutputFileDir + "sig_gFEX_sublead_TOBEt_vs_offlineEt.pdf",
+            "Subleading gFEX Large-R Jet E_{T} = Subleading Offline Large-R Jet E_{T}");
         drawTOBvsOffline(back_h2_JetTagger_lead_TOBEt_vs_offlineEt,
-            modifiedOutputFileDir + "back_JetTagger_lead_TOBEt_vs_offlineEt.pdf");
+            modifiedOutputFileDir + "back_JetTagger_lead_TOBEt_vs_offlineEt.pdf",
+            "Leading JetTagger Large-R Jet E_{T} = Leading Offline Large-R Jet E_{T}");
         drawTOBvsOffline(back_h2_JetTagger_sublead_TOBEt_vs_offlineEt,
-            modifiedOutputFileDir + "back_JetTagger_sublead_TOBEt_vs_offlineEt.pdf");
+            modifiedOutputFileDir + "back_JetTagger_sublead_TOBEt_vs_offlineEt.pdf",
+            "Subleading JetTagger Large-R Jet E_{T} = Subleading Offline Large-R Jet E_{T}");
         drawTOBvsOffline(back_h2_gFEX_lead_TOBEt_vs_offlineEt,
-            modifiedOutputFileDir + "back_gFEX_lead_TOBEt_vs_offlineEt.pdf");
+            modifiedOutputFileDir + "back_gFEX_lead_TOBEt_vs_offlineEt.pdf",
+            "Leading gFEX Large-R Jet E_{T} = Leading Offline Large-R Jet E_{T}");
         drawTOBvsOffline(back_h2_gFEX_sublead_TOBEt_vs_offlineEt,
-            modifiedOutputFileDir + "back_gFEX_sublead_TOBEt_vs_offlineEt.pdf");
+            modifiedOutputFileDir + "back_gFEX_sublead_TOBEt_vs_offlineEt.pdf",
+            "Subleading gFEX Large-R Jet E_{T} = Subleading Offline Large-R Jet E_{T}");
+        // JetTagger constituent mass vs. reference mass
+        drawTOBvsOffline(sig_h2_JetTagger_lead_ConstituentMass_vs_offlineMass,
+            modifiedOutputFileDir + "sig_JetTagger_lead_ConstituentMass_vs_offlineMass.pdf",
+            "Leading JetTagger Large-R Jet Mass = Leading Offline Large-R Jet Mass");
+        drawTOBvsOffline(sig_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass,
+            modifiedOutputFileDir + "sig_JetTagger_sublead_ConstituentMass_vs_offlineMass.pdf",
+            "Subleading JetTagger Large-R Jet Mass = Subleading Offline Large-R Jet Mass");
+        drawTOBvsOffline(sig_h2_JetTagger_lead_ConstituentMass_vs_truthMass,
+            modifiedOutputFileDir + "sig_JetTagger_lead_ConstituentMass_vs_truthMass.pdf",
+            "Leading JetTagger Large-R Jet Mass = Leading Truth Large-R Jet Mass");
+        drawTOBvsOffline(sig_h2_JetTagger_sublead_ConstituentMass_vs_truthMass,
+            modifiedOutputFileDir + "sig_JetTagger_sublead_ConstituentMass_vs_truthMass.pdf",
+            "Subleading JetTagger Large-R Jet Mass = Subleading Truth Large-R Jet Mass");
+        drawTOBvsOffline(sig_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass,
+            modifiedOutputFileDir + "sig_JetTagger_lead_ConstituentMass_vs_truthSDMass.pdf",
+            "Leading JetTagger Large-R Jet Mass = Leading Truth Large-R Jet Mass with SoftDrop");
+        drawTOBvsOffline(sig_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass,
+            modifiedOutputFileDir + "sig_JetTagger_sublead_ConstituentMass_vs_truthSDMass.pdf",
+            "Subleading JetTagger Large-R Jet Mass = Subleading Truth Large-R Jet Mass with SoftDrop");
+        drawTOBvsOffline(back_h2_JetTagger_lead_ConstituentMass_vs_offlineMass,
+            modifiedOutputFileDir + "back_JetTagger_lead_ConstituentMass_vs_offlineMass.pdf",
+            "Leading JetTagger Large-R Jet Mass = Leading Offline Large-R Jet Mass");
+        drawTOBvsOffline(back_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass,
+            modifiedOutputFileDir + "back_JetTagger_sublead_ConstituentMass_vs_offlineMass.pdf",
+            "Subleading JetTagger Large-R Jet Mass = Subleading Offline Large-R Jet Mass");
+        drawTOBvsOffline(back_h2_JetTagger_lead_ConstituentMass_vs_truthMass,
+            modifiedOutputFileDir + "back_JetTagger_lead_ConstituentMass_vs_truthMass.pdf",
+            "Leading JetTagger Large-R Jet Mass = Leading Truth Large-R Jet Mass");
+        drawTOBvsOffline(back_h2_JetTagger_sublead_ConstituentMass_vs_truthMass,
+            modifiedOutputFileDir + "back_JetTagger_sublead_ConstituentMass_vs_truthMass.pdf",
+            "Subleading JetTagger Large-R Jet Mass = Subleading Truth Large-R Jet Mass");
+        drawTOBvsOffline(back_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass,
+            modifiedOutputFileDir + "back_JetTagger_lead_ConstituentMass_vs_truthSDMass.pdf",
+            "Leading JetTagger Large-R Jet Mass = Leading Truth Large-R Jet Mass with SoftDrop");
+        drawTOBvsOffline(back_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass,
+            modifiedOutputFileDir + "back_JetTagger_sublead_ConstituentMass_vs_truthSDMass.pdf",
+            "Subleading JetTagger Large-R Jet Mass = Subleading Truth Large-R Jet Mass with SoftDrop");
     }
 
     c.cd();
@@ -15238,11 +15190,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
 
     // === Jet-type comparison plots ===
     {
-        TLine diagLine(0, 0, 600, 600);
-        diagLine.SetLineColor(kRed);
-        diagLine.SetLineWidth(2);
-
-        // helper: draw, normalise, overlay diagonal, save
+        // helper: draw, normalise, overlay diagonal + linear fit + legend, save
         auto drawJetComp = [&](TH2F* h, const TString& fname) {
             cLogZ.cd();
             if (h->Integral() > 0) h->Scale(1.0 / h->Integral());
@@ -15252,8 +15200,43 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
                 h->GetYaxis()->SetRangeUser(0, 400);
             }
             h->Draw("COLZ");
-            diagLine.Draw("same");
+
+            double xmax = h->GetXaxis()->GetXmax();
+            double ymax = h->GetYaxis()->GetXmax();
+            double rng  = std::min(xmax, ymax);
+
+            // y = x diagonal reference line (dashed red)
+            TLine* diag = new TLine(0, 0, rng, rng);
+            diag->SetLineColor(kRed); diag->SetLineStyle(2); diag->SetLineWidth(2);
+            diag->Draw("SAME");
+
+            // Pearson correlation coefficient
+            double r = h->GetCorrelationFactor(1, 2);
+
+            // Linear fit via TProfile
+            TProfile* prof = h->ProfileX(
+                (std::string(h->GetName()) + "_pfx").c_str(), 1, -1, "s");
+            prof->SetMarkerStyle(20); prof->SetMarkerSize(0.5);
+            prof->SetMarkerColor(kBlack); prof->SetLineColor(kBlack);
+            TF1* fitFn = new TF1("linfit", "pol1", 0, xmax);
+            prof->Fit(fitFn, "QN");
+            double slope     = fitFn->GetParameter(1);
+            double intercept = fitFn->GetParameter(0);
+            fitFn->SetLineColor(kBlue); fitFn->SetLineWidth(2);
+            fitFn->Draw("SAME");
+            prof->Draw("SAME");
+
+            // Legend — top left
+            TLegend leg(0.16, 0.62, 0.61, 0.88);
+            leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
+            leg.AddEntry(diag, "y = x", "l");
+            leg.AddEntry(fitFn,
+                Form("Fit: y = %.3f x + %.1f GeV", slope, intercept), "l");
+            leg.AddEntry((TObject*)nullptr, Form("r = %.4f", r), "");
+            leg.Draw();
+
             cLogZ.SaveAs(modifiedOutputFileDir + fname);
+            delete diag; delete prof; delete fitFn;
         };
 
         // Pair 1: Reco vs. Reco+SD — Signal
@@ -15261,6 +15244,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         drawJetComp(sig_h2_recoVsRecoSD_subleading_Et,   "sig_h2_recoVsRecoSD_subleading_Et.pdf");
         drawJetComp(sig_h2_recoVsRecoSD_leading_Mass,    "sig_h2_recoVsRecoSD_leading_Mass.pdf");
         drawJetComp(sig_h2_recoVsRecoSD_subleading_Mass, "sig_h2_recoVsRecoSD_subleading_Mass.pdf");
+        
         // Pair 1: Reco vs. Reco+SD — Background
         drawJetComp(back_h2_recoVsRecoSD_leading_Et,      "back_h2_recoVsRecoSD_leading_Et.pdf");
         drawJetComp(back_h2_recoVsRecoSD_subleading_Et,   "back_h2_recoVsRecoSD_subleading_Et.pdf");
@@ -15272,6 +15256,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         drawJetComp(sig_h2_recoVsTruth_subleading_Et,   "sig_h2_recoVsTruth_subleading_Et.pdf");
         drawJetComp(sig_h2_recoVsTruth_leading_Mass,    "sig_h2_recoVsTruth_leading_Mass.pdf");
         drawJetComp(sig_h2_recoVsTruth_subleading_Mass, "sig_h2_recoVsTruth_subleading_Mass.pdf");
+
         // Pair 2: Reco vs. Truth — Background
         drawJetComp(back_h2_recoVsTruth_leading_Et,      "back_h2_recoVsTruth_leading_Et.pdf");
         drawJetComp(back_h2_recoVsTruth_subleading_Et,   "back_h2_recoVsTruth_subleading_Et.pdf");
@@ -15283,6 +15268,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
         drawJetComp(sig_h2_truthVsTruthSD_subleading_Et,   "sig_h2_truthVsTruthSD_subleading_Et.pdf");
         drawJetComp(sig_h2_truthVsTruthSD_leading_Mass,    "sig_h2_truthVsTruthSD_leading_Mass.pdf");
         drawJetComp(sig_h2_truthVsTruthSD_subleading_Mass, "sig_h2_truthVsTruthSD_subleading_Mass.pdf");
+
         // Pair 3: Truth vs. Truth+SD — Background
         drawJetComp(back_h2_truthVsTruthSD_leading_Et,      "back_h2_truthVsTruthSD_leading_Et.pdf");
         drawJetComp(back_h2_truthVsTruthSD_subleading_Et,   "back_h2_truthVsTruthSD_subleading_Et.pdf");
@@ -15399,87 +15385,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundRootFileNames.size(); ++fileIt)
     cLogYConeJets.cd();
 
 
-    sig_h_leading_WTA_conecellstowers_pT->Scale(1.0 / sig_h_leading_WTA_conecellstowers_pT->Integral());
-    back_h_leading_WTA_conecellstowers_pT->Scale(1.0 / back_h_leading_WTA_conecellstowers_pT->Integral());
-    sig_h_leading_WTA_conecellstowers_pT->SetLineColor(kRed);
-    back_h_leading_WTA_conecellstowers_pT->SetLineColor(kBlue);
-    back_h_leading_WTA_conecellstowers_pT->Draw("HIST");
-    sig_h_leading_WTA_conecellstowers_pT->Draw("HIST SAME");
-    leg->Draw();
-    cLogYConeJets.SaveAs(modifiedOutputFileDir + "leading_WTA_conecellstowers_pT.pdf");
-
-    sig_h_subleading_WTA_conecellstowers_pT->Scale(1.0 / sig_h_subleading_WTA_conecellstowers_pT->Integral());
-    back_h_subleading_WTA_conecellstowers_pT->Scale(1.0 / back_h_subleading_WTA_conecellstowers_pT->Integral());
-    sig_h_subleading_WTA_conecellstowers_pT->SetLineColor(kRed);
-    back_h_subleading_WTA_conecellstowers_pT->SetLineColor(kBlue);
-    back_h_subleading_WTA_conecellstowers_pT->Draw("HIST");
-    sig_h_subleading_WTA_conecellstowers_pT->Draw("HIST SAME");
-    leg->Draw();
-    cLogYConeJets.SaveAs(modifiedOutputFileDir + "subleading_WTA_conecellstowers_pT.pdf");
-
-    sig_h_leading_WTA_conebasicclusters_pT->Scale(1.0 / sig_h_leading_WTA_conebasicclusters_pT->Integral());
-    back_h_leading_WTA_conebasicclusters_pT->Scale(1.0 / back_h_leading_WTA_conebasicclusters_pT->Integral());
-    sig_h_leading_WTA_conebasicclusters_pT->SetLineColor(kRed);
-    back_h_leading_WTA_conebasicclusters_pT->SetLineColor(kBlue);
-    back_h_leading_WTA_conebasicclusters_pT->Draw("HIST");
-    sig_h_leading_WTA_conebasicclusters_pT->Draw("HIST SAME");
-    leg->Draw();
-    cLogYConeJets.SaveAs(modifiedOutputFileDir + "leading_WTA_conebasicclusters_pT.pdf");
-
-    sig_h_subleading_WTA_conebasicclusters_pT->Scale(1.0 / sig_h_subleading_WTA_conebasicclusters_pT->Integral());
-    back_h_subleading_WTA_conebasicclusters_pT->Scale(1.0 / back_h_subleading_WTA_conebasicclusters_pT->Integral());
-    sig_h_subleading_WTA_conebasicclusters_pT->SetLineColor(kRed);
-    back_h_subleading_WTA_conebasicclusters_pT->SetLineColor(kBlue);
-    back_h_subleading_WTA_conebasicclusters_pT->Draw("HIST");
-    sig_h_subleading_WTA_conebasicclusters_pT->Draw("HIST SAME");
-    leg->Draw();
-    cLogYConeJets.SaveAs(modifiedOutputFileDir + "subleading_WTA_conebasicclusters_pT.pdf");
-
-    sig_h_WTA_conecellstowers_multiplicity->Scale(1.0 / sig_h_WTA_conecellstowers_multiplicity->Integral());
-    back_h_WTA_conecellstowers_multiplicity->Scale(1.0 / back_h_WTA_conecellstowers_multiplicity->Integral());
-    sig_h_WTA_conecellstowers_multiplicity->SetLineColor(kRed);
-    back_h_WTA_conecellstowers_multiplicity->SetLineColor(kBlue);
-    back_h_WTA_conecellstowers_multiplicity->Draw("HIST");
-    sig_h_WTA_conecellstowers_multiplicity->Draw("HIST SAME");
-    leg->Draw();
-    cLogYConeJets.SaveAs(modifiedOutputFileDir + "WTA_conecellstowers_multiplicity.pdf");
-
-    sig_h_WTA_conebasicclusters_multiplicity->Scale(1.0 / sig_h_WTA_conebasicclusters_multiplicity->Integral());
-    back_h_WTA_conebasicclusters_multiplicity->Scale(1.0 / back_h_WTA_conebasicclusters_multiplicity->Integral());
-    sig_h_WTA_conebasicclusters_multiplicity->SetLineColor(kRed);
-    back_h_WTA_conebasicclusters_multiplicity->SetLineColor(kBlue);
-    back_h_WTA_conebasicclusters_multiplicity->Draw("HIST");
-    sig_h_WTA_conebasicclusters_multiplicity->Draw("HIST SAME");
-    leg->Draw();
-    cLogYConeJets.SaveAs(modifiedOutputFileDir + "WTA_conebasicclusters_multiplicity.pdf");
-
+    drawSigBack(sig_h_leading_WTA_conecellstowers_pT,    back_h_leading_WTA_conecellstowers_pT,    cLogYConeJets, "leading_WTA_conecellstowers_pT.pdf");
+    drawSigBack(sig_h_subleading_WTA_conecellstowers_pT, back_h_subleading_WTA_conecellstowers_pT, cLogYConeJets, "subleading_WTA_conecellstowers_pT.pdf");
+    drawSigBack(sig_h_leading_WTA_conebasicclusters_pT,    back_h_leading_WTA_conebasicclusters_pT,    cLogYConeJets, "leading_WTA_conebasicclusters_pT.pdf");
+    drawSigBack(sig_h_subleading_WTA_conebasicclusters_pT, back_h_subleading_WTA_conebasicclusters_pT, cLogYConeJets, "subleading_WTA_conebasicclusters_pT.pdf");
+    drawSigBack(sig_h_WTA_conecellstowers_multiplicity,  back_h_WTA_conecellstowers_multiplicity,  cLogYConeJets, "WTA_conecellstowers_multiplicity.pdf");
+    drawSigBack(sig_h_WTA_conebasicclusters_multiplicity, back_h_WTA_conebasicclusters_multiplicity, cLogYConeJets, "WTA_conebasicclusters_multiplicity.pdf");
     c.cd();
-    sigOfflineLeadingLRJMass->Scale(1.0 / sigOfflineLeadingLRJMass->Integral());
-    backOfflineLeadingLRJMass->Scale(1.0 / backOfflineLeadingLRJMass->Integral());
-    sigOfflineLeadingLRJMass->SetLineColor(kRed);
-    backOfflineLeadingLRJMass->SetLineColor(kBlue);
-    backOfflineLeadingLRJMass->Draw("HIST");
-    sigOfflineLeadingLRJMass->Draw("HIST SAME");
-    leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leadingOfflineLRJMass.pdf");
-
-    sigOfflineSubleadingLRJMass->Scale(1.0 / sigOfflineSubleadingLRJMass->Integral());
-    backOfflineSubleadingLRJMass->Scale(1.0 / backOfflineSubleadingLRJMass->Integral());
-    sigOfflineSubleadingLRJMass->SetLineColor(kRed);
-    backOfflineSubleadingLRJMass->SetLineColor(kBlue);
-    backOfflineSubleadingLRJMass->Draw("HIST");
-    sigOfflineSubleadingLRJMass->Draw("HIST SAME");
-    leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "subleadingOfflineLRJMass.pdf");
-
-    sigDeltaRLeadingSubleadingTruthJets->Scale(1.0 / sigDeltaRLeadingSubleadingTruthJets->Integral());
-    backDeltaRLeadingSubleadingTruthJets->Scale(1.0 / backDeltaRLeadingSubleadingTruthJets->Integral());
-    sigDeltaRLeadingSubleadingTruthJets->SetLineColor(kRed);
-    backDeltaRLeadingSubleadingTruthJets->SetLineColor(kBlue);
-    backDeltaRLeadingSubleadingTruthJets->Draw("HIST");
-    sigDeltaRLeadingSubleadingTruthJets->Draw("HIST SAME");
-    leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "deltaRLeadingSubleadingTruthJets.pdf");
+    drawSigBack(sigOfflineLeadingLRJMass,              backOfflineLeadingLRJMass,              c, "leadingOfflineLRJMass.pdf");
+    drawSigBack(sigOfflineSubleadingLRJMass,           backOfflineSubleadingLRJMass,           c, "subleadingOfflineLRJMass.pdf");
+    drawSigBack(sigDeltaRLeadingSubleadingTruthJets,   backDeltaRLeadingSubleadingTruthJets,   c, "deltaRLeadingSubleadingTruthJets.pdf");
     
 
 
@@ -22442,12 +22357,7 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now();
 
-    //ROOT::EnableImplicitMT(8);   // use 8 threads - this didn't speed anything up!
-    //const std::string signalLargeRJetDataFileName = "/eos/home-m/mlarson/LargeRadiusJets/MemPrints/largeRJets/mc21_14TeV_hh_bbbb_vbf_novhh_largeR.dat";
-    //const std::string backgroundLargeRJetDataFileName = "/eos/home-m/mlarson/LargeRadiusJets/MemPrints/largeRJets/mc21_14TeV_jj_JZ3_largeR.dat";
-    constexpr bool vbfBool = true;
     std::vector<std::string > signalRootFileNames = {
-
                                                     // for FEX comparison (ggF)
                                                     /*"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
                                                     
@@ -22462,36 +22372,6 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
                                                     /*"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
                                                     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_jFEXSRJ_SK_subjetEt50GeV_v3.root",
                                                     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gFEXSRJ_SK_subjetEt35GeV_v3.root",*/
-                                                    
-
-                                                    // samples for global trigger meeting 02112026
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_hh_bbbb_vbf_novhh_cvv0_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_hh_bbbb_vbf_novhh_cvv1_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-
-                                                    // samples for emulation - HLS synchronization 04092026 
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_v3.root",
-
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_hh_bbbb_vbf_novhh_cvv0_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_v3.root",
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_hh_bbbb_vbf_novhh_cvv1_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_v3.root",
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_v3.root",
-
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-
-                                                    // samples for v2 algorithm for global trigger meeting 02112026
-                                                    /*"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_hh_bbbb_vbf_novhh_cvv0_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_hh_bbbb_vbf_novhh_cvv1_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    */
 
                                                     // samples for v3 algorithm but using cone jets as input objects for global trigger meeting 02112026
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
@@ -22500,17 +22380,7 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
                                                     //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    
-
-                                                    // samples for global trigger meeting 02112026 for seed optimization comparison
-                                                    /*"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_hh_bbbb_vbf_novhh_cvv1_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_hh_bbbb_vbf_novhh_cvv1_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",*/
-
+        
                                                     // for re-optimization of jet radius / search distance
                                                     /*"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
                                                     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
@@ -22590,28 +22460,6 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
                                                         /*"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_v3.root",
                                                         "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_jFEXSRJ_SK_subjetEt50GeV_v3.root",
                                                         "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gFEXSRJ_SK_subjetEt35GeV_v3.root",*/
-
-
-
-                                                        // samples for global trigger meeting 02112026
-
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-
-                                                        // samples for emulation - HLS synchronization 04092026 
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_v3.root",
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_v3.root",
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_v3.root",
-
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK.root",
-
 
                                                         // samples for v2 algorithm for global trigger meeting 02112026
                                                         /*"/data/larsonma/LargeRadiusJets/outputNTuplesDev_GlobalTriggerMeeting_02092026/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_Seed_gepWTAConeCellsTowersJets_SK.root",

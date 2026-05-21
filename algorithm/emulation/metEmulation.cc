@@ -25,7 +25,7 @@
 // Function for processing provided number of events with MET algorithm,
 // then writing output MET data to a new TTree
 void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
-               bool useSKObjects) {
+               bool useSKObjects, double jetEtThreshold) {
 
     // GEPCellsTowers
     std::vector<double>* gepCellsTowersEtValues  = nullptr;
@@ -127,7 +127,9 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
     // Event loop
     unsigned int eventsToProcess = gepCellsTowersTree->GetEntries();
     for (unsigned int iEvt = 0; iEvt < eventsToProcess; iEvt++) {
-
+        std::cout << "-------------------------------------" << "\n";
+        std::cout << "iEvt: " << iEvt << "\n";
+        std::cout << "-------------------------------------" << "\n";
         // Reset output values for this event
         out_jetMetX    = 0.0;
         out_jetMetY    = 0.0;
@@ -176,7 +178,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
             std::cout << "towerPhi: " << towerPhi << "\n";
             towerSumEt += towerEt;
 
-            int towerCosPhi = sinLUT_[towerPhi + half_pi_digitized_in_phi_];
+            int towerCosPhi = sinLUT_[wrapPhiUnsigned(towerPhi + half_pi_digitized_in_phi_)];
             int towerSinPhi = sinLUT_[towerPhi];
 
             std::cout << "towerCosPhi: " << towerCosPhi << "\n";
@@ -191,6 +193,8 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
         }
         int towerMETx = -towerETxSum; // Take negative of ET sums 
         int towerMETy = -towerETySum; // Take negative of ET sums 
+        std::cout << "towerETxsum: " << towerETxSum << " , towerMETx: " << towerMETx << "\n";
+        std::cout << "towerETysum: " << towerETySum << " , towerMETy: " << towerMETy << "\n";
 
         // Select jet collection based on useSKObjects
         const std::vector<double>* jetPtVec  = useSKObjects ? gepWTAConeCellsTowersSKJetspTValues  : gepWTAConeCellsTowersJetspTValues;
@@ -205,12 +209,13 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
         int jetETySum = 0;
         unsigned int jetSumEt = 0; 
         for (unsigned int iJet = 0; iJet < jetsProcessed; iJet++) {
+            if(jetPtVec->at(iJet) <= jetEtThreshold) continue;
             unsigned int jetEt  = digitize(jetPtVec->at(iJet),  et_bit_length_,  static_cast<double>(et_min_),  static_cast<double>(et_max_));
             unsigned int jetPhi = digitize(jetPhiVec->at(iJet), phi_bit_length_, phi_min_, phi_max_);
 
             jetSumEt += jetEt;
 
-            int jetCosPhi = sinLUT_[jetPhi + half_pi_digitized_in_phi_];
+            int jetCosPhi = sinLUT_[wrapPhiUnsigned(jetPhi + half_pi_digitized_in_phi_)];
             int jetSinPhi = sinLUT_[jetPhi];
 
             int jetETx = (static_cast<int>(jetEt) * jetCosPhi) / (1 << (sin_bit_length_ - 1));
@@ -223,6 +228,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
 
         int          totalMETx  = towerMETx + jetMETx;
         int          totalMETy  = towerMETy + jetMETy;
+        std::cout << "totalMETx: " << totalMETx << " , totalMETy: " << totalMETy << "\n";
         unsigned int towerMET   = static_cast<unsigned int>(std::sqrt(towerMETx * towerMETx + towerMETy * towerMETy));
         unsigned int jetMET     = static_cast<unsigned int>(std::sqrt(jetMETx   * jetMETx   + jetMETy   * jetMETy));
         unsigned int totalMET   = static_cast<unsigned int>(std::sqrt(totalMETx * totalMETx + totalMETy * totalMETy));
@@ -251,7 +257,9 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
 
         // --- Undigitize to doubles for ntuple output ---
         out_towerMetX  = undigitize_signed_et(towerMETx_bitset);
+        std::cout << "out_towerMetX: " << out_towerMetX << "\n";
         out_towerMetY  = undigitize_signed_et(towerMETy_bitset);
+        std::cout << "out_towerMetY: " << out_towerMetY << "\n";
         out_jetMetX    = undigitize_signed_et(jetMETx_bitset);
         out_jetMetY    = undigitize_signed_et(jetMETy_bitset);
         out_totalMETX  = undigitize_signed_et(totalMETx_bitset);
@@ -275,17 +283,18 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
 } // eventLoop
 
 // Main MET emulation function
-// Use: root -b -l -q -e '.L metEmulation.cc+; metEmulation(true, false, "ZvvHbb")'
+// Use: root -b -l -q 'metEmulation.cc+(true, false, "ZvvHbb")'
 void metEmulation(bool signalBool,                 // true = signal sample, false = background (dijet)
                   bool useSKObjects,               // true = use PU-suppressed (SoftKiller) objects
-                  std::string signalString = "ZvvHbb"         // Which signal sample: "VBF_hh_bbbb_cvv0/1", "ggF_hh_bbbb",
+                  std::string signalString = "ZvvHbb",        // Which signal sample: "VBF_hh_bbbb_cvv0/1", "ggF_hh_bbbb",
                                                               //   "ZvvHbb", "ttbar_had", "Zprime_ttbar", "ttbar_semilep", "ttbar_lep"
+                  double jetEtThreshold = 20.0               // Minimum jet E_T [GeV] included in jet MET sum
                   ) {
 
     if (signalBool) std::cout << "Processing signal: " << signalString << "\n";
 
     auto infile  = makeInputFileName(signalBool, signalString);
-    auto outfile = makeOutputMETFileName(maxTowersConsidered_, signalBool, signalString, useSKObjects);
+    auto outfile = makeOutputMETFileName(maxTowersConsidered_, signalBool, signalString, useSKObjects, jetEtThreshold);
 
     std::cout << "infile:  " << infile  << "\n";
     std::cout << "outfile: " << outfile << "\n";
@@ -299,5 +308,5 @@ void metEmulation(bool signalBool,                 // true = signal sample, fals
     }
     gSystem->RedirectOutput("debuglog_MET.log", "w");
     std::cout << "Calling event loop\n";
-    eventLoop(infile, outfile, useSKObjects);
+    eventLoop(infile, outfile, useSKObjects, jetEtThreshold);
 }

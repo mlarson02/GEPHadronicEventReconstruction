@@ -3,7 +3,7 @@
 #include <cmath>
 
 static inline uint32_t maskN(unsigned n) { return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }
-constexpr unsigned int maxTowersConsidered_ = 1024;
+constexpr unsigned int maxTowersConsidered_ = 4096;
 constexpr unsigned int maxJetsConsidered_ = 10;
 constexpr unsigned int signed_et_bit_length_ = 13;
 constexpr unsigned int et_bit_length_ = 13;
@@ -20,7 +20,8 @@ constexpr unsigned int et_min_ = 0;
 constexpr unsigned int et_max_ = 1024;
 constexpr double phi_granularity_ = (phi_max_ - phi_min_) / (1 << (phi_bit_length_));
 constexpr unsigned int pi_digitized_in_phi_ = (M_PI) / (phi_granularity_);
-const int half_pi_digitized_in_phi_     =  pi_digitized_in_phi_/2;
+constexpr unsigned int half_pi_digitized_in_phi_     =  pi_digitized_in_phi_/2;
+constexpr unsigned int two_pi_digitized_in_phi_      =  (1 << phi_bit_length_) - 1; 
 constexpr unsigned int eta_range_ = (eta_max_ - eta_min_) / (phi_granularity_); // ensures phi and eta have the same granularity
 constexpr double eta_granularity_ = (eta_max_ - eta_min_) / double(eta_range_);
 constexpr double et_granularity_ = (et_max_ - et_min_) / double((1 << et_bit_length_));

@@ -302,8 +302,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     TTree* leadingTruthAntiKt4TruthDressedWZJets = new TTree("leadingTruthAntiKt4TruthDressedWZJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* subleadingTruthAntiKt4TruthDressedWZJets = new TTree("subleadingTruthAntiKt4TruthDressedWZJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* gFexMETTree             = new TTree("gFexMETTree",             "Tree storing event-wise gFEX MET quantities");
+    TTree* gFexMETNoiseCutTree     = new TTree("gFexMETNoiseCutTree",     "Tree storing event-wise gFEX MET quantities (NoiseCut)");
+    TTree* gFexMETRmsTree          = new TTree("gFexMETRmsTree",          "Tree storing event-wise gFEX MET quantities (Rms)");
     TTree* metTruthTree            = new TTree("metTruthTree",            "Tree storing event-wise truth MET quantities");
-    TTree* metCoreAntiKt4EMTopoTree= new TTree("metCoreAntiKt4EMTopoTree","Tree storing event-wise reco core MET quantities (AntiKt4EMTopo)");
+    TTree* metCoreAntiKt4EMTopoTree  = new TTree("metCoreAntiKt4EMTopoTree",  "Tree storing event-wise reco core MET quantities (AntiKt4EMTopo)");
+    TTree* metCoreAntiKt4EMPFlowTree = new TTree("metCoreAntiKt4EMPFlowTree", "Tree storing event-wise reco core MET quantities (AntiKt4EMPFlow)");
     /*TTree* recoAntiKt10LCTopoJets = new TTree("recoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* leadingRecoAntiKt10LCTopoJets = new TTree("leadingRecoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* subleadingRecoAntiKt10LCTopoJets = new TTree("recoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");*/
@@ -431,6 +434,10 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     double gMSX = 0.0, gMSY = 0.0;                 // soft term (L1_gMSTComponentsJwoj)
     double gMETX = 0.0, gMETY = 0.0;               // total MET components (L1_gMETComponentsJwoj)
     double gMET = 0.0, gSumET = 0.0;               // scalar MET and SumET (L1_gScalarEJwoj)
+    double gMETX_NC = 0.0, gMETY_NC = 0.0;         // total MET components (L1_gMETComponentsNoiseCut)
+    double gMET_NC = 0.0, gSumET_NC = 0.0;         // scalar MET and SumET (L1_gScalarENoiseCut)
+    double gMETX_Rms = 0.0, gMETY_Rms = 0.0;       // total MET components (L1_gMETComponentsRms)
+    double gMET_Rms = 0.0, gSumET_Rms = 0.0;       // scalar MET and SumET (L1_gScalarERms)
     // Reference MET quantities (scalar per event)
     double metTruthNonIntX = 0.0, metTruthNonIntY = 0.0;   // MET_Truth["NonInt"]
     double metTruthNonIntSumET = 0.0, metTruthNonInt = 0.0;
@@ -438,8 +445,13 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     double metTruthIntSumET = 0.0, metTruthInt = 0.0;
     double metTruthIntOutX = 0.0, metTruthIntOutY = 0.0;   // MET_Truth["IntOut"]
     double metTruthIntOutSumET = 0.0, metTruthIntOut = 0.0;
-    double metCoreX = 0.0, metCoreY = 0.0;         // MET_Core_AntiKt4EMTopo (total of container)
-    double metCoreSumET = 0.0, metCore = 0.0;
+    // MET_Core_AntiKt4EMTopo — one set of variables per term
+    double metCoreEMTopo_SoftClus_X = 0.0,   metCoreEMTopo_SoftClus_Y = 0.0,   metCoreEMTopo_SoftClus_SumET = 0.0,   metCoreEMTopo_SoftClus_MET = 0.0;
+    double metCoreEMTopo_PVSoftTrk_X = 0.0,  metCoreEMTopo_PVSoftTrk_Y = 0.0,  metCoreEMTopo_PVSoftTrk_SumET = 0.0,  metCoreEMTopo_PVSoftTrk_MET = 0.0;
+    double metCoreEMTopo_SoftClusEM_X = 0.0, metCoreEMTopo_SoftClusEM_Y = 0.0, metCoreEMTopo_SoftClusEM_SumET = 0.0, metCoreEMTopo_SoftClusEM_MET = 0.0;
+    // MET_Core_AntiKt4EMPFlow — one set of variables per term
+    double metCoreEMPFlow_SoftClus_X = 0.0,  metCoreEMPFlow_SoftClus_Y = 0.0,  metCoreEMPFlow_SoftClus_SumET = 0.0,  metCoreEMPFlow_SoftClus_MET = 0.0;
+    double metCoreEMPFlow_PVSoftTrk_X = 0.0, metCoreEMPFlow_PVSoftTrk_Y = 0.0, metCoreEMPFlow_PVSoftTrk_SumET = 0.0, metCoreEMPFlow_PVSoftTrk_MET = 0.0;
 
     // In time anti-kt 4 truth jets vectors
     std::vector<unsigned int> inTimeAntiKt4TruthSRJEtIndexValues;
@@ -809,6 +821,18 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     gFexMETTree->Branch("gMET",   &gMET);
     gFexMETTree->Branch("gSumET", &gSumET);
 
+    // gFexMETNoiseCutTree branches
+    gFexMETNoiseCutTree->Branch("gMETX",  &gMETX_NC);
+    gFexMETNoiseCutTree->Branch("gMETY",  &gMETY_NC);
+    gFexMETNoiseCutTree->Branch("gMET",   &gMET_NC);
+    gFexMETNoiseCutTree->Branch("gSumET", &gSumET_NC);
+
+    // gFexMETRmsTree branches
+    gFexMETRmsTree->Branch("gMETX",  &gMETX_Rms);
+    gFexMETRmsTree->Branch("gMETY",  &gMETY_Rms);
+    gFexMETRmsTree->Branch("gMET",   &gMET_Rms);
+    gFexMETRmsTree->Branch("gSumET", &gSumET_Rms);
+
     metTruthTree->Branch("metTruthNonIntX",     &metTruthNonIntX);
     metTruthTree->Branch("metTruthNonIntY",     &metTruthNonIntY);
     metTruthTree->Branch("metTruthNonIntSumET", &metTruthNonIntSumET);
@@ -822,10 +846,27 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     metTruthTree->Branch("metTruthIntOutSumET", &metTruthIntOutSumET);
     metTruthTree->Branch("metTruthIntOut",      &metTruthIntOut);
 
-    metCoreAntiKt4EMTopoTree->Branch("metCoreX",     &metCoreX);
-    metCoreAntiKt4EMTopoTree->Branch("metCoreY",     &metCoreY);
-    metCoreAntiKt4EMTopoTree->Branch("metCoreSumET", &metCoreSumET);
-    metCoreAntiKt4EMTopoTree->Branch("metCore",      &metCore);
+    metCoreAntiKt4EMTopoTree->Branch("SoftClus_X",     &metCoreEMTopo_SoftClus_X);
+    metCoreAntiKt4EMTopoTree->Branch("SoftClus_Y",     &metCoreEMTopo_SoftClus_Y);
+    metCoreAntiKt4EMTopoTree->Branch("SoftClus_SumET", &metCoreEMTopo_SoftClus_SumET);
+    metCoreAntiKt4EMTopoTree->Branch("SoftClus_MET",   &metCoreEMTopo_SoftClus_MET);
+    metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_X",     &metCoreEMTopo_PVSoftTrk_X);
+    metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_Y",     &metCoreEMTopo_PVSoftTrk_Y);
+    metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_SumET", &metCoreEMTopo_PVSoftTrk_SumET);
+    metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_MET",   &metCoreEMTopo_PVSoftTrk_MET);
+    metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_X",     &metCoreEMTopo_SoftClusEM_X);
+    metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_Y",     &metCoreEMTopo_SoftClusEM_Y);
+    metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_SumET", &metCoreEMTopo_SoftClusEM_SumET);
+    metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_MET",   &metCoreEMTopo_SoftClusEM_MET);
+
+    metCoreAntiKt4EMPFlowTree->Branch("SoftClus_X",     &metCoreEMPFlow_SoftClus_X);
+    metCoreAntiKt4EMPFlowTree->Branch("SoftClus_Y",     &metCoreEMPFlow_SoftClus_Y);
+    metCoreAntiKt4EMPFlowTree->Branch("SoftClus_SumET", &metCoreEMPFlow_SoftClus_SumET);
+    metCoreAntiKt4EMPFlowTree->Branch("SoftClus_MET",   &metCoreEMPFlow_SoftClus_MET);
+    metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_X",     &metCoreEMPFlow_PVSoftTrk_X);
+    metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_Y",     &metCoreEMPFlow_PVSoftTrk_Y);
+    metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_SumET", &metCoreEMPFlow_PVSoftTrk_SumET);
+    metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_MET",   &metCoreEMPFlow_PVSoftTrk_MET);
 
     int higgsPassEventCounter = 0;
     namespace fs = std::filesystem;
@@ -1090,7 +1131,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             
             
 
-            std::cout << "iEvt: " << iEvt << "\n";
+            if(iEvt % 100 == 0) std::cout << "iEvt: " << iEvt << "\n";
             
 
             // -- retrieve collections from DAOD ---
@@ -1173,14 +1214,40 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 std::cerr << "Failed to retrieve gFEX scalar MET/SumET" << std::endl;
             }
 
+            const DataVector<xAOD::gFexGlobalRoI_v1>* L1_gMETComponentsNoiseCut = nullptr;
+            if (!event.retrieve(L1_gMETComponentsNoiseCut, "L1_gMETComponentsNoiseCut").isSuccess()) {
+                std::cerr << "Failed to retrieve gFEX scalar MET/SumET" << std::endl;
+            }
+
+            const DataVector<xAOD::gFexGlobalRoI_v1>* L1_gScalarENoiseCut = nullptr;
+            if (!event.retrieve(L1_gScalarENoiseCut, "L1_gScalarENoiseCut").isSuccess()) {
+                std::cerr << "Failed to retrieve gFEX scalar MET/SumET" << std::endl;
+            }
+
+            const DataVector<xAOD::gFexGlobalRoI_v1>* L1_gMETComponentsRms = nullptr;
+            if (!event.retrieve(L1_gMETComponentsRms, "L1_gMETComponentsRms").isSuccess()) {
+                std::cerr << "Failed to retrieve gFEX scalar MET/SumET" << std::endl;
+            }
+
+            const DataVector<xAOD::gFexGlobalRoI_v1>* L1_gScalarERms = nullptr;
+            if (!event.retrieve(L1_gScalarERms, "L1_gScalarERms").isSuccess()) {
+                std::cerr << "Failed to retrieve gFEX scalar MET/SumET" << std::endl;
+            }
+
             // Reference MET containers
-            const xAOD::MissingETContainer* MET_Truth = nullptr;
+            const xAOD::MissingETContainer_v1* MET_Truth = nullptr;
             if (!event.retrieve(MET_Truth, "MET_Truth").isSuccess()) {
                 std::cerr << "Failed to retrieve MET_Truth" << std::endl;
             }
-            const xAOD::MissingETContainer* MET_Core_AntiKt4EMTopo = nullptr;
+
+            const xAOD::MissingETContainer_v1* MET_Core_AntiKt4EMTopo = nullptr;
             if (!event.retrieve(MET_Core_AntiKt4EMTopo, "MET_Core_AntiKt4EMTopo").isSuccess()) {
                 std::cerr << "Failed to retrieve MET_Core_AntiKt4EMTopo" << std::endl;
+            }
+
+            const xAOD::MissingETContainer_v1* MET_Core_AntiKt4EMPFlow = nullptr;
+            if (!event.retrieve(MET_Core_AntiKt4EMPFlow, "MET_Core_AntiKt4EMPFlow").isSuccess()) {
+                std::cerr << "Failed to retrieve MET_Core_AntiKt4EMPFlow" << std::endl;
             }
 
             const xAOD::JetContainer* AntiKt10UFOCSSKJets = nullptr;
@@ -2377,10 +2444,16 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             gMSX = 0.0; gMSY = 0.0;
             gMETX = 0.0; gMETY = 0.0;
             gMET = 0.0; gSumET = 0.0;
+            gMETX_NC = 0.0; gMETY_NC = 0.0; gMET_NC = 0.0; gSumET_NC = 0.0;
+            gMETX_Rms = 0.0; gMETY_Rms = 0.0; gMET_Rms = 0.0; gSumET_Rms = 0.0;
             metTruthNonIntX = 0.0; metTruthNonIntY = 0.0; metTruthNonIntSumET = 0.0; metTruthNonInt = 0.0;
             metTruthIntX    = 0.0; metTruthIntY    = 0.0; metTruthIntSumET    = 0.0; metTruthInt    = 0.0;
             metTruthIntOutX = 0.0; metTruthIntOutY = 0.0; metTruthIntOutSumET = 0.0; metTruthIntOut = 0.0;
-            metCoreX  = 0.0; metCoreY  = 0.0; metCoreSumET  = 0.0; metCore  = 0.0;
+            metCoreEMTopo_SoftClus_X   = 0.0; metCoreEMTopo_SoftClus_Y   = 0.0; metCoreEMTopo_SoftClus_SumET   = 0.0; metCoreEMTopo_SoftClus_MET   = 0.0;
+            metCoreEMTopo_PVSoftTrk_X  = 0.0; metCoreEMTopo_PVSoftTrk_Y  = 0.0; metCoreEMTopo_PVSoftTrk_SumET  = 0.0; metCoreEMTopo_PVSoftTrk_MET  = 0.0;
+            metCoreEMTopo_SoftClusEM_X = 0.0; metCoreEMTopo_SoftClusEM_Y = 0.0; metCoreEMTopo_SoftClusEM_SumET = 0.0; metCoreEMTopo_SoftClusEM_MET = 0.0;
+            metCoreEMPFlow_SoftClus_X  = 0.0; metCoreEMPFlow_SoftClus_Y  = 0.0; metCoreEMPFlow_SoftClus_SumET  = 0.0; metCoreEMPFlow_SoftClus_MET  = 0.0;
+            metCoreEMPFlow_PVSoftTrk_X = 0.0; metCoreEMPFlow_PVSoftTrk_Y = 0.0; metCoreEMPFlow_PVSoftTrk_SumET = 0.0; metCoreEMPFlow_PVSoftTrk_MET = 0.0;
 
             if (L1_gMHTComponentsJwoj) {
                 for (size_t i = 0; i < L1_gMHTComponentsJwoj->size(); ++i) {
@@ -2411,6 +2484,36 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 }
             }
 
+            // --- gFEX MET NoiseCut ---
+            if (L1_gMETComponentsNoiseCut) {
+                for (size_t i = 0; i < L1_gMETComponentsNoiseCut->size(); ++i) {
+                    const auto& metTotal = (*L1_gMETComponentsNoiseCut)[i];
+                    gMETX_NC = metTotal->METquantityOne() / 1000.0;
+                    gMETY_NC = metTotal->METquantityTwo() / 1000.0;
+                }
+            }
+            gMET_NC = std::sqrt(gMETX_NC * gMETX_NC + gMETY_NC * gMETY_NC);
+            if (L1_gScalarENoiseCut) {
+                for (size_t i = 0; i < L1_gScalarENoiseCut->size(); ++i) {
+                    gSumET_NC = (*L1_gScalarENoiseCut)[i]->SumEt() / 1000.0;
+                }
+            }
+
+            // --- gFEX MET Rms ---
+            if (L1_gMETComponentsRms) {
+                for (size_t i = 0; i < L1_gMETComponentsRms->size(); ++i) {
+                    const auto& metTotal = (*L1_gMETComponentsRms)[i];
+                    gMETX_Rms = metTotal->METquantityOne() / 1000.0;
+                    gMETY_Rms = metTotal->METquantityTwo() / 1000.0;
+                }
+            }
+            gMET_Rms = std::sqrt(gMETX_Rms * gMETX_Rms + gMETY_Rms * gMETY_Rms);
+            if (L1_gScalarERms) {
+                for (size_t i = 0; i < L1_gScalarERms->size(); ++i) {
+                    gSumET_Rms = (*L1_gScalarERms)[i]->SumEt() / 1000.0;
+                }
+            }
+
             // --- MET_Truth ---
             if (MET_Truth) {
                 auto fillTruthTerm = [&](const std::string& key,
@@ -2429,21 +2532,31 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 fillTruthTerm("IntOut", metTruthIntOutX, metTruthIntOutY, metTruthIntOutSumET, metTruthIntOut);
             }
 
-            // --- MET_Core_AntiKt4EMTopo (sum all terms in container) ---
-            // NOTE: key name(s) inside this container may need verification against the sample.
-            // Summing mpx/mpy over all terms gives the total core MET.
-            if (MET_Core_AntiKt4EMTopo) {
-                for (const auto* metTerm : *MET_Core_AntiKt4EMTopo) {
-                    std::cout << "MET_Core_AntiKt4EMTopo term: " << metTerm->name() << "\n";
-                    metCoreX     += metTerm->mpx()   / 1000.0;
-                    std::cout << "metCoreX: " << metCoreX << "\n";
-                    metCoreY     += metTerm->mpy()   / 1000.0;
-                    std::cout << "metCoreY: " << metCoreY << "\n";
-                    metCoreSumET += metTerm->sumet() / 1000.0;
-                    std::cout << "metCoreSumET: " << metCoreY << "\n";
+            // Helper: fill per-term variables from a named term in a MissingET container
+            auto fillCoreTerm = [](const xAOD::MissingETContainer* cont, const std::string& key,
+                                   double& mx, double& my, double& sumet, double& mag, Long64_t iEvt) {
+                auto it = cont->find(key);
+                if (it != cont->end()) {
+                    const xAOD::MissingET* m = *it;
+                    mx    = m->mpx()   / 1000.0;
+                    my    = m->mpy()   / 1000.0;
+                    sumet = m->sumet() / 1000.0;
+                    mag   = std::sqrt(mx * mx + my * my);
+                    if(iEvt <= 10) std::cout << key << ": X=" << mx << " Y=" << my << " SumET=" << sumet << " MET=" << mag << "\n";
                 }
-                metCore = std::sqrt(metCoreX * metCoreX + metCoreY * metCoreY);
-                std::cout << "metCore: " << metCore << "\n";
+            };
+
+            // --- MET_Core_AntiKt4EMTopo ---
+            if (MET_Core_AntiKt4EMTopo) {
+                fillCoreTerm(MET_Core_AntiKt4EMTopo, "SoftClusCore",   metCoreEMTopo_SoftClus_X,   metCoreEMTopo_SoftClus_Y,   metCoreEMTopo_SoftClus_SumET,   metCoreEMTopo_SoftClus_MET, iEvt);
+                fillCoreTerm(MET_Core_AntiKt4EMTopo, "PVSoftTrkCore",  metCoreEMTopo_PVSoftTrk_X,  metCoreEMTopo_PVSoftTrk_Y,  metCoreEMTopo_PVSoftTrk_SumET,  metCoreEMTopo_PVSoftTrk_MET, iEvt);
+                fillCoreTerm(MET_Core_AntiKt4EMTopo, "SoftClusEMCore", metCoreEMTopo_SoftClusEM_X, metCoreEMTopo_SoftClusEM_Y, metCoreEMTopo_SoftClusEM_SumET, metCoreEMTopo_SoftClusEM_MET, iEvt);
+            }
+
+            // --- MET_Core_AntiKt4EMPFlow ---
+            if (MET_Core_AntiKt4EMPFlow) {
+                fillCoreTerm(MET_Core_AntiKt4EMPFlow, "SoftClusCore",  metCoreEMPFlow_SoftClus_X,  metCoreEMPFlow_SoftClus_Y,  metCoreEMPFlow_SoftClus_SumET,  metCoreEMPFlow_SoftClus_MET, iEvt);
+                fillCoreTerm(MET_Core_AntiKt4EMPFlow, "PVSoftTrkCore", metCoreEMPFlow_PVSoftTrk_X, metCoreEMPFlow_PVSoftTrk_Y, metCoreEMPFlow_PVSoftTrk_SumET, metCoreEMPFlow_PVSoftTrk_MET, iEvt);
             }
 
             std::vector<std::pair<size_t, double>> hltJetEtWithIndex;
@@ -2773,8 +2886,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             leadingTruthAntiKt4TruthDressedWZJets->Fill();
             subleadingTruthAntiKt4TruthDressedWZJets->Fill();
             gFexMETTree->Fill();
+            gFexMETNoiseCutTree->Fill();
+            gFexMETRmsTree->Fill();
             metTruthTree->Fill();
             metCoreAntiKt4EMTopoTree->Fill();
+            metCoreAntiKt4EMPFlowTree->Fill();
         } // loop through events
         std::cout << "for jz: " << jzSlice << " these many events passed: " << passedEventsCounter << " out of: " << event.getEntries() << "\n";
         std::cout << " these many events skipped due to empty truth container: " << skippedEventsEmptyTruth << " these many events skipped due to pt hard < pt pileup: " << skippedEventsHSTP << "\n";
@@ -2841,8 +2957,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     leadingTruthAntiKt4TruthDressedWZJets->Write("", TObject::kOverwrite);
     subleadingTruthAntiKt4TruthDressedWZJets->Write("", TObject::kOverwrite);
     gFexMETTree->Write("", TObject::kOverwrite);
+    gFexMETNoiseCutTree->Write("", TObject::kOverwrite);
+    gFexMETRmsTree->Write("", TObject::kOverwrite);
     metTruthTree->Write("", TObject::kOverwrite);
     metCoreAntiKt4EMTopoTree->Write("", TObject::kOverwrite);
+    metCoreAntiKt4EMPFlowTree->Write("", TObject::kOverwrite);
     outputFile->Close();
     std::cout << "Processing complete." << endl;
     //std::cout << "higgsPassEventCounter: " << higgsPassEventCounter << "\n";
@@ -2854,7 +2973,7 @@ void HERNTupler(){
     //xAOD::Init().ignore();
     
 
-    gSystem->RedirectOutput("NTupler.log", "w");
+    gSystem->RedirectOutput("HERNTupler.log", "w");
     //std::vector<unsigned int > jzSlices = {3};
     std::vector<unsigned int > jzSlices = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     std::vector<unsigned int > algoVersions = {3}; // FIXME algo version needs to control eta, phi bit widths too! otherwise can't loop through them and do this all in one run
@@ -2876,7 +2995,7 @@ void HERNTupler(){
         //nTupler(true, "Zprime_ttbar", etaAltRange, algoVersion); // call for signal Zprime -> ttbar (hadronic), flat in pT
     }
 
-    /*for(auto jzSlice : jzSlices){
+    for(auto jzSlice : jzSlices){
         for(auto algoVersion : algoVersions){
             unsigned int etaAltRange = 0;
             if(algoVersion == 2){
@@ -2890,7 +3009,7 @@ void HERNTupler(){
             jzOutputFilenames.push_back(out.Data());
         }
         
-    }*/
+    }
 
     // FIXME allow hadd to work automatically 
     //std::ostringstream cmd;

@@ -6,6 +6,13 @@
 #include <cmath>
 #include "metConstants/constants.h"
 
+// Wrap unsigned phi index into [0, two_pi_digitized_in_phi_]
+inline unsigned int wrapPhiUnsigned(unsigned int phi) {
+    unsigned int phiWrapped = phi;
+    if (phi > two_pi_digitized_in_phi_) phiWrapped = phi - (two_pi_digitized_in_phi_ + 1);
+    return phiWrapped;
+}
+
 // Returns input NTuple file name given parameters
 std::string makeInputFileName(bool signalBool, std::string signalString,
                               std::string inputRootFilePath = "/home/larsonma/GEPHadronicEventReconstruction/data/inputNTuples/") {
@@ -42,12 +49,15 @@ unsigned int digitize(double value, int bit_length, double min_val, double max_v
     return static_cast<unsigned int>(std::round((value - min_val) * scale));
 }
 
-
 // Sign-magnitude: MSB = sign bit, remaining signed_et_bit_length_-1 bits = magnitude
 template<size_t signed_et_bit_length_>
 inline double undigitize_signed_et(const std::bitset<signed_et_bit_length_>& bits) {
+    std::cout << "bits: " << bits << "\n";
     int sign = bits[signed_et_bit_length_ - 1] ? -1 : 1;
-    unsigned int mag = static_cast<unsigned int>(bits.to_ulong()) & ((1u << (signed_et_bit_length_ - 1)) - 1);
+    std::cout << "sign: " << sign << "\n";
+    int mag = static_cast<int>(bits.to_ulong()) & ((1u << (signed_et_bit_length_ - 1)) - 1);
+    std::cout << "mag: " << mag << "\n";
+    std::cout << "output: " << sign * mag * et_granularity_ << "\n";
     return sign * mag * et_granularity_;
 }
 
@@ -60,9 +70,17 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
                                   bool signalBool,
                                   std::string signalString,
                                   bool useSKObjects,
+                                  double jetEtThreshold,
                                   std::string outputRootFilePath = "/data/larsonma/GEPMET/outputNTuplesDev_METv1/") {
     gSystem->mkdir(outputRootFilePath.c_str());
     std::string usePUSuppress = useSKObjects ? "SK" : "NoSK";
+    // Format threshold as integer if it is a whole number, e.g. 20.0 -> "20"
+    std::ostringstream thrSS;
+    int thrInt = static_cast<int>(jetEtThreshold);
+    if (jetEtThreshold == thrInt) thrSS << thrInt;
+    else thrSS << std::fixed << std::setprecision(1) << jetEtThreshold;
+    std::string thrTag = thrSS.str();
+
     std::ostringstream ss;
     if (signalBool) {
         if      (signalString == "VBF_hh_bbbb_cvv0") ss << outputRootFilePath << "mc21_14TeV_hh_bbbb_vbf_novhh_cvv0_e8557_s4422_r16130_";
@@ -74,6 +92,6 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
     } else {
         ss << outputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_";
     }
-    ss << "N_Towers_" << maxTowersProcessed << "_" << usePUSuppress << ".root";
+    ss << "N_Towers_" << maxTowersProcessed << "_jetEt" << thrTag << "_" << usePUSuppress << ".root";
     return ss.str();
 }
