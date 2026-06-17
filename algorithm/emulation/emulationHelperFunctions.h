@@ -181,10 +181,14 @@ std::string makeOutputFileName(double rMergeCut,
                                bool enableEtWeightedMidpoint = false,
                                bool minEtSeedPosOptimization = true,
                                double minEtSeedPosOptimizationCut = 20.0,
-                               std::string outputRootFilePath = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_HLSSynchronization_NewJetTypes/") {
-    gSystem->mkdir(outputRootFilePath.c_str()); 
+                               std::string outputRootFilePath = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/",
+                               bool useEtaSKObjects = false) {
+    gSystem->mkdir(outputRootFilePath.c_str());
     std::string usePUSuppress;
-    if(useSKObjects){
+    if(useEtaSKObjects){
+        usePUSuppress = "EtaSK";
+    }
+    else if(useSKObjects){
         usePUSuppress = "SK";
     }
     else{
@@ -225,9 +229,13 @@ std::string makeOutputTextFileName(double rMergeCut,
                                std::string seedObjectType,
                                bool useSKObjects,
                                unsigned int algoVersion,
-                               std::string outputTextFilePath = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsEmulation/") {
+                               std::string outputTextFilePath = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsEmulation/",
+                               bool useEtaSKObjects = false) {
     std::string usePUSuppress;
-    if(useSKObjects){
+    if(useEtaSKObjects){
+        usePUSuppress = "EtaSK";
+    }
+    else if(useSKObjects){
         usePUSuppress = "SK";
     }
     else{

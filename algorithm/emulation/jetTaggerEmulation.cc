@@ -26,7 +26,8 @@
 // then writing output large radius jets to a new TTree & text files
 void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::string outputTextFilePath, std::string inputObjectType, std::string seedObjectType,
         bool useSKObjects, bool enableEtWeightedMidpoint, bool minEtSeedPosOptimization,
-        double minEtSeedPosOptimizationCut, double subjetEtThreshold // Both in GeV --> converted to digitized 125 MeV units later 
+        double minEtSeedPosOptimizationCut, double subjetEtThreshold, // Both in GeV --> converted to digitized 125 MeV units later
+        bool useEtaSKObjects = false
     ){
         std::cout << "inputobjecttype: " << inputObjectType << "\n";
         std::cout << "useSKObjects: " << useSKObjects << "\n";
@@ -53,16 +54,6 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
 
     // Relevant data for algorithm read from inputNTuple
 
-    // CaloTopoTowers
-    std::vector<double>* caloTopoTowerEtValues = nullptr;
-    std::vector<double>* caloTopoTowerEtaValues = nullptr;
-    std::vector<double>* caloTopoTowerPhiValues = nullptr;
-
-    // Topo422 Clusters
-    std::vector<double>* topo422EtValues = nullptr;
-    std::vector<double>* topo422EtaValues = nullptr;
-    std::vector<double>* topo422PhiValues = nullptr;
-
     // GEPCellsTowers
     std::vector<double>* gepCellsTowersEtValues = nullptr;
     std::vector<double>* gepCellsTowersEtaValues = nullptr;
@@ -84,16 +75,27 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     std::vector<double>* gepBasicClustersSKPhiValues = nullptr;
 
     // Cone jets from TrigGepPerf
-    std::vector<double>* gepWTAConeCellsTowersJetspTValues = nullptr;
+    std::vector<double>* gepWTAConeCellsTowersJetsEtValues = nullptr;
     std::vector<double>* gepWTAConeCellsTowersJetsEtaValues = nullptr;
     std::vector<double>* gepWTAConeCellsTowersJetsPhiValues = nullptr;
     std::vector<unsigned int >* gepWTAConeCellsTowersJetsNConstituentsValues = nullptr;
 
     // Cone jets from TrigGepPerf (PU-suppressed)
-    std::vector<double>* gepWTAConeCellsTowersSKJetspTValues = nullptr;
+    std::vector<double>* gepWTAConeCellsTowersSKJetsEtValues = nullptr;
     std::vector<double>* gepWTAConeCellsTowersSKJetsEtaValues = nullptr;
     std::vector<double>* gepWTAConeCellsTowersSKJetsPhiValues = nullptr;
     std::vector<unsigned int >* gepWTAConeCellsTowersSKJetsNConstituentsValues = nullptr;
+
+    // GEPCellsTowers (EtaSK PU-suppressed)
+    std::vector<double>* gepCellsTowersEtaSKEtValues = nullptr;
+    std::vector<double>* gepCellsTowersEtaSKEtaValues = nullptr;
+    std::vector<double>* gepCellsTowersEtaSKPhiValues = nullptr;
+
+    // Cone jets from TrigGepPerf (EtaSK PU-suppressed)
+    std::vector<double>* gepWTAConeCellsTowersEtaSKJetsEtValues = nullptr;
+    std::vector<double>* gepWTAConeCellsTowersEtaSKJetsEtaValues = nullptr;
+    std::vector<double>* gepWTAConeCellsTowersEtaSKJetsPhiValues = nullptr;
+    std::vector<unsigned int>* gepWTAConeCellsTowersEtaSKJetsNConstituentsValues = nullptr;
 
     // gFEX small radius jets
     std::vector<unsigned int>* gFexSRJEtIndexValues = nullptr;
@@ -151,6 +153,11 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     std::vector<double>* jetTaggerSubleadingLRJSubjetEtaValues = nullptr;
     std::vector<double>* jetTaggerSubleadingLRJSubjetPhiValues = nullptr;
 
+    // Event/run number passthrough (for ordering-alignment validation)
+    int gepRunNumberIn = 0, gepEventNumberIn = 0;
+
+    int gepRunNumberOut = 0, gepEventNumberOut = 0;
+
     //std::cout << "test 2 " << "\n";
 
     // Open input ROOT file
@@ -160,8 +167,8 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         return;
     }
 
-    // Open output ROOT file - assume it has already been copied from the input ROOT file, use to write to a new tree
-    TFile* outputFile = TFile::Open(outputNTuplePath.c_str(), "UPDATE");
+    // Create new output ROOT file containing only jet tagger trees
+    TFile* outputFile = TFile::Open(outputNTuplePath.c_str(), "RECREATE");
     if (!outputFile || outputFile->IsZombie()) {
         std::cerr << "Error: Could not open file " << outputNTuplePath << std::endl;
         return;
@@ -178,10 +185,20 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     TTree* gepCellsTowersSKTree = (TTree*)inputFile->Get("gepCellsTowersSKTree");
     TTree* gepWTAConeCellsTowersJetsTree = (TTree*)inputFile->Get("gepWTAConeCellsTowersJetsTree");
     TTree* gepWTAConeCellsTowersSKJetsTree = (TTree*)inputFile->Get("gepWTAConeCellsTowersSKJetsTree");
+    TTree* gepCellsTowersEtaSKTree = (TTree*)inputFile->Get("gepCellsTowersEtaSKTree");
+    TTree* gepWTAConeCellsTowersEtaSKJetsTree = (TTree*)inputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree");
     TTree* gFexSRJTree = (TTree*)inputFile->Get("gFexSRJTree");
     TTree* jFexSRJTree = (TTree*)inputFile->Get("jFexSRJTree"); // Note that jFEX, gFEX trees are pre-sorted by Et in LRJNTupler.cc
+    TTree* eventInfoTreeIn = (TTree*)inputFile->Get("eventInfoTree");
+    eventInfoTreeIn->SetBranchAddress("gepRunNumberOut",   &gepRunNumberIn);
+    eventInfoTreeIn->SetBranchAddress("gepEventNumberOut", &gepEventNumberIn);
 
     outputFile->cd();
+    // Event/run number passthrough tree (one entry per event, for ordering-alignment validation)
+    TTree* emulEventInfoTree = new TTree("emulEventInfoTree", "Run/event number passthrough from HERNTupler input for ordering validation");
+    emulEventInfoTree->Branch("gepRunNumberOut",   &gepRunNumberOut);
+    emulEventInfoTree->Branch("gepEventNumberOut", &gepEventNumberOut);
+
     // Create new output TTrees to be written to the output file
     TTree* jetTaggerLRJs = new TTree("jetTaggerLRJsTree", "Tree storing event-wise Substructure variable, Et, Eta, Phi");
     jetTaggerLRJs->Branch("Psi_R", &jetTaggerLRJPsi_RValues);
@@ -225,16 +242,6 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     jetTaggerSubleadingLRJs->Branch("SubjetEta", &jetTaggerSubleadingLRJSubjetEtaValues);
     jetTaggerSubleadingLRJs->Branch("SubjetPhi", &jetTaggerSubleadingLRJSubjetPhiValues);
 
-    // === caloTopoTowerTree ===
-    caloTopoTowerTree->SetBranchAddress("Et", &caloTopoTowerEtValues);
-    caloTopoTowerTree->SetBranchAddress("Eta", &caloTopoTowerEtaValues);
-    caloTopoTowerTree->SetBranchAddress("Phi", &caloTopoTowerPhiValues);
-
-    // === topo422Tree ===
-    topo422Tree->SetBranchAddress("Et", &topo422EtValues);
-    topo422Tree->SetBranchAddress("Eta", &topo422EtaValues);
-    topo422Tree->SetBranchAddress("Phi", &topo422PhiValues);
-
     // === gepBasicClustersTree ===
     gepBasicClustersTree->SetBranchAddress("Et", &gepBasicClustersEtValues);
     gepBasicClustersTree->SetBranchAddress("Eta", &gepBasicClustersEtaValues);
@@ -256,16 +263,27 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     gepCellsTowersSKTree->SetBranchAddress("Phi", &gepCellsTowersSKPhiValues);
 
     // gep WTA cone cells towers jets
-    gepWTAConeCellsTowersJetsTree->SetBranchAddress("pT", &gepWTAConeCellsTowersJetspTValues);
+    gepWTAConeCellsTowersJetsTree->SetBranchAddress("Et", &gepWTAConeCellsTowersJetsEtValues);
     gepWTAConeCellsTowersJetsTree->SetBranchAddress("Eta", &gepWTAConeCellsTowersJetsEtaValues);
     gepWTAConeCellsTowersJetsTree->SetBranchAddress("Phi", &gepWTAConeCellsTowersJetsPhiValues);
     gepWTAConeCellsTowersJetsTree->SetBranchAddress("NConstituents", &gepWTAConeCellsTowersJetsNConstituentsValues);
 
     // gep WTA cone cells towers SK jets (PU-suppressed)
-    gepWTAConeCellsTowersSKJetsTree->SetBranchAddress("pT", &gepWTAConeCellsTowersSKJetspTValues);
+    gepWTAConeCellsTowersSKJetsTree->SetBranchAddress("Et", &gepWTAConeCellsTowersSKJetsEtValues);
     gepWTAConeCellsTowersSKJetsTree->SetBranchAddress("Eta", &gepWTAConeCellsTowersSKJetsEtaValues);
     gepWTAConeCellsTowersSKJetsTree->SetBranchAddress("Phi", &gepWTAConeCellsTowersSKJetsPhiValues);
     gepWTAConeCellsTowersSKJetsTree->SetBranchAddress("NConstituents", &gepWTAConeCellsTowersSKJetsNConstituentsValues);
+
+    // === gepCellsTowersEtaSKTree (EtaSK PU-suppressed) ===
+    gepCellsTowersEtaSKTree->SetBranchAddress("Et",  &gepCellsTowersEtaSKEtValues);
+    gepCellsTowersEtaSKTree->SetBranchAddress("Eta", &gepCellsTowersEtaSKEtaValues);
+    gepCellsTowersEtaSKTree->SetBranchAddress("Phi", &gepCellsTowersEtaSKPhiValues);
+
+    // gep WTA cone cells towers EtaSK jets (EtaSK PU-suppressed)
+    gepWTAConeCellsTowersEtaSKJetsTree->SetBranchAddress("Et",           &gepWTAConeCellsTowersEtaSKJetsEtValues);
+    gepWTAConeCellsTowersEtaSKJetsTree->SetBranchAddress("Eta",          &gepWTAConeCellsTowersEtaSKJetsEtaValues);
+    gepWTAConeCellsTowersEtaSKJetsTree->SetBranchAddress("Phi",          &gepWTAConeCellsTowersEtaSKJetsPhiValues);
+    gepWTAConeCellsTowersEtaSKJetsTree->SetBranchAddress("NConstituents",&gepWTAConeCellsTowersEtaSKJetsNConstituentsValues);
 
     // === gFexSRJTree ===
     gFexSRJTree->SetBranchAddress("EtIndex", &gFexSRJEtIndexValues);
@@ -350,6 +368,11 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         jetTaggerSubleadingLRJSubjetEtaValues->clear();
         jetTaggerSubleadingLRJSubjetPhiValues->clear();
 
+        eventInfoTreeIn->GetEntry(iEvt); // get event/run number for passthrough
+
+        gepRunNumberOut = gepRunNumberIn;
+        gepEventNumberOut = gepEventNumberIn;
+
         if(seedObjectType == "jFEXSRJ"){
             jFexSRJTree->GetEntry(iEvt); // get seed data
         }
@@ -357,13 +380,15 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             gFexSRJTree->GetEntry(iEvt); // get seed data
         }
         else if(seedObjectType == "gepWTAConeCellsTowersJets"){
-            if(useSKObjects){
+            if(useEtaSKObjects){
+                gepWTAConeCellsTowersEtaSKJetsTree->GetEntry(iEvt); // get seed object data (EtaSK PU-suppressed)
+            }
+            else if(useSKObjects){
                 gepWTAConeCellsTowersSKJetsTree->GetEntry(iEvt); // get seed object data (PU-suppressed)
             }
             else{
                 gepWTAConeCellsTowersJetsTree->GetEntry(iEvt); // get seed object data
             }
-            
         }
         if(inputObjectType == "gepBasicClusters"){
             if(useSKObjects){
@@ -375,7 +400,10 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             
         }
         else if(inputObjectType == "gepCellsTowers"){
-            if(useSKObjects){
+            if(useEtaSKObjects){
+                gepCellsTowersEtaSKTree->GetEntry(iEvt); // get input object data (EtaSK PU-suppressed)
+            }
+            else if(useSKObjects){
                 gepCellsTowersSKTree->GetEntry(iEvt); // get input object data (PU-suppressed)
             }
             else{
@@ -383,7 +411,10 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             }
         }
         else if(inputObjectType == "gepWTAConeCellsTowersJets"){
-            if(useSKObjects){
+            if(useEtaSKObjects){
+                gepWTAConeCellsTowersEtaSKJetsTree->GetEntry(iEvt); // get input object data (EtaSK PU-suppressed)
+            }
+            else if(useSKObjects){
                 gepWTAConeCellsTowersSKJetsTree->GetEntry(iEvt); // get input object data (PU-suppressed)
             }
             else{
@@ -433,41 +464,52 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 seedValuesOriginal[iSeed].phi = digitize(gFexSRJPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
             }
             else if(seedObjectType == "gepWTAConeCellsTowersJets"){
-                if(useSKObjects){
-                    //std::cout << " seedobject type is correct" << "\n";
-                    //std::cout << "gepWTAConeCellsTowersSKJetspTValues->size() :" << gepWTAConeCellsTowersSKJetspTValues->size() << "\n";
-                    if(gepWTAConeCellsTowersSKJetspTValues->size() < nSeedsInput_){
-                        if(iSeed >= gepWTAConeCellsTowersSKJetspTValues->size()){
+                if(useEtaSKObjects){
+                    if(gepWTAConeCellsTowersEtaSKJetsEtValues->size() < nSeedsInput_){
+                        if(iSeed >= gepWTAConeCellsTowersEtaSKJetsEtValues->size()){
                             seedValuesOriginal[iSeed].et = 0;
                             seedValuesOriginal[iSeed].eta = 0;
                             seedValuesOriginal[iSeed].phi = 0;
                             continue;
                         }
                     }
-                    seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersSKJetspTValues->at(iSeed), et_bit_length_,
+                    seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersEtaSKJetsEtValues->at(iSeed), et_bit_length_,
                                     static_cast<double>(et_min_), static_cast<double>(et_max_));
-
+                    seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersEtaSKJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
+                    seedValuesOriginal[iSeed].phi = digitize(gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
+                }
+                else if(useSKObjects){
+                    //std::cout << " seedobject type is correct" << "\n";
+                    //std::cout << "gepWTAConeCellsTowersSKJetsEtValues->size() :" << gepWTAConeCellsTowersSKJetsEtValues->size() << "\n";
+                    if(gepWTAConeCellsTowersSKJetsEtValues->size() < nSeedsInput_){
+                        if(iSeed >= gepWTAConeCellsTowersSKJetsEtValues->size()){
+                            seedValuesOriginal[iSeed].et = 0;
+                            seedValuesOriginal[iSeed].eta = 0;
+                            seedValuesOriginal[iSeed].phi = 0;
+                            continue;
+                        }
+                    }
+                    seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersSKJetsEtValues->at(iSeed), et_bit_length_,
+                                    static_cast<double>(et_min_), static_cast<double>(et_max_));
                     seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersSKJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
                     seedValuesOriginal[iSeed].phi = digitize(gepWTAConeCellsTowersSKJetsPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
-
                 }
                 else{
                     //std::cout << " seedobject type is correct" << "\n";
-                    //std::cout << "gepConeGEPBasicClustersJetspTValues->size() :" << gepWTAConeCellsTowersJetspTValues->size() << "\n";
-                    if(gepWTAConeCellsTowersJetspTValues->size() < nSeedsInput_){
-                        if(iSeed >= gepWTAConeCellsTowersJetspTValues->size()){
+                    //std::cout << "gepConeGEPBasicClustersJetsEtValues->size() :" << gepWTAConeCellsTowersJetsEtValues->size() << "\n";
+                    if(gepWTAConeCellsTowersJetsEtValues->size() < nSeedsInput_){
+                        if(iSeed >= gepWTAConeCellsTowersJetsEtValues->size()){
                             seedValuesOriginal[iSeed].et = 0;
                             seedValuesOriginal[iSeed].eta = 0;
                             seedValuesOriginal[iSeed].phi = 0;
                             continue;
                         }
                     }
-                    seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersJetspTValues->at(iSeed), et_bit_length_,
+                    seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersJetsEtValues->at(iSeed), et_bit_length_,
                                     static_cast<double>(et_min_), static_cast<double>(et_max_));
                     seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
                     seedValuesOriginal[iSeed].phi = digitize(gepWTAConeCellsTowersJetsPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
                 }
-                
             }
         }
         std::memcpy(seedValues, seedValuesOriginal,
@@ -511,26 +553,35 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             }
         }
         else if(inputObjectType == "gepCellsTowers"){
-            if(useSKObjects){
+            if(useEtaSKObjects){
+                if (maxObjectsConsidered_ > gepCellsTowersEtaSKEtValues->size()) objectsProcessed = gepCellsTowersEtaSKEtValues->size();
+            }
+            else if(useSKObjects){
                 if (maxObjectsConsidered_ > gepCellsTowersSKEtValues->size()) objectsProcessed = gepCellsTowersSKEtValues->size();
             }
             else{
                 if (maxObjectsConsidered_ > gepCellsTowersEtValues->size()) objectsProcessed = gepCellsTowersEtValues->size();
-            } 
+            }
         }
         else if(inputObjectType == "gepWTAConeCellsTowersJets"){
-            if(useSKObjects){
-                if (maxObjectsConsidered_ + nSeedsOutput_ >= gepWTAConeCellsTowersSKJetspTValues->size()){
-                    if(gepWTAConeCellsTowersSKJetspTValues->size() >= nSeedsOutput_ ) objectsProcessed = gepWTAConeCellsTowersSKJetspTValues->size() - nSeedsOutput_;
+            if(useEtaSKObjects){
+                if (maxObjectsConsidered_ + nSeedsOutput_ >= gepWTAConeCellsTowersEtaSKJetsEtValues->size()){
+                    if(gepWTAConeCellsTowersEtaSKJetsEtValues->size() >= nSeedsOutput_ ) objectsProcessed = gepWTAConeCellsTowersEtaSKJetsEtValues->size() - nSeedsOutput_;
+                    else objectsProcessed = 0;
+                }
+            }
+            else if(useSKObjects){
+                if (maxObjectsConsidered_ + nSeedsOutput_ >= gepWTAConeCellsTowersSKJetsEtValues->size()){
+                    if(gepWTAConeCellsTowersSKJetsEtValues->size() >= nSeedsOutput_ ) objectsProcessed = gepWTAConeCellsTowersSKJetsEtValues->size() - nSeedsOutput_;
                     else objectsProcessed = 0;
                 }
             }
             else{
-                if (maxObjectsConsidered_ + nSeedsOutput_ >= gepWTAConeCellsTowersJetspTValues->size()){
-                    if(gepWTAConeCellsTowersJetspTValues->size() >= nSeedsOutput_ ) objectsProcessed = gepWTAConeCellsTowersJetspTValues->size() - nSeedsOutput_;
+                if (maxObjectsConsidered_ + nSeedsOutput_ >= gepWTAConeCellsTowersJetsEtValues->size()){
+                    if(gepWTAConeCellsTowersJetsEtValues->size() >= nSeedsOutput_ ) objectsProcessed = gepWTAConeCellsTowersJetsEtValues->size() - nSeedsOutput_;
                     else objectsProcessed = 0;
                 }
-            } 
+            }
         }
         //std::cout << "--------------------------------------------" << "\n";
         //std::cout << "OBJECTS PROCESSED: " << objectsProcessed << "\n";
@@ -550,10 +601,13 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 }
             }
             else if(inputObjectType == "gepCellsTowers"){
-                if(useSKObjects){
-                    //std::cout << "-----------------" << "\n";
-                    //std::cout << "tower sk i io: " << iIO << "\n";
-                    //std::cout << "tower eta: " << gepCellsTowersSKEtaValues->at(iIO) << " , phi: " << gepCellsTowersSKPhiValues->at(iIO) << "\n";
+                if(useEtaSKObjects){
+                    inputObjectValues[iIO].et = digitize(gepCellsTowersEtaSKEtValues->at(iIO), et_bit_length_,
+                                static_cast<double>(et_min_), static_cast<double>(et_max_));
+                    inputObjectValues[iIO].eta = digitize(gepCellsTowersEtaSKEtaValues->at(iIO), eta_bit_length_, eta_min_, eta_max_, eta_range_);
+                    inputObjectValues[iIO].phi = digitize(gepCellsTowersEtaSKPhiValues->at(iIO), phi_bit_length_, phi_min_, phi_max_);
+                }
+                else if(useSKObjects){
                     inputObjectValues[iIO].et = digitize(gepCellsTowersSKEtValues->at(iIO), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepCellsTowersSKEtaValues->at(iIO), eta_bit_length_, eta_min_, eta_max_, eta_range_);
@@ -568,22 +622,24 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             }
             else if(inputObjectType == "gepWTAConeCellsTowersJets"){
                 //std::cout << "digitizing gepWTAConeCellsTowersJets" << "\n";
-                if(useSKObjects){
-                    //std::cout << "iIO: " << iIO << "\n";
-                    //std::cout << "gepWTAConeCellsTowersSKJetspTValues->at(iIO + nSeedsOutput_): " << gepWTAConeCellsTowersSKJetspTValues->at(iIO + nSeedsOutput_) << "\n";
-                    inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersSKJetspTValues->at(iIO + nSeedsOutput_), et_bit_length_,
+                if(useEtaSKObjects){
+                    inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersEtaSKJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    //std::cout << "digitzed inputObjectValues[iIO].et: " << inputObjectValues[iIO].et << "\n";
+                    inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersEtaSKJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
+                    inputObjectValues[iIO].phi = digitize(gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iIO + nSeedsOutput_), phi_bit_length_, phi_min_, phi_max_);
+                }
+                else if(useSKObjects){
+                    inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersSKJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
+                                static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersSKJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
                     inputObjectValues[iIO].phi = digitize(gepWTAConeCellsTowersSKJetsPhiValues->at(iIO + nSeedsOutput_), phi_bit_length_, phi_min_, phi_max_);
                 }
                 else{
-                    inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersJetspTValues->at(iIO + nSeedsOutput_), et_bit_length_,
+                    inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
                     inputObjectValues[iIO].phi = digitize(gepWTAConeCellsTowersJetsPhiValues->at(iIO + nSeedsOutput_), phi_bit_length_, phi_min_, phi_max_);
                 }
-                
             }
 
         }
@@ -1072,10 +1128,11 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             jetTaggerSubleadingLRJSubjetEtaValues->push_back(undigitize_eta(subjetsSeedArray[sublIdx][iSubj].eta));
             jetTaggerSubleadingLRJSubjetPhiValues->push_back(undigitize_phi(subjetsSeedArray[sublIdx][iSubj].phi));
         }
-        // Fill branch to output ntuple with 
+        // Fill branch to output ntuple with
         jetTaggerLRJs->Fill();
         jetTaggerLeadingLRJs->Fill();
         jetTaggerSubleadingLRJs->Fill();
+        emulEventInfoTree->Fill();
     } // Loop through events
     std::cout << "number of overlaps removed: " << overlapRemovalCounter << " for " << eventsToProcess << " events." << "\n";
     // Close output files
@@ -1084,6 +1141,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     jetTaggerLRJs->Write("", TObject::kOverwrite);
     jetTaggerLeadingLRJs->Write("", TObject::kOverwrite);
     jetTaggerSubleadingLRJs->Write("", TObject::kOverwrite);
+    emulEventInfoTree->Write("", TObject::kOverwrite);
     outputFile->Close();
     inputFile->Close();
 
@@ -1093,42 +1151,43 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
 // Use(compiling, running with ROOT): .L jetTaggerEmulation.cc, jetTaggerEmulation(0.001, 128, 2, 1.0, true, 3, false)
 void jetTaggerEmulation(double rMergeCut, // Distance in r-phi plane to look for other jFEX SRJs (from leading, subleading jets)
                                         // to recalculate seed position by taking midpoint between the two jets
-                                        // to disable recalculation of seed position, set to 0.001 
+                                        // to disable recalculation of seed position, set to 0.001
                         unsigned int numberIOs, // number of input objects (clusters or towers) considered for merging to seeds
                         unsigned int nSeeds, // Number of seeds and consequently number of output jets
                         double RSquaredCut, // radius squared of output jets
                         bool signalBool,  // whether processing a signal or background process
                         bool condorBool, // whether running using condor batch job submission (requires change in filepaths)
-                        bool useSKObjects, // Whether to use PU-suppressed (with SoftKiller) objects 
+                        bool useSKObjects, // Whether to use PU-suppressed (with SoftKiller) objects
                         std::string signalString, // Which signal sample being used (functionality for: VBF_hh_bbbb, ggF_hh_bbbb, ZvvHbb, ttbar_had, Zprime_ttbar)
-                        std::string inputObjectType = "gepCellsTowers", // Possibilities: "gepCellsTowers", "gepWTAConeCellsTowersJets", "gepTopoTowers", "gepBasicClusters"
-                        std::string seedObjectType = "gepWTAConeCellsTowersJets", // Possibilities: "gepWTAConeCellsTowersJets" or "jFEXSRJ"  // FIXME allow this to be changed in executable
+                        std::string inputObjectType = "gepCellsTowers", // Possibilities: "gepCellsTowers", "gepWTAConeCellsTowersJets", "gepBasicClusters"
+                        std::string seedObjectType = "gepWTAConeCellsTowersJets", // Possibilities: "gepWTAConeCellsTowersJets" or "jFEXSRJ"
                         double subjetEtThreshold = 25.0, // Nominally 25 GeV for gepWTAConeCellsTowersJets, 50 GeV for jFEX SRJ, 35 GeV for gFEX SRJ based on their respective energy scales, not fully optimized
                         bool enableEtWeightedMidpoint = false, // Whether use E_T weighted midpoint calculation for seed optimization
                         bool minEtSeedPosOptimization = false, // Whether require a minimum E_T to allow a proto-seed to be considered for seed optimization
-                        double minEtSeedPosOptimizationCut = 25.0 // Minimum E_T (in GeV) if minEtSeedPosOptimization is enabled for a proto-seed to be considered for seed optimization
+                        double minEtSeedPosOptimizationCut = 25.0, // Minimum E_T (in GeV) if minEtSeedPosOptimization is enabled for a proto-seed to be considered for seed optimization
+                        bool writeMemPrints = true, // Whether to write memory-print text files (disable for batch/Condor runs)
+                        std::string explicitInputPath = "", // When non-empty, overrides makeInputFileName (used for per-file Condor parallelism)
+                        int fileIndex = -1, // When >= 0, appended as _fileN to output name to avoid collisions across parallel jobs
+                        bool useEtaSKObjects = false // Whether to use EtaSK PU-suppressed objects (gepCellsTowers and WTAConeJets only)
                         ){
     if(signalBool) std::cout << "Processing signal of: " << signalString  << "\n";
     // Construct input and output ntuple, LUT paths based on configuration type
-    auto infile = makeInputFileName(signalBool, signalString); // FIXME update this when running with condor.
-    auto outntuplefile = makeOutputFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, subjetEtThreshold, enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut);
-    auto outtextfile = makeOutputTextFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_);
+    auto infile = explicitInputPath.empty() ? makeInputFileName(signalBool, signalString) : explicitInputPath;
+    auto outntuplefile = makeOutputFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, subjetEtThreshold, enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut, "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/", useEtaSKObjects);
+    if (fileIndex >= 0) {
+        size_t pos = outntuplefile.rfind(".root");
+        if (pos != std::string::npos)
+            outntuplefile = outntuplefile.substr(0, pos) + "_file" + std::to_string(fileIndex) + ".root";
+    }
+    auto outtextfile = writeMemPrints
+        ? makeOutputTextFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsEmulation/", useEtaSKObjects)
+        : std::string("/dev/null");
     std::cout << "infile: " << infile << "\n";
-    std::cout << "outntuplefile: " << outntuplefile << "\n"; 
-    std::cout << "outtextfile: " << outtextfile << "\n";       
-    try { // FIXME update this when running with condor.
-        //std::cout << "why is this not working" << "\n";
-        std::filesystem::copy_file(infile, outntuplefile, 
-                      std::filesystem::copy_options::overwrite_existing);
-        std::cout << "File copied successfully\n";
-    } catch (std::filesystem::filesystem_error& e) {
-        std::cerr << "Copy failed: " << e.what() << '\n';
-    }     
-
-    //gSystem->RedirectOutput("debuglog.log", "w");
+    std::cout << "outntuplefile: " << outntuplefile << "\n";
+    if (writeMemPrints) std::cout << "outtextfile: " << outtextfile << "\n";
     std::cout << "calling event loop: " << "\n";
-    eventLoop(infile, outntuplefile, outtextfile, inputObjectType, seedObjectType, useSKObjects, 
+    eventLoop(infile, outntuplefile, outtextfile, inputObjectType, seedObjectType, useSKObjects,
         enableEtWeightedMidpoint, minEtSeedPosOptimization,
-        minEtSeedPosOptimizationCut, subjetEtThreshold);
+        minEtSeedPosOptimizationCut, subjetEtThreshold, useEtaSKObjects);
     //gSystem->Exit(0);
-} 
+}

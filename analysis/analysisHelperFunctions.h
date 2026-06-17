@@ -2914,23 +2914,23 @@ GlobalRateEffOut5 MakeCombinedRateVsEff_AllFive_NSubjetiness_Cat0Mass(
   return out;
 }
 
+struct BestPoint5_EtOnly {
+  double bestEff  = 0.0;
+  double bestRate = 0.0;
+  double bestEtCut[5]    = {0,0,0,0,0};
+  double bestEff_cat[5]  = {0,0,0,0,0};
+  double bestEff_tot[5]  = {0,0,0,0,0};
+  double bestRate_cat[5] = {0,0,0,0,0};
+};
+
 struct GlobalRateEffOut5_EtOnly {
   TGraphErrors* gRate_vsEff_combined = nullptr;
 
   // signal fractions (from signal hist integrals)
   double fractionEventsPerCat[5] = {0,0,0,0,0};
 
-  // best global point (max eff with total rate <= maxRateHz)
-  double bestEff  = 0.0;
-  double bestRate = 0.0;
-
-  // best per-category Et thresholds at that point
-  double bestEtCut[5] = {0,0,0,0,0};
-
-  // per-category values at the best point
-  double bestEff_cat[5]  = {0,0,0,0,0};   // efficiency within category
-  double bestEff_tot[5]  = {0,0,0,0,0};   // contribution to total (eff_cat * frac)
-  double bestRate_cat[5] = {0,0,0,0,0};   // background rate contribution [Hz]
+  // best points per rate target (indexed parallel to rateTargets vector)
+  std::vector<BestPoint5_EtOnly> bestPoints;
 };
 
 // Pareto update: keep only points that are not dominated
@@ -2994,7 +2994,7 @@ GlobalRateEffOut5_EtOnly MakeCombinedRateVsEff_AllFive_EtOnly(
     TH1* sigCat3,
     TH1* sigCat4,
     double maxRateHzDraw,
-    double maxRateHzPrint)
+    const std::vector<double>& rateTargets)
 {
   const double minRateHz = 10.0;
 
@@ -3165,25 +3165,24 @@ GlobalRateEffOut5_EtOnly MakeCombinedRateVsEff_AllFive_EtOnly(
 
   for (int c = 0; c < 5; ++c) out.fractionEventsPerCat[c] = frac[c];
 
-  out.bestEff  = 0.0;
-  out.bestRate = 0.0;
+  out.bestPoints.resize(rateTargets.size());
 
   for (size_t i = 0; i < globalFrontier.size(); ++i) {
     const auto& gp = globalFrontier[i];
     gCombined->SetPoint(i, gp.eff, gp.rate);
     gCombined->SetPointError(i, 0.0, gp.rateErr);
 
-    if(gp.rate > maxRateHzPrint) continue; // ensure that the printed values are for a rate of the print value (10kHz)
-
-    if (gp.eff > out.bestEff) {
-      out.bestEff  = gp.eff;
-      out.bestRate = gp.rate;
-      
-      for (int c = 0; c < 5; ++c) {
-        out.bestEtCut[c]    = gp.etCut[c];
-        out.bestEff_cat[c]  = gp.eff_cat[c];
-        out.bestEff_tot[c]  = gp.eff_tot[c];
-        out.bestRate_cat[c] = gp.rate_cat[c];
+    for (size_t t = 0; t < rateTargets.size(); ++t) {
+      if (gp.rate > rateTargets[t]) continue;
+      if (gp.eff > out.bestPoints[t].bestEff) {
+        out.bestPoints[t].bestEff  = gp.eff;
+        out.bestPoints[t].bestRate = gp.rate;
+        for (int c = 0; c < 5; ++c) {
+          out.bestPoints[t].bestEtCut[c]    = gp.etCut[c];
+          out.bestPoints[t].bestEff_cat[c]  = gp.eff_cat[c];
+          out.bestPoints[t].bestEff_tot[c]  = gp.eff_tot[c];
+          out.bestPoints[t].bestRate_cat[c] = gp.rate_cat[c];
+        }
       }
     }
   }
