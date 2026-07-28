@@ -32,7 +32,9 @@ std::string makeInputFileName(bool signalBool, std::string signalString,
         else if (signalString == "ggF_hh_bbbb") ss << inputRootFilePath << "ggF_HHbbbb_v3/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ZvvHbb") ss << inputRootFilePath << "ZvvHbb_v3/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_resim_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ttbar_had") ss << inputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
-        else if (signalString == "Zprime_ttbar") ss << inputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";       
+        else if (signalString == "Zprime_ttbar") ss << inputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "ttbar_semilep") ss << inputRootFilePath << "ttbar_semilep_v4/mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "ttbar_dilep") ss << inputRootFilePath << "ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     } else {
         ss << inputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     }
@@ -119,6 +121,8 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
         else if (signalString == "ZvvHbb")            ss << outputRootFilePath << "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_";
         else if (signalString == "ttbar_had")         ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_";
         else if (signalString == "Zprime_ttbar")      ss << outputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_";
+        else if (signalString == "ttbar_semilep")     ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_";
+        else if (signalString == "ttbar_dilep")       ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_";
     } else {
         ss << outputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_";
     }

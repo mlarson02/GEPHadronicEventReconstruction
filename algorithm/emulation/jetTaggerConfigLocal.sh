@@ -14,7 +14,7 @@ algoVersions=(3)
 rMergeCuts=(2) 
 #rMergeCuts=(1.25 1.75)
 rSquaredCuts=(1.21)
-nIOs=(128)
+nIOs=(512)
 nSeeds=(2)
 signals=(true false)
 puSuppression=(true)
@@ -33,6 +33,11 @@ inputObjects=("gepCellsTowers")
 #seedObjects=("gepWTAConeCellsTowersJets")
 seedObjects=("gepWTAConeCellsTowersJets")
 condor=false
+
+# Set true to validate against the Athena TrigGepPerf output (reads the
+# HERNTupler validation ntuple, writes a fixed output). Leaves the nominal
+# parameter scan below untouched when false.
+trigGepPerfValidation=true
 
 # ---- new algorithm behaviour parameters ----
 enableEtWeightedMidpoints=(false)
@@ -67,6 +72,34 @@ make_input_constants_file_name() {
   printf "%sconstants_rMerge_%s_R2_%s_IOs_%s_Seeds_%s_v%s.h" \
          "$base" "$rMergeFmt" "$r2Fmt" "$nIOs" "$nSeeds" "$vers"
 }
+
+# ---- TrigGepPerf validation mode ----
+# Runs the emulation once on the HERNTupler validation ntuple for the chosen
+# algorithm version, copying the matching constants/LUT and using the emulation
+# config that mirrors the Athena preset (seed=WTACone, const=Towers, subjetEt=25,
+# non-SK). jetTaggerEmulation picks the input/output file from algoVersion_.
+if [[ "$trigGepPerfValidation" == true ]]; then
+  trigGepPerfValidationAlgoVersion=3   # 2 = basic (BasicV2), 3 = advanced (AdvancedV3); must match the Athena sample
+  if [[ "$trigGepPerfValidationAlgoVersion" -eq 2 ]]; then
+    vRMerge=0.001; vR2=1.21; vIOs=8;   vSeeds=2; vVers=2; vEwm=false; vMep=false
+  else
+    vRMerge=2;     vR2=1.21; vIOs=512; vSeeds=2; vVers=3; vEwm=false;  vMep=true
+  fi
+  vConstants=$(make_input_constants_file_name "$vRMerge" "$vIOs" "$vSeeds" "$vR2" "$vVers" "$constants_base")
+  vLutR8b=$(make_input_LUT_file_name "$vRMerge" "$vR2" "deltaR_8b" "$inputLUTFilePath")
+  echo "[trigGepPerfValidation] v${vVers} constants: $vConstants"
+  echo "[trigGepPerfValidation] v${vVers} LUT:       $vLutR8b"
+  cp -f "$vConstants" "$dest_dir/constants.h"
+  cp -f "$vLutR8b"    "$dest_dir/deltaRLUT_8b.h"
+  # arg order: rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, condorBool,
+  #   useSKObjects, signalString, inputObjectType, seedObjectType, subjetEtThreshold,
+  #   enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut,
+  #   writeMemPrints, explicitInputPath, fileIndex, useEtaSKObjects, trigGepPerfValidation
+  # NOTE: useEtaSKObjects=true -> EtaSK GEPCellsTowers WTACone seeds + EtaSK towers (the intended JetTagger input)
+  root -l -b -q "${src_cc}+(${vRMerge}, ${vIOs}, ${vSeeds}, ${vR2}, true, false, false, \"ggF_hh_bbbb\", \"gepCellsTowers\", \"gepWTAConeCellsTowersJets\", 25, ${vEwm}, ${vMep}, 25.0, false, \"\", -1, true, true)"
+  rm -rf jetTaggerEmulation_cc*
+  exit 0
+fi
 
 # ---- main loops ----
 for rMerge in "${rMergeCuts[@]}"; do

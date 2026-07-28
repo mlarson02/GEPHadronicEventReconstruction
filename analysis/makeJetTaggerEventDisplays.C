@@ -1,5 +1,42 @@
 #include "analysisHelperFunctions.h"
 
+// Draw the ATLAS "Work in progress" label (plus beam-energy / pileup and physics
+// process info) in a white strip ABOVE the plot frame on the currently active canvas.
+// Call after cd()'ing to the canvas and before SaveAs/Print.
+// Unlike the largeRJetAnalysisAndRates.C version (which enlarges the top margin and
+// thereby shrinks the frame), this assumes the canvas was created taller by a fixed
+// strip (see canvas creation) so the existing display keeps its original size: the
+// plot frame and bottom margin are held at their original pixel dimensions and the
+// extra room is added entirely at the top.
+// NOTE: this only adjusts margins (re-applied by Print when it repaints). It must NOT
+// resize the canvas or call Update() here: doing so mid-multipage-PDF corrupts the
+// TPDF object stream ("An Object is already open") and blanks the pages.
+void DrawATLASLabel(double x = 0.20, double /*y*/ = 0.88, const char* status = "Work in progress",
+                    const char* processLabel = "") {
+    if (gPad) {
+        const double h0      = 700.0;                       // original display height [px]
+        const double stripPx = 105.0;                       // headroom added at the top [px]
+        const double tm0     = gStyle->GetPadTopMargin();   // style default margins
+        const double bm0     = gStyle->GetPadBottomMargin();
+        const double H       = h0 + stripPx;                // matches canvas creation height
+        gPad->SetTopMargin((tm0 * h0 + stripPx) / H); // original top margin + strip, in new units
+        gPad->SetBottomMargin(bm0 * h0 / H);          // keep bottom margin at original pixel size
+        gPad->Modified();                             // flag for repaint; Print re-applies margins (no Update() mid-PDF)
+    }
+    const double yAtlas = 0.945;    // "ATLAS <status>" line, in the strip above the frame
+    const double yInfo  = 0.895;    // beam-energy / pileup line, just below it
+    TLatex l; l.SetNDC(); l.SetTextFont(72); l.SetTextColor(kBlack); l.SetTextSize(0.04);
+    l.DrawLatex(x, yAtlas, "ATLAS");
+    TLatex p; p.SetNDC(); p.SetTextFont(42); p.SetTextColor(kBlack); p.SetTextSize(0.04);
+    p.DrawLatex(x + 0.13, yAtlas, status);
+    TLatex e; e.SetNDC(); e.SetTextFont(42); e.SetTextColor(kBlack); e.SetTextSize(0.035);
+    e.DrawLatex(x, yInfo, "#sqrt{s} = 14 TeV, <PU> = 200");
+    if (processLabel && processLabel[0] != '\0') {
+        TLatex pr; pr.SetNDC(); pr.SetTextFont(42); pr.SetTextColor(kBlack); pr.SetTextSize(0.035);
+        pr.DrawLatex(0.70, yAtlas, processLabel);
+    }
+}
+
 void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputFile, unsigned int desiredJZSlice, bool signalBool, std::string signalString, std::string subjetType, bool skBool){
     SetPlotStyle();
 
@@ -40,6 +77,16 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
    
     TString modifiedOutputFileDir = "eventDisplays/" + signalString + "_" + algorithmConfigurations[0] + "_seed" + seedObjectType + "_" + subjetType + "subjets/";
     gSystem->mkdir(modifiedOutputFileDir);
+
+    // Human-readable physics process label for the ATLAS header on each event display
+    std::string processLabel;
+    if(signalString == "VBF_hh_4b_cvv0")      processLabel = "hh#rightarrow4b [VBF, c_{vv} = 0]";
+    else if(signalString == "VBF_hh_4b_cvv1") processLabel = "hh#rightarrow4b [VBF, c_{vv} = 1]";
+    else if(signalString == "ggF_hh_4b")      processLabel = "hh#rightarrow4b [ggF]";
+    else if(signalString == "ttbar_had")      processLabel = "t#bar{t} [had]";
+    else if(signalString == "Zprime_ttbar")   processLabel = "Z' #rightarrow t#bar{t} [had]";
+    else if(signalString.rfind("jj_", 0) == 0) processLabel = Form("QCD dijet [JZ%s]", signalString.substr(3).c_str());
+    else                                       processLabel = signalString;
 
     std::vector<double>* mcEventWeightsValues = nullptr;
     double sumOfWeightsForSampleValues = 0.0;
@@ -433,13 +480,16 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
 
     //const int numProcessedEvents = eventInfoTree->GetEntries();
     TString pdf = modifiedOutputFileDir + "cellsTowersHighestEtSeedPositions.pdf";
-    TCanvas c("c","c",800,700);
+    // Taller than the 700 px display so the ATLAS header strip fits on top without
+    // shrinking the plot (DrawATLASLabel sets margins to preserve the frame size).
+    // Size is fixed here for the whole multipage PDF - do NOT resize between pages.
+    TCanvas c("c","c",800,805);
 
     // open multipage pdf
     c.Print(pdf + "(");
 
     TString pdf_ED = modifiedOutputFileDir + "cellsTowersHighestEtTruthAndPileupJets.pdf";
-    TCanvas cEventDisplay("cEventDisplay","cEventDisplay",800,700);
+    TCanvas cEventDisplay("cEventDisplay","cEventDisplay",800,805);
 
     // open multipage pdf_ED
     cEventDisplay.Print(pdf_ED + "(");
@@ -448,19 +498,24 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
     unsigned int nAccepted = 0;
 
     const int numProcessedEvents = eventInfoTree->GetEntries();
-
-    for (int iEvt = 154796; iEvt < numProcessedEvents && nAccepted < maxDisplays; ++iEvt) {
+    std::cout << "numProcessedEvents: " << numProcessedEvents << "\n";
+    for (int iEvt = 1000; iEvt < numProcessedEvents && nAccepted < maxDisplays; ++iEvt) {
         eventInfoTree->GetEntry(iEvt);
-        //std::cout << "iEvt: " << iEvt << "\n";
+        std::cout << "iEvt: " << iEvt << "\n";
         //std::cout << "sampleJZSliceValues: " << desiredJZSlice << "\n";
-        if (!signalBool && sampleJZSliceValues != desiredJZSlice)
+        std::cout << "signalBOol: " << signalBool << " , sampleJZSlice: " << sampleJZSliceValues << "\n";
+        if (!signalBool && sampleJZSliceValues != desiredJZSlice){
+            std::cout << "continuing: " << "\n";
             continue;
+        }
+            
 
         // ---- event accepted ----
         ++nAccepted;
         //std::cout << "accepted!" << "\n";
 
         if(iEvt % 10 == 0) std::cout << "iEvt: " << iEvt << "\n";
+        std::cout << "test 0" << "\n";
         inTimeAntiKt4TruthJetsTree->GetEntry(iEvt); // NOTE all of these are pT / Et sorted!
         leadingInTimeAntiKt4TruthJetsTree->GetEntry(iEvt);
         outOfTimeAntiKt4TruthJetsTree->GetEntry(iEvt);
@@ -470,7 +525,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
         jetTaggerLeadingLRJs->GetEntry(iEvt);
         eventInfoTree->GetEntry(iEvt);
         jetTaggerSubleadingLRJs->GetEntry(iEvt);
-
+        std::cout << "getting tree..." << "\n";
         truthbTree->GetEntry(iEvt);
         truthHiggsTree->GetEntry(iEvt);
         gepWTAConeCellsTowersJetsTree->GetEntry(iEvt);
@@ -482,7 +537,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
         leadingRecoAntiKt10UFOCSSKJets->GetEntry(iEvt);
         truthAntiKt4TruthDressedWZJets->GetEntry(iEvt);
         leadingTruthAntiKt4TruthDressedWZJets->GetEntry(iEvt);
-
+        std::cout << "test 1" << "\n";
         TH2F *cellsTowersHighestEtSeedPositions = new TH2F("cellsTowersHighestEtSeedPositions", "Sum of CellsTowers E_{T} in Each Bin; #eta;#phi", 
                             100, -5, 5,   
                             64, -3.2, 3.2);  
@@ -509,7 +564,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
         else if(subjetType == "gFEXSRJ") subjetEtThreshold = 35.0;
         const double truthJetEtThreshold = 15.0;
         const double pileupJetEtThreshold = 15.0;
-
+            std::cout << "test 2" << "\n";
         std::vector<std::pair<double, double > > possibleSubjets;
         std::vector<std::pair<double, double > > truthJets;
         std::vector<std::pair<double, double > > pileupJets;
@@ -574,7 +629,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                 }
             }
         }
-
+        std::cout << "test 3" << "\n";
         newSeedPositions.push_back(std::make_pair(jetTaggerLeadingLRJEtaValues->at(0), jetTaggerLeadingLRJPhiValues->at(0)));
         newSeedPositions.push_back(std::make_pair(jetTaggerSubleadingLRJEtaValues->at(0), jetTaggerSubleadingLRJPhiValues->at(0)));
         lrjEt.push_back(jetTaggerLeadingLRJEtValues->at(0));
@@ -583,6 +638,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
         lrjPsi_R.push_back(jetTaggerSubleadingLRJPsi_RValues->at(0));
         std::array<std::vector<unsigned int >, 2 > subjetIndices;
         std::array<unsigned int, 2 > NSubjets = {0};
+        std::cout << "test 3.1" << "\n";
         if(subjetType == "WTACone"){
             if(skBool){
                 for(unsigned int iConeJet = 0; iConeJet < gepWTAConeCellsTowersSKJetspTValues->size(); iConeJet++){
@@ -654,7 +710,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                 }
             }
         }
-
+        std::cout << "test 3.3" << "\n";
         if(NSubjets[0] >= 2){
             if(subjetType == "WTACone"){
                 if(skBool){
@@ -732,14 +788,16 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                 outOfTimePileupJets.push_back(std::make_pair(outOfTimeAntiKt4TruthSRJEtaValues->at(iOOTPUJet), outOfTimeAntiKt4TruthSRJPhiValues->at(iOOTPUJet)));
             }
         }
-
+        std::cout << "test 3.4" << "\n";
         if(signalString == "VBF_hh_4b_cvv0" || signalString == "VBF_hh_4b_cvv1" || signalString == "ggF_hh_4b"){
             // Map: Higgs index -> list of b-quark indices
+             std::cout << "test 3.41" << "\n";
             std::unordered_map<int, std::vector<int>> higgsToB;
             higgsToB.reserve(higgsIndexValues->size());
             for (size_t ib = 0; ib < higgsIndexValues->size(); ++ib) {
                 higgsToB[ (*higgsIndexValues)[ib] ].push_back((int)ib);
             }
+             std::cout << "test 3.42" << "\n";
             for (size_t ih = 0; ih < indexOfHiggsValues->size(); ++ih) {
 
                 const int hid = (*indexOfHiggsValues)[ih];
@@ -752,17 +810,27 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                 higgsPts.push_back(higgspT);
 
                 auto it = higgsToB.find(hid);
+                if(truthbquarksEtValues->size() == 0) continue;
+                std::cout << "truthbquarksEtValues->size(): " << truthbquarksEtValues->size() << "\n";
+                std::cout << "it->second.size(): " << it->second.size() << "\n";
                 if (it == higgsToB.end() || it->second.size() < 2) continue;
-
+                 std::cout << "test 3.43" << "\n";
                 const int ib1 = it->second[0];
+                std::cout << "test 3.431" << "\n";
                 const int ib2 = it->second[1];
+                std::cout << "test 3.432" << "\n";
                 const double et1 = (*truthbquarksEtValues)[ib1];
+                std::cout << "test 3.433" << "\n";
                 const double eta1 = (*truthbquarksEtaValues)[ib1];
+                std::cout << "test 3.434" << "\n";
                 const double phi1 = (*truthbquarksPhiValues)[ib1];
+                std::cout << "test 3.431" << "\n";
                 const double et2 = (*truthbquarksEtValues)[ib2];
                 const double eta2 = (*truthbquarksEtaValues)[ib2];
                 const double phi2 = (*truthbquarksPhiValues)[ib2];
+                std::cout << "test 3.44" << "\n";
                 if(et1 >= et2){
+                    std::cout << "test 3.441" << "\n";
                     bQuarks[ih].push_back(std::make_pair(eta1, phi1));
                     bQuarks[ih].push_back(std::make_pair(eta2, phi2));
                     bEts[ih].push_back(et1);
@@ -775,7 +843,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                     bEts[ih].push_back(et1);
                 }
                 
-
+                std::cout << "test 3.5" << "\n";
                 const double dr2 = calcDeltaR2(eta1, phi1, eta2, phi2);
                 const double dR  = std::sqrt(dr2);
 
@@ -786,7 +854,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                 
             }
         }
-
+        std::cout << "test 3.6" << "\n";
         {
             c.cd();
             c.Clear();
@@ -845,7 +913,8 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
             Lat2.SetTextSize(0.025);     // Adjust size
             Lat2.SetTextColor(kBlack); // Match circle color
             Lat2.DrawLatex(newSeedPositions[1].first, newSeedPositions[1].second + 0.6, inputFileLabel2); // Slightly above the circle
-
+            std::cout << "test 4" << "\n";
+            DrawATLASLabel(0.20, 0.88, "Work in progress", processLabel.c_str());
             c.Print(pdf);   // add a page
 
             c.Clear();
@@ -855,10 +924,11 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
             lat.SetTextAlign(13);  // left, top
 
             double y = 0.85;
-
+            std::cout << "test 3.8" << "\n";
             double deltaRSubjetsLead = -1; 
             double lrjEtRatioLead = -1;
             double massApproxLead = -1;
+            std::cout << "test 3.81" << "\n";
             if(NSubjets[0] >= 2){
                 deltaRSubjetsLead = lrjDeltaRSubjets[0];
                 lrjEtRatioLead = lrjEtRatioSubjets[0];
@@ -873,7 +943,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                     lrjEt[0], lrjPsi_R[0], deltaRSubjetsLead, lrjEtRatioLead));
 
             y -= 0.08;
-            
+                std::cout << "test 3.9" << "\n";
             double deltaRSubjetsSublead = -1; 
             double lrjEtRatioSublead = -1;
             double massApproxSublead = -1;
@@ -889,7 +959,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
 
             c.Print(pdf);   // ===== PAGE 2 =====
         } // within scope to allow for renaming variables. 
-
+        std::cout << "test 4.0" << "\n";
         { // generate event displays with cone subjets, jettagger LRJ, truth & pileup jets + b, higgs information
             cEventDisplay.cd();
             cEventDisplay.Clear();
@@ -909,7 +979,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
             circle1->SetFillStyle(0); // no fill
             circle1->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
             circle1->Draw("same");    // overlay on the existing plot
-
+            std::cout << "test 4.1" << "\n";
             for(unsigned int iSubjet = 0; iSubjet < possibleSubjets.size(); iSubjet++){
                 //if(subjetType == "WTACone"){
                     TEllipse *circle = new TEllipse(possibleSubjets[iSubjet].first, possibleSubjets[iSubjet].second, 0.4, 0.4); // R in both x and y
@@ -918,6 +988,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                     circle->SetFillStyle(0); // no fill
                     circle->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
                     circle->Draw("same");    // overlay on the existing plot
+                    std::cout << "test 4.2" << "\n";
                 //}
                 /*else if(subjetType == "jFEXSRJ"){
                     if()
@@ -957,8 +1028,11 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                 circle->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
                 circle->Draw("same");    // overlay on the existing plot
             }
+            std::cout << "test 4.3" << "\n";
             if(signalString == "VBF_hh_4b_cvv0" || signalString == "VBF_hh_4b_cvv1" || signalString == "ggF_hh_4b"){
+                std::cout << "why are there no HIGGS " << "\n";
                 TEllipse *circle_h1 = new TEllipse(higgses[0].first, higgses[0].second, 0.1, 0.1); // R in both x and y
+                std::cout << "are there really no higgs" << "\n";
                 circle_h1->SetLineColor(kOrange);
                 circle_h1->SetLineWidth(2);
                 circle_h1->SetFillStyle(0); // no fill
@@ -1020,7 +1094,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
 
                 
             }
-
+            std::cout << "test 4.4" << "\n";
             // Build the label text (1st LRJ)
             TString label1 = Form("Lead. E_{T}=%.1f GeV", lrjEt[0]);
 
@@ -1038,9 +1112,10 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
             Lat2.SetTextSize(0.025);     // Adjust size
             Lat2.SetTextColor(kBlack); // Match circle color
             Lat2.DrawLatex(newSeedPositions[1].first, newSeedPositions[1].second + 0.6, label2); // Slightly above the circle
-            
-            
 
+
+
+            DrawATLASLabel(0.20, 0.88, "Work in progress", processLabel.c_str());
             cEventDisplay.Print(pdf_ED);
 
             cEventDisplay.Clear();
@@ -1059,7 +1134,7 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
                 lrjEtRatioLead = lrjEtRatioSubjets[0];
                 massApproxLead = lrjMassApprox[0];
             }
-
+            std::cout << "test 4.5" << "\n";
             lat.DrawLatexNDC(0.05, y,
                 Form("Lead.: E_{T}=%.1f GeV, #psi_{R}=%.2f, #DeltaR=%.2f, r_{E_{T}}=%.2f, #DeltaR #times r_{E_{T}}=%.2f",
                     lrjEt[0], lrjPsi_R[0], deltaRSubjetsLead, lrjEtRatioLead, deltaRSubjetsLead*lrjEtRatioLead));
@@ -1111,25 +1186,38 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
             }
 
             y -= 0.10;
-            lat.DrawLatexNDC(0.05, y,
-                Form("Lead. Offline LRJ: E_{T}=%.1f GeV, #eta=%.2f, #phi=%.2f",
-                    recoAntiKt10LRJLeadingEtValues->at(0), recoAntiKt10LRJLeadingEtaValues->at(0), recoAntiKt10LRJLeadingPhiValues->at(0)));
+            if(!recoAntiKt10LRJLeadingEtValues->empty())
+                lat.DrawLatexNDC(0.05, y,
+                    Form("Lead. Offline LRJ: E_{T}=%.1f GeV, #eta=%.2f, #phi=%.2f",
+                        recoAntiKt10LRJLeadingEtValues->at(0), recoAntiKt10LRJLeadingEtaValues->at(0), recoAntiKt10LRJLeadingPhiValues->at(0)));
+            else
+                lat.DrawLatexNDC(0.05, y, "Lead. Offline LRJ: (none)");
             y -= 0.10;
-            lat.DrawLatexNDC(0.05, y,
-                Form("Lead. Truth Jet: E_{T}=%.1f GeV, #eta=%.2f, #phi=%.2f",
-                    truthAntiKt4WZSRJLeadingEtValues->at(0), truthAntiKt4WZSRJLeadingEtaValues->at(0), truthAntiKt4WZSRJLeadingPhiValues->at(0)));
+            if(!truthAntiKt4WZSRJLeadingEtValues->empty())
+                lat.DrawLatexNDC(0.05, y,
+                    Form("Lead. Truth Jet: E_{T}=%.1f GeV, #eta=%.2f, #phi=%.2f",
+                        truthAntiKt4WZSRJLeadingEtValues->at(0), truthAntiKt4WZSRJLeadingEtaValues->at(0), truthAntiKt4WZSRJLeadingPhiValues->at(0)));
+            else
+                lat.DrawLatexNDC(0.05, y, "Lead. Truth Jet: (none)");
             y -= 0.10;
-            lat.DrawLatexNDC(0.05, y,
-                Form("Lead. In-Time PU Truth Jet: E_{T}=%.1f GeV, #eta=%.2f, #phi=%.2f",
-                    inTimeAntiKt4TruthSRJLeadingEtValues->at(0), inTimeAntiKt4TruthSRJLeadingEtaValues->at(0), inTimeAntiKt4TruthSRJLeadingPhiValues->at(0)));
+            if(!inTimeAntiKt4TruthSRJLeadingEtValues->empty())
+                lat.DrawLatexNDC(0.05, y,
+                    Form("Lead. In-Time PU Truth Jet: E_{T}=%.1f GeV, #eta=%.2f, #phi=%.2f",
+                        inTimeAntiKt4TruthSRJLeadingEtValues->at(0), inTimeAntiKt4TruthSRJLeadingEtaValues->at(0), inTimeAntiKt4TruthSRJLeadingPhiValues->at(0)));
+            else
+                lat.DrawLatexNDC(0.05, y, "Lead. In-Time PU Truth Jet: (none)");
             y -= 0.10;
-            lat.DrawLatexNDC(0.05, y,
-                Form("Lead. Out-of-Time PU Truth Jet: E_{T}=%.1f GeV, #eta=%.2f, #phi=%.2f",
-                    outOfTimeAntiKt4TruthSRJLeadingEtValues->at(0), outOfTimeAntiKt4TruthSRJLeadingEtaValues->at(0), outOfTimeAntiKt4TruthSRJLeadingPhiValues->at(0)));
+            if(!outOfTimeAntiKt4TruthSRJLeadingEtValues->empty())
+                lat.DrawLatexNDC(0.05, y,
+                    Form("Lead. Out-of-Time PU Truth Jet: E_{T}=%.1f GeV, #eta=%.2f, #phi=%.2f",
+                        outOfTimeAntiKt4TruthSRJLeadingEtValues->at(0), outOfTimeAntiKt4TruthSRJLeadingEtaValues->at(0), outOfTimeAntiKt4TruthSRJLeadingPhiValues->at(0)));
+            else
+                lat.DrawLatexNDC(0.05, y, "Lead. Out-of-Time PU Truth Jet: (none)");
 
             cEventDisplay.Print(pdf_ED);   // ===== PAGE 2 =====
         }
     }
+    std::cout << "test 4.5" << "\n";
     
     // close multipage pdf
     c.Print(pdf + ")");
@@ -1186,13 +1274,13 @@ void makeJetTaggerEventDisplays(){
         -1, true, "ggF_hh_4b", "WTACone", true);*/
 
     // ggF hh->4b, rMerge=0.001, R=1.1 (WTACone subjets, SK)
-    /*callMakeEventDisplays(
-        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3_file0.root",
-        "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v3/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_resim_DAOD_NTUPLE_GEP_000001.root",
-        -1, true, "ggF_hh_4b", "WTACone", true);*/
+    callMakeEventDisplays(
+        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
+        "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+        -1, true, "ggF_hh_4b", "WTACone", true);
 
     callMakeEventDisplays(
-        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
+        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
         "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
         1, false, "jj_1", "WTACone", true);
 

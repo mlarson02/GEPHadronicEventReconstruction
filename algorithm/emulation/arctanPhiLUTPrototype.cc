@@ -61,14 +61,14 @@
 // globals are set from that argument before the LUT is built. Setting it equal
 // to ET_MAG_BITS (12) means no reduction, i.e. full E_T precision (and a
 // LUT of 2^(2*bits) entries).
-static unsigned int g_reduceBits = 5;
+static unsigned int g_reduceBits = 8;
 static unsigned int g_reduceMask = (1u << 5) - 1;
 
 // Output phi_missing word width for this prototype. This is intentionally an
 // independent quantity from phi_bit_length_ in constants.h (which digitizes
 // tower/jet phi over [-3.2, 3.2]); the MET phi_missing word spans the full
 // 0..2pi and is kept fully configurable here for prototyping.
-constexpr unsigned int DEFAULT_PHI_MISSING_BITS = 10;
+constexpr unsigned int DEFAULT_PHI_MISSING_BITS = 8;
 
 // phi-domain constants, all derived from the phi_missing word width and
 // refreshed by setPhiBits() before the LUT is built.
@@ -247,7 +247,7 @@ static void writeLUTHeader(const std::string& path) {
 // Main driver: scan random (E_x, E_y), compare estimators, make ROOT plots.
 // -----------------------------------------------------------------------------
 
-void arctanPhiLUTPrototype(unsigned int reduceBits = 5,
+void arctanPhiLUTPrototype(unsigned int reduceBits = g_reduceBits,
                            unsigned int nSamples   = 500000,
                            bool         dumpLUT     = true,
                             unsigned int phiBits    = DEFAULT_PHI_MISSING_BITS) {

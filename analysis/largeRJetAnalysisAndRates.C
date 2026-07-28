@@ -1,19 +1,79 @@
 #include "analysisHelperFunctions.h"
 
+#include "/home/larsonma/atlasrootstyle/AtlasStyle.C"
+
 using namespace std;
 
-int colors[] = {            
-    kRed,          // strong red
-    kGreen+2,         // deep blue
-    kBlue,      // vivid green
-    kMagenta,      // purple-pink
-    kOrange+7,     // light orange
+// 6-color palette
+const int kP6Blue   = TColor::GetColor("#5790fc");
+const int kP6Yellow = TColor::GetColor("#ee941d");
+const int kP6Red    = TColor::GetColor("#e42536");
+const int kP6Grape  = TColor::GetColor("#964a8b");
+const int kP6Gray   = TColor::GetColor("#9c9ca1");
+const int kP6Violet = TColor::GetColor("#7a21dd");
 
-    kCyan+1,       // bright cyan
-    kViolet+1,     // light violet
-    kAzure+2,      // soft blue
-    kPink+3,       // light pink
-    kSpring+5      // light green-yellow
+// 8-color palette
+const int kP8Blue   = TColor::GetColor("#1845fb");
+const int kP8Orange = TColor::GetColor("#ff5e02");
+const int kP8Red    = TColor::GetColor("#c91f16");
+const int kP8Pink   = TColor::GetColor("#c849a9");
+const int kP8Green  = TColor::GetColor("#adad7d");
+const int kP8Cyan   = TColor::GetColor("#86c8dd");
+const int kP8Azure  = TColor::GetColor("#578dff");
+const int kP8Gray   = TColor::GetColor("#656364");
+
+// 10-color palette
+const int kP10Blue   = TColor::GetColor("#3f90da");
+const int kP10Yellow = TColor::GetColor("#ffa90e");
+const int kP10Red    = TColor::GetColor("#bd1f01");
+const int kP10Gray   = TColor::GetColor("#94a4a2");
+const int kP10Violet = TColor::GetColor("#832db6");
+const int kP10Brown  = TColor::GetColor("#a96b59");
+const int kP10Orange = TColor::GetColor("#e76300");
+const int kP10Green  = TColor::GetColor("#b9ac70");
+const int kP10Ash    = TColor::GetColor("#717581");
+const int kP10Cyan   = TColor::GetColor("#92dadd");
+
+// define the 8 color palette 
+
+// Cap on events processed per file/JZ slice; set to -1 to process every event.
+// Used only to limit runtime while tweaking plots; same cap must apply to every
+// event loop so that per-event vectors (sized to the full entry count) stay
+// consistent across loops.
+constexpr int kMaxEventsPerSlice = -1;
+
+// Draw the ATLAS "Work in progress" label (plus beam-energy / pileup info) in a
+// white strip ABOVE the plot frame on the currently active canvas.
+// Call after cd()'ing to the canvas and before SaveAs/Print.
+// The top margin is enlarged so the frame shrinks down and leaves room above it.
+void DrawATLASLabel(double x = 0.20, double /*y*/ = 0.88, const char* status = "Work in progress") {
+    if (gPad) {
+        gPad->SetTopMargin(0.14);   // frame top now ~0.86, leaving a white strip above
+        gPad->Modified();
+        gPad->Update();
+    }
+    const double yAtlas = 0.945;    // "ATLAS <status>" line, in the strip above the frame
+    const double yInfo  = 0.895;    // beam-energy / pileup line, just below it
+    TLatex l; l.SetNDC(); l.SetTextFont(72); l.SetTextColor(kBlack); l.SetTextSize(0.04);
+    l.DrawLatex(x, yAtlas, "ATLAS");
+    TLatex p; p.SetNDC(); p.SetTextFont(42); p.SetTextColor(kBlack); p.SetTextSize(0.04);
+    p.DrawLatex(x + 0.13, yAtlas, status);
+    TLatex e; e.SetNDC(); e.SetTextFont(42); e.SetTextColor(kBlack); e.SetTextSize(0.035);
+    e.DrawLatex(x, yInfo, "#sqrt{s} = 14 TeV, <PU> = 200");
+}
+
+int colors[] = {            // colorblind-friendly Petroff 10-color palette
+    kP10Red,
+    kP10Green,
+    kP10Blue,
+    kP10Violet,
+    kP10Orange,
+
+    kP10Cyan,
+    kP10Brown,
+    kP10Gray,
+    kP10Yellow,
+    kP10Ash
 };
 
 // Generates the algorithm-configuration → ROOT legend label map.
@@ -58,6 +118,19 @@ std::map<std::string, std::string> legendMap = buildLegendMap();
 void analyze_files(std::vector<std::pair<std::string,std::string>> signalFiles,
                    std::vector<std::pair<std::string,std::string>> backgroundFiles,
                    TString overlayOutputFileDir, bool overlayThreeFiles, double subjetEtThreshold, bool categorySubjetEtScan_8, bool substructure5CategoryScan = false, bool leadingLRJSubjetScan = false, bool compute4thConeOR = false) {
+// --- Runtime profiling ---
+using _clock = std::chrono::steady_clock;
+auto _t0   = _clock::now();
+auto _tLap = _t0;
+auto _lap  = [&](const char* label) {
+    auto now = _clock::now();
+    double lap   = std::chrono::duration<double>(now - _tLap).count();
+    double total = std::chrono::duration<double>(now - _t0).count();
+    std::cout << "[TIMER] " << label
+              << "  lap=" << lap << "s  total=" << total << "s\n" << std::flush;
+    _tLap = now;
+};
+// --- end timer setup ---
 SetPlotStyle();
 // Apply HSTP filter to background fills (all-JZ rate). JZ0-only histograms are filled unconditionally.
 const bool applyHSTPFilter = true;
@@ -144,20 +217,27 @@ std::vector<TH1F*> sig_eff_ETmass_10kHz_NoMassSel_vec;
 std::vector<TH1F*> sig_eff_offlineLRJ35kHz_SubjetBased_vec;
 std::vector<TH1F*> sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec;
 std::vector<TH1F*> sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec;
-std::vector<TH1F*> sig_eff_ETonly_35kHz_vec;
-std::vector<TH1F*> sig_eff_ETonly_35kHz_MassSel_vec;
-std::vector<TH1F*> sig_eff_ETonly_35kHz_NoMassSel_vec;
-std::vector<TH1F*> sig_eff_ETmass_35kHz_vec;
-std::vector<TH1F*> sig_eff_ETmass_35kHz_MassSel_vec;
-std::vector<TH1F*> sig_eff_ETmass_35kHz_NoMassSel_vec;
+std::vector<TH1F*> sig_eff_ETonly_40kHz_vec;
+// Lead. LRJ E_T-only threshold @ 40 kHz, per file (for SubjetVsET compare legend)
+std::vector<double> thr_ET_only_40kHz_vec;
+// gFEX (Resim) LRJ E_T-only turn-on @ 40 kHz + threshold, per file (overlaid on SubjetVsET compare)
+std::vector<TH1F*> sig_eff_gFEX_Sim_40kHz_vec;
+std::vector<double> thr_gFEX_Sim_40kHz_vec;
+std::vector<TH1F*> sig_eff_ETonly_40kHz_MassSel_vec;
+std::vector<TH1F*> sig_eff_ETonly_40kHz_NoMassSel_vec;
+std::vector<TH1F*> sig_eff_ETmass_40kHz_vec;
+std::vector<TH1F*> sig_eff_ETmass_40kHz_MassSel_vec;
+std::vector<TH1F*> sig_eff_ETmass_40kHz_NoMassSel_vec;
 // Integrated efficiencies per file (for legend in multi-file overlay)
 std::vector<double> intEff_SubjetBased_10kHz_all_vec;
 //std::vector<double> intEff_SubjetBased_10kHz_massSel_vec, intEff_SubjetBased_10kHz_noMassSel_vec;
 std::vector<double> intEff_ETonly_10kHz_all_vec, intEff_ETonly_10kHz_massSel_vec, intEff_ETonly_10kHz_noMassSel_vec;
 std::vector<double> intEff_ETmass_10kHz_all_vec, intEff_ETmass_10kHz_massSel_vec, intEff_ETmass_10kHz_noMassSel_vec;
 std::vector<double> intEff_SubjetBased_35kHz_all_vec, intEff_SubjetBased_35kHz_massSel_vec, intEff_SubjetBased_35kHz_noMassSel_vec;
-std::vector<double> intEff_ETonly_35kHz_all_vec, intEff_ETonly_35kHz_massSel_vec, intEff_ETonly_35kHz_noMassSel_vec;
-std::vector<double> intEff_ETmass_35kHz_all_vec, intEff_ETmass_35kHz_massSel_vec, intEff_ETmass_35kHz_noMassSel_vec;
+std::vector<double> intEff_ETonly_40kHz_all_vec, intEff_ETonly_40kHz_massSel_vec, intEff_ETonly_40kHz_noMassSel_vec;
+std::vector<double> intEff_ETmass_40kHz_all_vec, intEff_ETmass_40kHz_massSel_vec, intEff_ETmass_40kHz_noMassSel_vec;
+// gFEX (Resim) E_T-only integrated efficiencies @ 40 kHz (mass-inclusive + split), per file
+std::vector<double> intEff_gFEX_ETonly_40kHz_all_vec, intEff_gFEX_ETonly_40kHz_massSel_vec, intEff_gFEX_ETonly_40kHz_noMassSel_vec;
 
 std::vector<TH1F* > sig_h_leadSubjet_matchFrac_vec;
 std::vector<TH1F* > sig_h_subSubjet_matchFrac_vec;
@@ -165,6 +245,8 @@ std::vector<TH1F* > back_h_leadSubjet_matchFrac_vec;
 std::vector<TH1F* > back_h_subSubjet_matchFrac_vec;
 
 std::vector<TGraph* > lead_ET_Scan_RatesVsEff_vec;
+// gFEX (Resim) leading LRJ E_T-only rate-vs-eff scan, per file (overlaid on subjetBased_ET_Scan_RatesVsEff)
+std::vector<TGraph* > gFEX_Sim_ET_Scan_RatesVsEff_vec;
 std::vector<TGraph* > fouth_lead_ConeJet_ET_Scan_RatesVsEff_vec;
 std::vector<TGraph* > sublead_ET_Scan_RatesVsEff_vec;
 std::vector<TH1* > lead_ET_Scan_EffVsThresh_vec;
@@ -199,8 +281,8 @@ std::vector<double> cone_HT_50kHz_threshold_vec;          // H_T @ 50 kHz
 std::vector<TH1F*> eff_ET_mass_10kHz_vec;
 std::vector<double> thr_ET_mass_10kHz_vec;
 std::vector<double> thr_mass_min_10kHz_vec;
-std::vector<double> thr_ET_mass_35kHz_vec;
-std::vector<double> thr_mass_min_35kHz_vec;
+std::vector<double> thr_ET_mass_40kHz_vec;
+std::vector<double> thr_mass_min_40kHz_vec;
 std::vector<TH1F*> sig_h_ConstituentMass_vec;
 std::vector<TH1F*> back_h_ConstituentMass_vec;
 std::vector<unsigned int> nInputObjects_vec;
@@ -260,152 +342,159 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         std::cerr << "Error: Could not open jet tagger file " << signalFiles[fileIt].second << std::endl;
         return;
     }
+    _lap(Form("[file %u] file open", fileIt));
 
-    TTree* jetTaggerLRJsSignal = (TTree*)signalJetTaggerFile->Get("jetTaggerLRJsTree");
-    TTree* jetTaggerLeadingLRJsSignal = (TTree*)signalJetTaggerFile->Get("jetTaggerLeadingLRJsTree");
-    TTree* jetTaggerSubleadingLRJsSignal = (TTree*)signalJetTaggerFile->Get("jetTaggerSubleadingLRJsTree");
-    TTree* eventInfoTreeSignal = (TTree*)signalInputFile->Get("eventInfoTree");
-    TTree* truthbTreeSignal = (TTree*)signalInputFile->Get("truthbTree");
-    TTree* truthHiggsTreeSignal = (TTree*)signalInputFile->Get("truthHiggsTree");
-    TTree* caloTopoTowerTreeSignal = (TTree*)signalInputFile->Get("caloTopoTowerTree");
-    TTree* topo422TreeSignal = (TTree*)signalInputFile->Get("topo422Tree");
-    TTree* gepBasicClustersTreeSignal = (TTree*)signalInputFile->Get("gepBasicClustersTree");
-    TTree* gepCellsTowersTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersTree");
-    TTree* gepBasicClustersSKTreeSignal = (TTree*)signalInputFile->Get("gepBasicClustersSKTree"); 
-    TTree* gepCellsTowersSKTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersSKTree");
-    TTree* gepCellsTowersEtaSKTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersEtaSKTree");
-    TTree* gepWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersJetsTree");
-    TTree* gepWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeBasicClustersJetsTree");
-    TTree* gepLeadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersJetsTree");
-    TTree* gepLeadingWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeBasicClustersJetsTree");
-    TTree* gepSubleadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersJetsTree");
-    TTree* gepSubleadingWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeBasicClustersJetsTree");
-    TTree* gepWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersSKJetsTree");
-    TTree* gepWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeBasicClustersSKJetsTree");
-    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersSKJetsTree");
-    TTree* gepLeadingWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeBasicClustersSKJetsTree");
-    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersSKJetsTree");
-    TTree* gepSubleadingWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeBasicClustersSKJetsTree");
-    TTree* gFexSRJTreeSignal = (TTree*)signalInputFile->Get("gFexSRJTree");
-    TTree* gFexLeadingSRJTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingSRJTree");
-    TTree* gFexSubleadingSRJTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingSRJTree");
-    TTree* gFexLRJTreeSignal = (TTree*)signalInputFile->Get("gFexLRJTree");
-    TTree* gFexLeadingLRJTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingLRJTree");
-    TTree* gFexSubleadingLRJTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingLRJTree");
-    TTree* inTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("inTimeAntiKt4TruthJetsTree");
-    TTree* leadingInTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("leadingInTimeAntiKt4TruthJetsTree");
-    TTree* subleadingInTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingInTimeAntiKt4TruthJetsTree");
-    TTree* outOfTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("outOfTimeAntiKt4TruthJetsTree");
-    TTree* leadingOutOfTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("leadingOutOfTimeAntiKt4TruthJetsTree");
-    TTree* subleadingOutOfTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingOutOfTimeAntiKt4TruthJetsTree");
-    TTree* jFexSRJTreeSignal = (TTree*)signalInputFile->Get("jFexSRJTree");
-    TTree* jFexLeadingSRJTreeSignal = (TTree*)signalInputFile->Get("jFexLeadingSRJTree");
-    TTree* jFexSubleadingSRJTreeSignal = (TTree*)signalInputFile->Get("jFexSubleadingSRJTree");
-    TTree* jFexLRJTreeSignal = (TTree*)signalInputFile->Get("jFexLRJTree");
-    TTree* jFexLeadingLRJTreeSignal = (TTree*)signalInputFile->Get("jFexLeadingLRJTree");
-    TTree* jFexSubleadingLRJTreeSignal = (TTree*)signalInputFile->Get("jFexSubleadingLRJTree");
-    TTree* hltAntiKt4EMTopoJetsTreeSignal = (TTree*)signalInputFile->Get("hltAntiKt4EMTopoJetsTree");
-    TTree* leadingHltAntiKt4EMTopoJetsTreeSignal = (TTree*)signalInputFile->Get("leadingHltAntiKt4EMTopoJetsTree");
-    TTree* subleadingHltAntiKt4EMTopoJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingHltAntiKt4EMTopoJetsTree");
-    TTree* recoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("recoAntiKt10UFOCSSKJets");
-    TTree* leadingRecoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("leadingRecoAntiKt10UFOCSSKJets");
-    TTree* subleadingRecoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("subleadingRecoAntiKt10UFOCSSKJets");
-    TTree* recoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("recoAntiKt10UFOCSSKSoftDropJets");
-    TTree* leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("leadingRecoAntiKt10UFOCSSKSoftDropJets");
-    TTree* subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("subleadingRecoAntiKt10UFOCSSKSoftDropJets");
-    TTree* antiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("antiKt10TruthJetsTree");
-    TTree* leadingAntiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("leadingAntiKt10TruthJetsTree");
-    TTree* subleadingAntiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingAntiKt10TruthJetsTree");
-    TTree* antiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("antiKt10TruthSoftDropJetsTree");
-    TTree* leadingAntiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("leadingAntiKt10TruthSoftDropJetsTree");
-    TTree* subleadingAntiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingAntiKt10TruthSoftDropJetsTree");
-    TTree* truthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("truthAntiKt4TruthDressedWZJets");
-    TTree* leadingTruthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("leadingTruthAntiKt4TruthDressedWZJets");
-    TTree* subleadingTruthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("subleadingTruthAntiKt4TruthDressedWZJets");
+    TTree* jetTaggerLRJsSignal = (TTree*)signalJetTaggerFile->Get("jetTaggerLRJsTree"); if (jetTaggerLRJsSignal) { jetTaggerLRJsSignal->SetCacheSize(30*1024*1024); }
+    TTree* jetTaggerLeadingLRJsSignal = (TTree*)signalJetTaggerFile->Get("jetTaggerLeadingLRJsTree"); if (jetTaggerLeadingLRJsSignal) { jetTaggerLeadingLRJsSignal->SetCacheSize(30*1024*1024); }
+    TTree* jetTaggerSubleadingLRJsSignal = (TTree*)signalJetTaggerFile->Get("jetTaggerSubleadingLRJsTree"); if (jetTaggerSubleadingLRJsSignal) { jetTaggerSubleadingLRJsSignal->SetCacheSize(30*1024*1024); }
+    TTree* eventInfoTreeSignal = (TTree*)signalInputFile->Get("eventInfoTree"); if (eventInfoTreeSignal) { eventInfoTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* truthbTreeSignal = (TTree*)signalInputFile->Get("truthbTree"); if (truthbTreeSignal) { truthbTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* truthHiggsTreeSignal = (TTree*)signalInputFile->Get("truthHiggsTree"); if (truthHiggsTreeSignal) { truthHiggsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* caloTopoTowerTreeSignal = (TTree*)signalInputFile->Get("caloTopoTowerTree"); if (caloTopoTowerTreeSignal) { caloTopoTowerTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* topo422TreeSignal = (TTree*)signalInputFile->Get("topo422Tree"); if (topo422TreeSignal) { topo422TreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepBasicClustersTreeSignal = (TTree*)signalInputFile->Get("gepBasicClustersTree"); if (gepBasicClustersTreeSignal) { gepBasicClustersTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepCellsTowersTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersTree"); if (gepCellsTowersTreeSignal) { gepCellsTowersTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepBasicClustersSKTreeSignal = (TTree*)signalInputFile->Get("gepBasicClustersSKTree"); if (gepBasicClustersSKTreeSignal) { gepBasicClustersSKTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepCellsTowersSKTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersSKTree"); if (gepCellsTowersSKTreeSignal) { gepCellsTowersSKTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepCellsTowersEtaSKTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersEtaSKTree"); if (gepCellsTowersEtaSKTreeSignal) { gepCellsTowersEtaSKTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersJetsTree"); if (gepWTAConeCellsTowersJetsTreeSignal) { gepWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeBasicClustersJetsTree"); if (gepWTAConeBasicClustersJetsTreeSignal) { gepWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersJetsTree"); if (gepLeadingWTAConeCellsTowersJetsTreeSignal) { gepLeadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeBasicClustersJetsTree"); if (gepLeadingWTAConeBasicClustersJetsTreeSignal) { gepLeadingWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersJetsTree"); if (gepSubleadingWTAConeCellsTowersJetsTreeSignal) { gepSubleadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeBasicClustersJetsTree"); if (gepSubleadingWTAConeBasicClustersJetsTreeSignal) { gepSubleadingWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersSKJetsTree"); if (gepWTAConeCellsTowersSKJetsTreeSignal) { gepWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeBasicClustersSKJetsTree"); if (gepWTAConeBasicClustersSKJetsTreeSignal) { gepWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersSKJetsTree"); if (gepLeadingWTAConeCellsTowersSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeBasicClustersSKJetsTree"); if (gepLeadingWTAConeBasicClustersSKJetsTreeSignal) { gepLeadingWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersSKJetsTree"); if (gepSubleadingWTAConeCellsTowersSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeBasicClustersSKJetsTree"); if (gepSubleadingWTAConeBasicClustersSKJetsTreeSignal) { gepSubleadingWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexSRJTreeSignal = (TTree*)signalInputFile->Get("gFexSRJTree"); if (gFexSRJTreeSignal) { gFexSRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexLeadingSRJTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingSRJTree"); if (gFexLeadingSRJTreeSignal) { gFexLeadingSRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexSubleadingSRJTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingSRJTree"); if (gFexSubleadingSRJTreeSignal) { gFexSubleadingSRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexLRJTreeSignal = (TTree*)signalInputFile->Get("gFexLRJTree"); if (gFexLRJTreeSignal) { gFexLRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexLeadingLRJTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingLRJTree"); if (gFexLeadingLRJTreeSignal) { gFexLeadingLRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexSubleadingLRJTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingLRJTree"); if (gFexSubleadingLRJTreeSignal) { gFexSubleadingLRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* inTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("inTimeAntiKt4TruthJetsTree"); if (inTimeAntiKt4TruthJetsTreeSignal) { inTimeAntiKt4TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* leadingInTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("leadingInTimeAntiKt4TruthJetsTree"); if (leadingInTimeAntiKt4TruthJetsTreeSignal) { leadingInTimeAntiKt4TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* subleadingInTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingInTimeAntiKt4TruthJetsTree"); if (subleadingInTimeAntiKt4TruthJetsTreeSignal) { subleadingInTimeAntiKt4TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* outOfTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("outOfTimeAntiKt4TruthJetsTree"); if (outOfTimeAntiKt4TruthJetsTreeSignal) { outOfTimeAntiKt4TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* leadingOutOfTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("leadingOutOfTimeAntiKt4TruthJetsTree"); if (leadingOutOfTimeAntiKt4TruthJetsTreeSignal) { leadingOutOfTimeAntiKt4TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* subleadingOutOfTimeAntiKt4TruthJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingOutOfTimeAntiKt4TruthJetsTree"); if (subleadingOutOfTimeAntiKt4TruthJetsTreeSignal) { subleadingOutOfTimeAntiKt4TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* jFexSRJTreeSignal = (TTree*)signalInputFile->Get("jFexSRJTree"); if (jFexSRJTreeSignal) { jFexSRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* jFexLeadingSRJTreeSignal = (TTree*)signalInputFile->Get("jFexLeadingSRJTree"); if (jFexLeadingSRJTreeSignal) { jFexLeadingSRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* jFexSubleadingSRJTreeSignal = (TTree*)signalInputFile->Get("jFexSubleadingSRJTree"); if (jFexSubleadingSRJTreeSignal) { jFexSubleadingSRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* jFexLRJTreeSignal = (TTree*)signalInputFile->Get("jFexLRJTree"); if (jFexLRJTreeSignal) { jFexLRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* jFexLeadingLRJTreeSignal = (TTree*)signalInputFile->Get("jFexLeadingLRJTree"); if (jFexLeadingLRJTreeSignal) { jFexLeadingLRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* jFexSubleadingLRJTreeSignal = (TTree*)signalInputFile->Get("jFexSubleadingLRJTree"); if (jFexSubleadingLRJTreeSignal) { jFexSubleadingLRJTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* hltAntiKt4EMTopoJetsTreeSignal = (TTree*)signalInputFile->Get("hltAntiKt4EMTopoJetsTree"); if (hltAntiKt4EMTopoJetsTreeSignal) { hltAntiKt4EMTopoJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* leadingHltAntiKt4EMTopoJetsTreeSignal = (TTree*)signalInputFile->Get("leadingHltAntiKt4EMTopoJetsTree"); if (leadingHltAntiKt4EMTopoJetsTreeSignal) { leadingHltAntiKt4EMTopoJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* subleadingHltAntiKt4EMTopoJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingHltAntiKt4EMTopoJetsTree"); if (subleadingHltAntiKt4EMTopoJetsTreeSignal) { subleadingHltAntiKt4EMTopoJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* recoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("recoAntiKt10UFOCSSKJets"); if (recoAntiKt10UFOCSSKJetsSignal) { recoAntiKt10UFOCSSKJetsSignal->SetCacheSize(30*1024*1024); }
+    TTree* leadingRecoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("leadingRecoAntiKt10UFOCSSKJets"); if (leadingRecoAntiKt10UFOCSSKJetsSignal) { leadingRecoAntiKt10UFOCSSKJetsSignal->SetCacheSize(30*1024*1024); }
+    TTree* subleadingRecoAntiKt10UFOCSSKJetsSignal = (TTree*)signalInputFile->Get("subleadingRecoAntiKt10UFOCSSKJets"); if (subleadingRecoAntiKt10UFOCSSKJetsSignal) { subleadingRecoAntiKt10UFOCSSKJetsSignal->SetCacheSize(30*1024*1024); }
+    TTree* recoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("recoAntiKt10UFOCSSKSoftDropJets"); if (recoAntiKt10UFOCSSKSoftDropJetsSignal) { recoAntiKt10UFOCSSKSoftDropJetsSignal->SetCacheSize(30*1024*1024); }
+    TTree* leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("leadingRecoAntiKt10UFOCSSKSoftDropJets"); if (leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal) { leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetCacheSize(30*1024*1024); }
+    TTree* subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal = (TTree*)signalInputFile->Get("subleadingRecoAntiKt10UFOCSSKSoftDropJets"); if (subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal) { subleadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->SetCacheSize(30*1024*1024); }
+    TTree* antiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("antiKt10TruthJetsTree"); if (antiKt10TruthJetsTreeSignal) { antiKt10TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* leadingAntiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("leadingAntiKt10TruthJetsTree"); if (leadingAntiKt10TruthJetsTreeSignal) { leadingAntiKt10TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* subleadingAntiKt10TruthJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingAntiKt10TruthJetsTree"); if (subleadingAntiKt10TruthJetsTreeSignal) { subleadingAntiKt10TruthJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* antiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("antiKt10TruthSoftDropJetsTree"); if (antiKt10TruthSoftDropJetsTreeSignal) { antiKt10TruthSoftDropJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* leadingAntiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("leadingAntiKt10TruthSoftDropJetsTree"); if (leadingAntiKt10TruthSoftDropJetsTreeSignal) { leadingAntiKt10TruthSoftDropJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* subleadingAntiKt10TruthSoftDropJetsTreeSignal = (TTree*)signalInputFile->Get("subleadingAntiKt10TruthSoftDropJetsTree"); if (subleadingAntiKt10TruthSoftDropJetsTreeSignal) { subleadingAntiKt10TruthSoftDropJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* truthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("truthAntiKt4TruthDressedWZJets"); if (truthAntiKt4TruthDressedWZJetsSignal) { truthAntiKt4TruthDressedWZJetsSignal->SetCacheSize(30*1024*1024); }
+    TTree* leadingTruthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("leadingTruthAntiKt4TruthDressedWZJets"); if (leadingTruthAntiKt4TruthDressedWZJetsSignal) { leadingTruthAntiKt4TruthDressedWZJetsSignal->SetCacheSize(30*1024*1024); }
+    TTree* subleadingTruthAntiKt4TruthDressedWZJetsSignal = (TTree*)signalInputFile->Get("subleadingTruthAntiKt4TruthDressedWZJets"); if (subleadingTruthAntiKt4TruthDressedWZJetsSignal) { subleadingTruthAntiKt4TruthDressedWZJetsSignal->SetCacheSize(30*1024*1024); }
     // Sim trees — signal
-    TTree* jFexSRJSimTreeSignal = (TTree*)signalInputFile->Get("jFexSRJSimTree");
-    TTree* jFexLeadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("jFexLeadingSRJSimTree");
-    TTree* jFexSubleadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("jFexSubleadingSRJSimTree");
-    TTree* gFexLRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexLRJSimTree");
-    TTree* gFexLeadingLRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingLRJSimTree");
-    TTree* gFexSubleadingLRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingLRJSimTree");
+    TTree* jFexSRJSimTreeSignal = (TTree*)signalInputFile->Get("jFexSRJSimTree"); if (jFexSRJSimTreeSignal) { jFexSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* jFexLeadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("jFexLeadingSRJSimTree"); if (jFexLeadingSRJSimTreeSignal) { jFexLeadingSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* jFexSubleadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("jFexSubleadingSRJSimTree"); if (jFexSubleadingSRJSimTreeSignal) { jFexSubleadingSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexLRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexLRJSimTree"); if (gFexLRJSimTreeSignal) { gFexLRJSimTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexLeadingLRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingLRJSimTree"); if (gFexLeadingLRJSimTreeSignal) { gFexLeadingLRJSimTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexSubleadingLRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingLRJSimTree"); if (gFexSubleadingLRJSimTreeSignal) { gFexSubleadingLRJSimTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexSRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexSRJSimTree"); if (gFexLRJSimTreeSignal) { gFexSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexLeadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingSRJSimTree"); if (gFexLeadingSRJSimTreeSignal) { gFexLeadingSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gFexSubleadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingSRJSimTree"); if (gFexSubleadingSRJSimTreeSignal) { gFexSubleadingSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
     // EtaSK WTA cone jet trees — signal
-    TTree* gepWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree");
-    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersEtaSKJetsTree");
-    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersEtaSKJetsTree");
+    TTree* gepWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree"); if (gepWTAConeCellsTowersEtaSKJetsTreeSignal) { gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersEtaSKJetsTree"); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersEtaSKJetsTree"); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
 
-    TTree* jetTaggerLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerLRJsTree");
-    TTree* jetTaggerLeadingLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerLeadingLRJsTree");
-    TTree* jetTaggerSubleadingLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerSubleadingLRJsTree");
-    TTree* emulEventInfoTreeBack = (TTree*)backgroundJetTaggerFile->Get("emulEventInfoTree");
-    TTree* emulEventInfoTreeSignal = (TTree*)signalJetTaggerFile->Get("emulEventInfoTree");
-    TTree* eventInfoTreeBack = (TTree*)backgroundInputFile->Get("eventInfoTree");
-    TTree* caloTopoTowerTreeBack = (TTree*)backgroundInputFile->Get("caloTopoTowerTree");
-    TTree* topo422TreeBack = (TTree*)backgroundInputFile->Get("topo422Tree");
-    TTree* gepBasicClustersTreeBack = (TTree*)backgroundInputFile->Get("gepBasicClustersTree");
-    TTree* gepCellsTowersTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersTree");
-    TTree* gepBasicClustersSKTreeBack = (TTree*)backgroundInputFile->Get("gepBasicClustersSKTree");
-    TTree* gepCellsTowersSKTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersSKTree");
-    TTree* gepCellsTowersEtaSKTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersEtaSKTree");
-    TTree* gepWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersJetsTree");
-    TTree* gepWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeBasicClustersJetsTree");
-    TTree* gepLeadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersJetsTree");
-    TTree* gepLeadingWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeBasicClustersJetsTree");
-    TTree* gepSubleadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersJetsTree");
-    TTree* gepSubleadingWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeBasicClustersJetsTree");
-    TTree* gepWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersSKJetsTree");
-    TTree* gepWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeBasicClustersSKJetsTree");
-    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersSKJetsTree");
-    TTree* gepLeadingWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeBasicClustersSKJetsTree");
-    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersSKJetsTree");
-    TTree* gepSubleadingWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeBasicClustersSKJetsTree");
-    TTree* gFexSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexSRJTree");
-    TTree* gFexLeadingSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingSRJTree");
-    TTree* gFexSubleadingSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingSRJTree");
-    TTree* gFexLRJTreeBack = (TTree*)backgroundInputFile->Get("gFexLRJTree");
-    TTree* gFexLeadingLRJTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingLRJTree");
-    TTree* gFexSubleadingLRJTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingLRJTree");
-    TTree* inTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("inTimeAntiKt4TruthJetsTree");
-    TTree* leadingInTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingInTimeAntiKt4TruthJetsTree");
-    TTree* subleadingInTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingInTimeAntiKt4TruthJetsTree");
-    TTree* outOfTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("outOfTimeAntiKt4TruthJetsTree");
-    TTree* leadingOutOfTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingOutOfTimeAntiKt4TruthJetsTree");
-    TTree* subleadingOutOfTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingOutOfTimeAntiKt4TruthJetsTree");
-    TTree* jFexSRJTreeBack = (TTree*)backgroundInputFile->Get("jFexSRJTree");
-    TTree* jFexLeadingSRJTreeBack = (TTree*)backgroundInputFile->Get("jFexLeadingSRJTree");
-    TTree* jFexSubleadingSRJTreeBack = (TTree*)backgroundInputFile->Get("jFexSubleadingSRJTree");
-    TTree* jFexLRJTreeBack = (TTree*)backgroundInputFile->Get("jFexLRJTree");
-    TTree* jFexLeadingLRJTreeBack = (TTree*)backgroundInputFile->Get("jFexLeadingLRJTree");
-    TTree* jFexSubleadingLRJTreeBack = (TTree*)backgroundInputFile->Get("jFexSubleadingLRJTree");
-    TTree* hltAntiKt4EMTopoJetsTreeBack = (TTree*)backgroundInputFile->Get("hltAntiKt4EMTopoJetsTree");
-    TTree* leadingHltAntiKt4EMTopoJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingHltAntiKt4EMTopoJetsTree");
-    TTree* subleadingHltAntiKt4EMTopoJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingHltAntiKt4EMTopoJetsTree");
-    TTree* recoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("recoAntiKt10UFOCSSKJets");
-    TTree* leadingRecoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("leadingRecoAntiKt10UFOCSSKJets");
-    TTree* subleadingRecoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("subleadingRecoAntiKt10UFOCSSKJets");
-    TTree* recoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("recoAntiKt10UFOCSSKSoftDropJets");
-    TTree* leadingRecoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("leadingRecoAntiKt10UFOCSSKSoftDropJets");
-    TTree* subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("subleadingRecoAntiKt10UFOCSSKSoftDropJets");
-    TTree* antiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("antiKt10TruthJetsTree");
-    TTree* leadingAntiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingAntiKt10TruthJetsTree");
-    TTree* subleadingAntiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingAntiKt10TruthJetsTree");
-    TTree* antiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("antiKt10TruthSoftDropJetsTree");
-    TTree* leadingAntiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingAntiKt10TruthSoftDropJetsTree");
-    TTree* subleadingAntiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingAntiKt10TruthSoftDropJetsTree");
-    TTree* truthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("truthAntiKt4TruthDressedWZJets");
-    TTree* leadingTruthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("leadingTruthAntiKt4TruthDressedWZJets");
-    TTree* subleadingTruthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("subleadingTruthAntiKt4TruthDressedWZJets");
+    TTree* jetTaggerLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerLRJsTree"); if (jetTaggerLRJsBack) { jetTaggerLRJsBack->SetCacheSize(30*1024*1024); }
+    TTree* jetTaggerLeadingLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerLeadingLRJsTree"); if (jetTaggerLeadingLRJsBack) { jetTaggerLeadingLRJsBack->SetCacheSize(30*1024*1024); }
+    TTree* jetTaggerSubleadingLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerSubleadingLRJsTree"); if (jetTaggerSubleadingLRJsBack) { jetTaggerSubleadingLRJsBack->SetCacheSize(30*1024*1024); }
+    TTree* emulEventInfoTreeBack = (TTree*)backgroundJetTaggerFile->Get("emulEventInfoTree"); if (emulEventInfoTreeBack) { emulEventInfoTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* emulEventInfoTreeSignal = (TTree*)signalJetTaggerFile->Get("emulEventInfoTree"); if (emulEventInfoTreeSignal) { emulEventInfoTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* eventInfoTreeBack = (TTree*)backgroundInputFile->Get("eventInfoTree"); if (eventInfoTreeBack) { eventInfoTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* caloTopoTowerTreeBack = (TTree*)backgroundInputFile->Get("caloTopoTowerTree"); if (caloTopoTowerTreeBack) { caloTopoTowerTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* topo422TreeBack = (TTree*)backgroundInputFile->Get("topo422Tree"); if (topo422TreeBack) { topo422TreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepBasicClustersTreeBack = (TTree*)backgroundInputFile->Get("gepBasicClustersTree"); if (gepBasicClustersTreeBack) { gepBasicClustersTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepCellsTowersTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersTree"); if (gepCellsTowersTreeBack) { gepCellsTowersTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepBasicClustersSKTreeBack = (TTree*)backgroundInputFile->Get("gepBasicClustersSKTree"); if (gepBasicClustersSKTreeBack) { gepBasicClustersSKTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepCellsTowersSKTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersSKTree"); if (gepCellsTowersSKTreeBack) { gepCellsTowersSKTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepCellsTowersEtaSKTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersEtaSKTree"); if (gepCellsTowersEtaSKTreeBack) { gepCellsTowersEtaSKTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersJetsTree"); if (gepWTAConeCellsTowersJetsTreeBack) { gepWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeBasicClustersJetsTree"); if (gepWTAConeBasicClustersJetsTreeBack) { gepWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersJetsTree"); if (gepLeadingWTAConeCellsTowersJetsTreeBack) { gepLeadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeBasicClustersJetsTree"); if (gepLeadingWTAConeBasicClustersJetsTreeBack) { gepLeadingWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersJetsTree"); if (gepSubleadingWTAConeCellsTowersJetsTreeBack) { gepSubleadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeBasicClustersJetsTree"); if (gepSubleadingWTAConeBasicClustersJetsTreeBack) { gepSubleadingWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersSKJetsTree"); if (gepWTAConeCellsTowersSKJetsTreeBack) { gepWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeBasicClustersSKJetsTree"); if (gepWTAConeBasicClustersSKJetsTreeBack) { gepWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersSKJetsTree"); if (gepLeadingWTAConeCellsTowersSKJetsTreeBack) { gepLeadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeBasicClustersSKJetsTree"); if (gepLeadingWTAConeBasicClustersSKJetsTreeBack) { gepLeadingWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersSKJetsTree"); if (gepSubleadingWTAConeCellsTowersSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeBasicClustersSKJetsTree"); if (gepSubleadingWTAConeBasicClustersSKJetsTreeBack) { gepSubleadingWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexSRJTree"); if (gFexSRJTreeBack) { gFexSRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexLeadingSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingSRJTree"); if (gFexLeadingSRJTreeBack) { gFexLeadingSRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexSubleadingSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingSRJTree"); if (gFexSubleadingSRJTreeBack) { gFexSubleadingSRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexLRJTreeBack = (TTree*)backgroundInputFile->Get("gFexLRJTree"); if (gFexLRJTreeBack) { gFexLRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexLeadingLRJTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingLRJTree"); if (gFexLeadingLRJTreeBack) { gFexLeadingLRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexSubleadingLRJTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingLRJTree"); if (gFexSubleadingLRJTreeBack) { gFexSubleadingLRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* inTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("inTimeAntiKt4TruthJetsTree"); if (inTimeAntiKt4TruthJetsTreeBack) { inTimeAntiKt4TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* leadingInTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingInTimeAntiKt4TruthJetsTree"); if (leadingInTimeAntiKt4TruthJetsTreeBack) { leadingInTimeAntiKt4TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* subleadingInTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingInTimeAntiKt4TruthJetsTree"); if (subleadingInTimeAntiKt4TruthJetsTreeBack) { subleadingInTimeAntiKt4TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* outOfTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("outOfTimeAntiKt4TruthJetsTree"); if (outOfTimeAntiKt4TruthJetsTreeBack) { outOfTimeAntiKt4TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* leadingOutOfTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingOutOfTimeAntiKt4TruthJetsTree"); if (leadingOutOfTimeAntiKt4TruthJetsTreeBack) { leadingOutOfTimeAntiKt4TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* subleadingOutOfTimeAntiKt4TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingOutOfTimeAntiKt4TruthJetsTree"); if (subleadingOutOfTimeAntiKt4TruthJetsTreeBack) { subleadingOutOfTimeAntiKt4TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* jFexSRJTreeBack = (TTree*)backgroundInputFile->Get("jFexSRJTree"); if (jFexSRJTreeBack) { jFexSRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* jFexLeadingSRJTreeBack = (TTree*)backgroundInputFile->Get("jFexLeadingSRJTree"); if (jFexLeadingSRJTreeBack) { jFexLeadingSRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* jFexSubleadingSRJTreeBack = (TTree*)backgroundInputFile->Get("jFexSubleadingSRJTree"); if (jFexSubleadingSRJTreeBack) { jFexSubleadingSRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* jFexLRJTreeBack = (TTree*)backgroundInputFile->Get("jFexLRJTree"); if (jFexLRJTreeBack) { jFexLRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* jFexLeadingLRJTreeBack = (TTree*)backgroundInputFile->Get("jFexLeadingLRJTree"); if (jFexLeadingLRJTreeBack) { jFexLeadingLRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* jFexSubleadingLRJTreeBack = (TTree*)backgroundInputFile->Get("jFexSubleadingLRJTree"); if (jFexSubleadingLRJTreeBack) { jFexSubleadingLRJTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* hltAntiKt4EMTopoJetsTreeBack = (TTree*)backgroundInputFile->Get("hltAntiKt4EMTopoJetsTree"); if (hltAntiKt4EMTopoJetsTreeBack) { hltAntiKt4EMTopoJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* leadingHltAntiKt4EMTopoJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingHltAntiKt4EMTopoJetsTree"); if (leadingHltAntiKt4EMTopoJetsTreeBack) { leadingHltAntiKt4EMTopoJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* subleadingHltAntiKt4EMTopoJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingHltAntiKt4EMTopoJetsTree"); if (subleadingHltAntiKt4EMTopoJetsTreeBack) { subleadingHltAntiKt4EMTopoJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* recoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("recoAntiKt10UFOCSSKJets"); if (recoAntiKt10UFOCSSKJetsBack) { recoAntiKt10UFOCSSKJetsBack->SetCacheSize(30*1024*1024); }
+    TTree* leadingRecoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("leadingRecoAntiKt10UFOCSSKJets"); if (leadingRecoAntiKt10UFOCSSKJetsBack) { leadingRecoAntiKt10UFOCSSKJetsBack->SetCacheSize(30*1024*1024); }
+    TTree* subleadingRecoAntiKt10UFOCSSKJetsBack = (TTree*)backgroundInputFile->Get("subleadingRecoAntiKt10UFOCSSKJets"); if (subleadingRecoAntiKt10UFOCSSKJetsBack) { subleadingRecoAntiKt10UFOCSSKJetsBack->SetCacheSize(30*1024*1024); }
+    TTree* recoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("recoAntiKt10UFOCSSKSoftDropJets"); if (recoAntiKt10UFOCSSKSoftDropJetsBack) { recoAntiKt10UFOCSSKSoftDropJetsBack->SetCacheSize(30*1024*1024); }
+    TTree* leadingRecoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("leadingRecoAntiKt10UFOCSSKSoftDropJets"); if (leadingRecoAntiKt10UFOCSSKSoftDropJetsBack) { leadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetCacheSize(30*1024*1024); }
+    TTree* subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack = (TTree*)backgroundInputFile->Get("subleadingRecoAntiKt10UFOCSSKSoftDropJets"); if (subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack) { subleadingRecoAntiKt10UFOCSSKSoftDropJetsBack->SetCacheSize(30*1024*1024); }
+    TTree* antiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("antiKt10TruthJetsTree"); if (antiKt10TruthJetsTreeBack) { antiKt10TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* leadingAntiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingAntiKt10TruthJetsTree"); if (leadingAntiKt10TruthJetsTreeBack) { leadingAntiKt10TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* subleadingAntiKt10TruthJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingAntiKt10TruthJetsTree"); if (subleadingAntiKt10TruthJetsTreeBack) { subleadingAntiKt10TruthJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* antiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("antiKt10TruthSoftDropJetsTree"); if (antiKt10TruthSoftDropJetsTreeBack) { antiKt10TruthSoftDropJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* leadingAntiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("leadingAntiKt10TruthSoftDropJetsTree"); if (leadingAntiKt10TruthSoftDropJetsTreeBack) { leadingAntiKt10TruthSoftDropJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* subleadingAntiKt10TruthSoftDropJetsTreeBack = (TTree*)backgroundInputFile->Get("subleadingAntiKt10TruthSoftDropJetsTree"); if (subleadingAntiKt10TruthSoftDropJetsTreeBack) { subleadingAntiKt10TruthSoftDropJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* truthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("truthAntiKt4TruthDressedWZJets"); if (truthAntiKt4TruthDressedWZJetsBack) { truthAntiKt4TruthDressedWZJetsBack->SetCacheSize(30*1024*1024); }
+    TTree* leadingTruthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("leadingTruthAntiKt4TruthDressedWZJets"); if (leadingTruthAntiKt4TruthDressedWZJetsBack) { leadingTruthAntiKt4TruthDressedWZJetsBack->SetCacheSize(30*1024*1024); }
+    TTree* subleadingTruthAntiKt4TruthDressedWZJetsBack = (TTree*)backgroundInputFile->Get("subleadingTruthAntiKt4TruthDressedWZJets"); if (subleadingTruthAntiKt4TruthDressedWZJetsBack) { subleadingTruthAntiKt4TruthDressedWZJetsBack->SetCacheSize(30*1024*1024); }
     // Sim trees — background
-    TTree* jFexSRJSimTreeBack = (TTree*)backgroundInputFile->Get("jFexSRJSimTree");
-    TTree* jFexLeadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("jFexLeadingSRJSimTree");
-    TTree* jFexSubleadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("jFexSubleadingSRJSimTree");
-    TTree* gFexLRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexLRJSimTree");
-    TTree* gFexLeadingLRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingLRJSimTree");
-    TTree* gFexSubleadingLRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingLRJSimTree");
+    TTree* jFexSRJSimTreeBack = (TTree*)backgroundInputFile->Get("jFexSRJSimTree"); if (jFexSRJSimTreeBack) { jFexSRJSimTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* jFexLeadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("jFexLeadingSRJSimTree"); if (jFexLeadingSRJSimTreeBack) { jFexLeadingSRJSimTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* jFexSubleadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("jFexSubleadingSRJSimTree"); if (jFexSubleadingSRJSimTreeBack) { jFexSubleadingSRJSimTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexLRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexLRJSimTree"); if (gFexLRJSimTreeBack) { gFexLRJSimTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexLeadingLRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingLRJSimTree"); if (gFexLeadingLRJSimTreeBack) { gFexLeadingLRJSimTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexSubleadingLRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingLRJSimTree"); if (gFexSubleadingLRJSimTreeBack) { gFexSubleadingLRJSimTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexSRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexSRJSimTree"); if (gFexSRJSimTreeBack) { gFexSRJSimTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexLeadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingSRJSimTree"); if (gFexLeadingSRJSimTreeBack) { gFexLeadingSRJSimTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gFexSubleadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingSRJSimTree"); if (gFexSubleadingSRJSimTreeBack) { gFexSubleadingSRJSimTreeBack->SetCacheSize(30*1024*1024); }
     // EtaSK WTA cone jet trees — background
-    TTree* gepWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree");
-    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersEtaSKJetsTree");
-    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersEtaSKJetsTree");
+    TTree* gepWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree"); if (gepWTAConeCellsTowersEtaSKJetsTreeBack) { gepWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersEtaSKJetsTree"); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersEtaSKJetsTree"); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
 
     std::vector<double>* mcEventWeightsValuesSignal = nullptr;
     double* sumOfWeightsForSampleValuesSignal = nullptr;
@@ -597,6 +686,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double>* gFexLRJSimSubleadingEtValuesSignal = nullptr;
     std::vector<double>* gFexLRJSimSubleadingEtaValuesSignal = nullptr;
     std::vector<double>* gFexLRJSimSubleadingPhiValuesSignal = nullptr;
+
+    // gFEX SRJ Sim (resimulated) — signal
+    std::vector<unsigned int>* gFexSRJSimEtIndexValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimEtValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimEtaValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimPhiValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimLeadingEtValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimLeadingEtaValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimLeadingPhiValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimSubleadingEtValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimSubleadingEtaValuesSignal = nullptr;
+    std::vector<double>* gFexSRJSimSubleadingPhiValuesSignal = nullptr;
     // EtaSK WTA cone jets (cells+towers) — signal
     std::vector<double>* gepWTAConeCellsTowersEtaSKJetspTValuesSignal = nullptr;
     std::vector<double>* gepWTAConeCellsTowersEtaSKJetsEtaValuesSignal = nullptr;
@@ -914,6 +1015,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double>* gFexLRJSimSubleadingEtValuesBack = nullptr;
     std::vector<double>* gFexLRJSimSubleadingEtaValuesBack = nullptr;
     std::vector<double>* gFexLRJSimSubleadingPhiValuesBack = nullptr;
+    // gFEX SRJ Sim (resimulated)
+    std::vector<unsigned int>* gFexSRJSimEtIndexValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimEtValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimEtaValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimPhiValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimLeadingEtValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimLeadingEtaValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimLeadingPhiValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimSubleadingEtValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimSubleadingEtaValuesBack = nullptr;
+    std::vector<double>* gFexSRJSimSubleadingPhiValuesBack = nullptr;
     // EtaSK WTA cone jets (cells+towers)
     std::vector<double>* gepWTAConeCellsTowersEtaSKJetspTValuesBack = nullptr;
     std::vector<double>* gepWTAConeCellsTowersEtaSKJetsEtaValuesBack = nullptr;
@@ -1305,6 +1417,22 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gFexSubleadingLRJSimTreeSignal->SetBranchAddress("Et", &gFexLRJSimSubleadingEtValuesSignal);
     gFexSubleadingLRJSimTreeSignal->SetBranchAddress("Eta", &gFexLRJSimSubleadingEtaValuesSignal);
     gFexSubleadingLRJSimTreeSignal->SetBranchAddress("Phi", &gFexLRJSimSubleadingPhiValuesSignal);
+
+    // === gFexSRJSimTreeSignal ===
+    gFexSRJSimTreeSignal->SetBranchAddress("EtIndex", &gFexSRJSimEtIndexValuesSignal);
+    gFexSRJSimTreeSignal->SetBranchAddress("Et", &gFexSRJSimEtValuesSignal);
+    gFexSRJSimTreeSignal->SetBranchAddress("Eta", &gFexSRJSimEtaValuesSignal);
+    gFexSRJSimTreeSignal->SetBranchAddress("Phi", &gFexSRJSimPhiValuesSignal);
+
+    // === gFexLeadingSRJSimTreeSignal ===
+    gFexLeadingSRJSimTreeSignal->SetBranchAddress("Et", &gFexSRJSimLeadingEtValuesSignal);
+    gFexLeadingSRJSimTreeSignal->SetBranchAddress("Eta", &gFexSRJSimLeadingEtaValuesSignal);
+    gFexLeadingSRJSimTreeSignal->SetBranchAddress("Phi", &gFexSRJSimLeadingPhiValuesSignal);
+
+    // === gFexSubleadingSRJSimTreeSignal ===
+    gFexSubleadingSRJSimTreeSignal->SetBranchAddress("Et", &gFexSRJSimSubleadingEtValuesSignal);
+    gFexSubleadingSRJSimTreeSignal->SetBranchAddress("Eta", &gFexSRJSimSubleadingEtaValuesSignal);
+    gFexSubleadingSRJSimTreeSignal->SetBranchAddress("Phi", &gFexSRJSimSubleadingPhiValuesSignal);
 
     // === gepWTAConeCellsTowersEtaSKJetsTreeSignal ===
     gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Et", &gepWTAConeCellsTowersEtaSKJetspTValuesSignal);
@@ -1735,6 +1863,22 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gFexSubleadingLRJSimTreeBack->SetBranchAddress("Eta", &gFexLRJSimSubleadingEtaValuesBack);
     gFexSubleadingLRJSimTreeBack->SetBranchAddress("Phi", &gFexLRJSimSubleadingPhiValuesBack);
 
+    // === gFexSRJSimTreeBack ===
+    gFexSRJSimTreeBack->SetBranchAddress("EtIndex", &gFexSRJSimEtIndexValuesBack);
+    gFexSRJSimTreeBack->SetBranchAddress("Et", &gFexSRJSimEtValuesBack);
+    gFexSRJSimTreeBack->SetBranchAddress("Eta", &gFexSRJSimEtaValuesBack);
+    gFexSRJSimTreeBack->SetBranchAddress("Phi", &gFexSRJSimPhiValuesBack);
+
+    // === gFexLeadingSRJSimTreeBack ===
+    gFexLeadingSRJSimTreeBack->SetBranchAddress("Et", &gFexSRJSimLeadingEtValuesBack);
+    gFexLeadingSRJSimTreeBack->SetBranchAddress("Eta", &gFexSRJSimLeadingEtaValuesBack);
+    gFexLeadingSRJSimTreeBack->SetBranchAddress("Phi", &gFexSRJSimLeadingPhiValuesBack);
+
+    // === gFexSubleadinSRJSimTreeBack ===
+    gFexSubleadingSRJSimTreeBack->SetBranchAddress("Et", &gFexSRJSimSubleadingEtValuesBack);
+    gFexSubleadingSRJSimTreeBack->SetBranchAddress("Eta", &gFexSRJSimSubleadingEtaValuesBack);
+    gFexSubleadingSRJSimTreeBack->SetBranchAddress("Phi", &gFexSRJSimSubleadingPhiValuesBack);
+
     // === gepWTAConeCellsTowersEtaSKJetsTreeBack ===
     gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Et", &gepWTAConeCellsTowersEtaSKJetspTValuesBack);
     gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Eta", &gepWTAConeCellsTowersEtaSKJetsEtaValuesBack);
@@ -1899,7 +2043,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     subleadingOutOfTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Et", &outOfTimeAntiKt4TruthSRJSubleadingEtValuesBack);
     subleadingOutOfTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Eta", &outOfTimeAntiKt4TruthSRJSubleadingEtaValuesBack);
     subleadingOutOfTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Phi", &outOfTimeAntiKt4TruthSRJSubleadingPhiValuesBack);
-
+    _lap(Form("[file %u] branch address setup", fileIt));
 
     const unsigned int num_processed_events_background = eventInfoTreeBack->GetEntries();
     const unsigned int num_processed_events_signal = eventInfoTreeSignal->GetEntries();
@@ -2179,8 +2323,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // H_T: 0→600 in 25 GeV steps, 600→3000 in 100 GeV steps
     std::vector<Double_t> rateVsEffBins_HT;
 
-    // 0 → 400 GeV in 10 GeV steps
-    for (int i = 0; i <= 40; ++i) rateVsEffBins.push_back(i * 10.0);
+    // 0 → 400 GeV in 5 GeV steps (finer scan in the E_T-only region of interest)
+    for (int i = 0; i <= 80; ++i) rateVsEffBins.push_back(i * 5.0);
     // 0 → 100 GeV in 1.0 GeV steps
     for (int i = 0; i <= 100; ++i) rateVsEffBins_Cone4thLead.push_back(i * 1.0);
     // Leading single cone jet: 0→400 in 10 GeV steps (share with rateVsEffBins below)
@@ -2820,6 +2964,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // jFEX SRJ Sim (resimulated) — signal rate histograms
     TH1F* sig_h_jFEX_Sim_leading_SRJ_Et = new TH1F("sig_h_jFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
     TH1F* sig_h_jFEX_Sim_subleading_SRJ_Et = new TH1F("sig_h_jFEX_Sim_subleading_SRJ_Et", "Subleading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading SRJs / 10 GeV", 52, 0, 520);
+    
+    TH1F* sig_h_jFEX_4thleading_SRJ_Et = new TH1F("sig_h_jFEX_4thleading_SRJ_Et", "4th Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+    TH1F* sig_h_jFEX_Sim_4thleading_SRJ_Et = new TH1F("sig_h_jFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+    TH1F* sig_h_gFEX_Sim_leading_SRJ_Et = new TH1F("sig_h_gFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
+    TH1F* sig_h_gFEX_Sim_4thleading_SRJ_Et = new TH1F("sig_h_gFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+
+    TH1F* sig_h_gFEX_leading_SRJ_Et = new TH1F("sig_h_gFEX_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
+    TH1F* sig_h_gFEX_4thleading_SRJ_Et = new TH1F("sig_h_gFEX_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+
     // jFEX SRJ (existing hardware objects) — signal rate histogram
     TH1F* sig_h_jFEX_leading_SRJ_Et = new TH1F("sig_h_jFEX_leading_SRJ_Et", "Leading jFEX SRJ E_{T} Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
 
@@ -3702,6 +3855,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TH1F* sig_h_leading_LRJ_offlineLRJ_deltaEt = new TH1F("sig_h_leading_LRJ_offlineLRJ_deltaEt", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
 
     TH1F* sig_h_leading_offlineLRJ_gFexLRJ_deltaEt = new TH1F("sig_h_leading_offlineLRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    // Resim-object twin used by the STANDALONE leading_offlineLRJ_gFexLRJ_deltaEt plot
+    // (the AOD histogram above is retained for the vs-JetTagger comparison overlay).
+    TH1F* sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim = new TH1F("sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim", "#Delta E_{T} Leading gFex LRJ (Resim), Offline LRJ;#Delta E_{T} (Offline - gFEX Resim) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
     TH1F* sig_h_leading_offlineLRJ_jFexLRJ_deltaEt = new TH1F("sig_h_leading_offlineLRJ_jFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
 
     TH1F* sig_h_leading_LRJ_gFexLRJ_Et_resolution = new TH1F("sig_h_leading_LRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 40, -2, 2);
@@ -3743,6 +3899,19 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
     TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+
+    // 40 kHz subjet-split turn-ons (mirror of the 10 kHz subjet split; gFEX uses resimulated objects)
+    TH1F* sig_h_offlineLRJ_Et_num40kHz_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num40kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom40kHz_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom40kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+
+    TH1F* sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+
+    TH1F* sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+
+    TH1F* sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
     TH1F* sig_h_offlineLRJ_Et_num10kHz_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
     TH1F* sig_h_offlineLRJ_Et_denom10kHz_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
@@ -4298,6 +4467,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // jFEX SRJ Sim (resimulated) — background rate histograms
     TH1F* back_h_jFEX_Sim_leading_SRJ_Et = new TH1F("back_h_jFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
     TH1F* back_h_jFEX_Sim_subleading_SRJ_Et = new TH1F("back_h_jFEX_Sim_subleading_SRJ_Et", "Subleading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading SRJs / 10 GeV", 52, 0, 520);
+
+    TH1F* back_h_jFEX_Sim_4thleading_SRJ_Et = new TH1F("back_h_jFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 100, 0, 200);
+    TH1F* back_h_jFEX_4thleading_SRJ_Et = new TH1F("back_h_jFEX_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 100, 0, 200);
+
+    TH1F* back_h_gFEX_Sim_leading_SRJ_Et = new TH1F("back_h_gFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
+    TH1F* back_h_gFEX_Sim_4thleading_SRJ_Et = new TH1F("back_h_gFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+
+    TH1F* back_h_gFEX_leading_SRJ_Et = new TH1F("back_h_gFEX_leading_SRJ_Et", "Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
+    TH1F* back_h_gFEX_4thleading_SRJ_Et = new TH1F("back_h_gFEX_4thleading_SRJ_Et", "4th Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
     // jFEX SRJ (existing hardware objects) — background rate histogram
     TH1F* back_h_jFEX_leading_SRJ_Et = new TH1F("back_h_jFEX_leading_SRJ_Et", "Leading jFEX SRJ E_{T} Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
 
@@ -4322,6 +4500,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TH1F* back_h_leading_LRJ_offlineLRJ_deltaEt = new TH1F("back_h_leading_LRJ_offlineLRJ_deltaEt", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) [GeV];% of Leading LRJs / 10 GeV",  50, -150, 350);
 
     TH1F* back_h_leading_offlineLRJ_gFexLRJ_deltaEt = new TH1F("back_h_leading_offlineLRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    // Resim-object twin used by the STANDALONE leading_offlineLRJ_gFexLRJ_deltaEt plot
+    // (the AOD histogram above is retained for the vs-JetTagger comparison overlay).
+    TH1F* back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim = new TH1F("back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim", "#Delta E_{T} Leading gFex LRJ (Resim), Offline LRJ;#Delta E_{T} (Offline - gFEX Resim) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
     TH1F* back_h_leading_offlineLRJ_jFexLRJ_deltaEt = new TH1F("back_h_leading_offlineLRJ_jFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
 
     TH1F* back_h_leading_LRJ_gFexLRJ_Et_resolution = new TH1F("back_h_leading_LRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFEX - JetTagger) / E_{T, gFEX} [GeV];% of Leading LRJs / 0.1", 40, -2, 2);
@@ -4452,8 +4633,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         std::cerr << "Error: Could not open file " << backgroundFiles[fileIt].first << std::endl;
         return;
     }
-    
+    _lap(Form("[file %u] histogram declarations", fileIt));
+
     for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt ++ ){
+        // Total signal-event cap (kMaxEventsPerSlice). Disabled when < 0.
+        if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
         //std::cout << "iEvt: " << iEvt << "\n";
         jetTaggerLRJsSignal->GetEntry(iEvt);
         jetTaggerLeadingLRJsSignal->GetEntry(iEvt);
@@ -4465,7 +4649,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gFexSubleadingLRJSimTreeSignal->GetEntry(iEvt);
         jFexLeadingLRJTreeSignal->GetEntry(iEvt);
         jFexSubleadingLRJTreeSignal->GetEntry(iEvt);
+        jFexLeadingSRJTreeSignal->GetEntry(iEvt);
         jFexLeadingSRJSimTreeSignal->GetEntry(iEvt);
+        jFexSRJSimTreeSignal->GetEntry(iEvt);
+        jFexSRJTreeSignal->GetEntry(iEvt);
+        gFexSRJSimTreeSignal->GetEntry(iEvt);
+        gFexLeadingSRJSimTreeSignal->GetEntry(iEvt);
+        gFexSRJTreeSignal->GetEntry(iEvt);
+        gFexLeadingSRJTreeSignal->GetEntry(iEvt);
         jFexSubleadingSRJSimTreeSignal->GetEntry(iEvt);
         gepWTAConeCellsTowersJetsTreeSignal->GetEntry(iEvt);
         gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->GetEntry(iEvt);
@@ -4512,7 +4703,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
         sig_leadLRJEt_perEvt[iEvt] = jetTaggerLeadingLRJEtValuesSignal->at(0);
         sig_h_leading_LRJ_Et->Fill(jetTaggerLeadingLRJEtValuesSignal->at(0));
-        if(iEvt < 500) std::cout << "jetTaggerLeadingLRJEtValuesSignal->at(0): " << jetTaggerLeadingLRJEtValuesSignal->at(0) << "\n";
+        //if(iEvt < 500) std::cout << "jetTaggerLeadingLRJEtValuesSignal->at(0): " << jetTaggerLeadingLRJEtValuesSignal->at(0) << "\n";
         sig_h_leading_LRJ_Eta->Fill(jetTaggerLeadingLRJEtaValuesSignal->at(0));
         sig_h_subleading_LRJ_Et->Fill(jetTaggerSubleadingLRJEtValuesSignal->at(0));
         if (compute4thConeOR) {
@@ -4540,6 +4731,21 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             sig_h_jFEX_Sim_subleading_SRJ_Et->Fill(jFexSRJSimSubleadingEtValuesSignal->at(0));
         if (jFexSRJLeadingEtValuesSignal->size() > 0)
             sig_h_jFEX_leading_SRJ_Et->Fill(jFexSRJLeadingEtValuesSignal->at(0));
+        
+        if (jFexSRJEtValuesSignal->size() > 3)
+            sig_h_jFEX_4thleading_SRJ_Et->Fill(clamp200(jFexSRJEtValuesSignal->at(3)));
+        if (jFexSRJSimEtValuesSignal->size() > 3)
+            sig_h_jFEX_Sim_4thleading_SRJ_Et->Fill(clamp200(jFexSRJSimEtValuesSignal->at(3)));
+        if(gFexSRJSimLeadingEtValuesSignal->size() > 0)
+            sig_h_gFEX_Sim_leading_SRJ_Et->Fill(gFexSRJSimLeadingEtValuesSignal->at(0));
+        if (gFexSRJSimEtValuesSignal->size() > 3)
+            sig_h_gFEX_Sim_4thleading_SRJ_Et->Fill(clamp200(gFexSRJSimEtValuesSignal->at(3)));
+        if(gFexSRJLeadingEtValuesSignal->size() > 0)
+            sig_h_gFEX_leading_SRJ_Et->Fill(gFexSRJLeadingEtValuesSignal->at(0));
+        if (gFexSRJEtValuesSignal->size() > 3)
+            sig_h_gFEX_4thleading_SRJ_Et->Fill(clamp200(gFexSRJEtValuesSignal->at(3)));
+
+        
 
         // SK WTA cone jets — signal kinematic distributions
         if (gepLeadingWTAConeCellsTowersSKJetspTValuesSignal->size() > 0)
@@ -4574,12 +4780,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             sig_h_LRJ_phi->Fill(jetTaggerLRJPhiValuesSignal->at(iSigLRJ));
         }
     }
+    _lap(Form("[file %u] signal loop 1 (rate)", fileIt));
 
-    
+
     // --- HSTP debug counters (loop 1: rate loop) ---
     unsigned long dbgTotal1[nJZSlices_] = {};
     unsigned long dbgPass1[nJZSlices_]  = {};
     unsigned int printedEventsCounter = 0;
+    // Per-JZ-slice counter for the background event-cap (kMaxEventsPerSlice).
+    // Same skip pattern must hold across every background loop so that per-event
+    // vectors (sized to num_processed_events_background) stay index-consistent.
+    std::array<unsigned int, nJZSlices_> back_jz_count_rate = {};
     for(unsigned int iEvt = 0; iEvt < num_processed_events_background; iEvt ++ ){
         jetTaggerLRJsBack->GetEntry(iEvt);
         jetTaggerLeadingLRJsBack->GetEntry(iEvt);
@@ -4592,6 +4803,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         jFexLeadingLRJTreeBack->GetEntry(iEvt);
         jFexSubleadingLRJTreeBack->GetEntry(iEvt);
         jFexLeadingSRJSimTreeBack->GetEntry(iEvt);
+        jFexSRJTreeBack->GetEntry(iEvt);
+        jFexSRJSimTreeBack->GetEntry(iEvt);
+        gFexSRJSimTreeBack->GetEntry(iEvt);
+        gFexLeadingSRJSimTreeBack->GetEntry(iEvt);
+        gFexLeadingSRJTreeBack->GetEntry(iEvt);
         jFexLeadingSRJTreeBack->GetEntry(iEvt);
         gepWTAConeCellsTowersJetsTreeBack->GetEntry(iEvt);
         gepLeadingWTAConeCellsTowersJetsTreeBack->GetEntry(iEvt);
@@ -4604,6 +4820,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         subleadingOutOfTimeAntiKt4TruthJetsTreeBack->GetEntry(iEvt);
         leadingTruthAntiKt4TruthDressedWZJetsBack->GetEntry(iEvt);
         leadingRecoAntiKt10UFOCSSKJetsBack->GetEntry(iEvt);
+        // Per-JZ-slice event cap (kMaxEventsPerSlice). Disabled when < 0.
+        if (kMaxEventsPerSlice >= 0) {
+            const int _jz = sampleJZSliceValuesBack;
+            if (_jz < 0 || (unsigned)_jz >= nJZSlices_) continue;
+            if (back_jz_count_rate[_jz] >= (unsigned int)kMaxEventsPerSlice) continue;
+            back_jz_count_rate[_jz]++;
+        }
         bool outOfTimeRateSpike = false;
         /*if (gepRunNumberHER_back != gepRunNumberEmul_back || gepEventNumberHER_back != gepEventNumberEmul_back) {
             std::cout << "[ORDERING MISMATCH back] iEvt=" << iEvt
@@ -4613,7 +4836,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             std::cout << "[ordering OK back] iEvt=" << iEvt
                       << " run=" << gepRunNumberHER_back << " evt=" << gepEventNumberHER_back << "\n";
         }*/
-        if(iEvt < 500) std::cout << "passHSTPValuesBack: " << passHSTPValuesBack << "\n";
+        //if(iEvt < 500) std::cout << "passHSTPValuesBack: " << passHSTPValuesBack << "\n";
         
 
         double backgroundEventWeight = eventWeightsValuesBack->at(0);
@@ -4711,9 +4934,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(printedEventsCounter < 500){
             printedEventsCounter++;
-            std::cout << "sampleJZSliceValuesBack: "<< sampleJZSliceValuesBack << "\n";
-            std::cout << "gFEX leading (resim) LRJ: " << gFexLRJSimLeadingEtValuesBack->at(0) << "\n";
-            std::cout << "jetTaggerLeadingLRJEtValuesBack->at(0): " << jetTaggerLeadingLRJEtValuesBack->at(0) << " , background event weight [hz]: " << backgroundEventWeight << "\n";
+            //std::cout << "sampleJZSliceValuesBack: "<< sampleJZSliceValuesBack << "\n";
+            //std::cout << "gFEX leading (resim) LRJ: " << gFexLRJSimLeadingEtValuesBack->at(0) << "\n";
+            //std::cout << "jetTaggerLeadingLRJEtValuesBack->at(0): " << jetTaggerLeadingLRJEtValuesBack->at(0) << " , background event weight [hz]: " << backgroundEventWeight << "\n";
         } 
         back_h_leading_LRJ_Eta->Fill(jetTaggerLeadingLRJEtaValuesBack->at(0), backgroundEventWeight);
         back_h_subleading_LRJ_Et->Fill(jetTaggerSubleadingLRJEtValuesBack->at(0), backgroundEventWeight);
@@ -4751,6 +4974,19 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             back_h_jFEX_Sim_subleading_SRJ_Et_arr[sampleJZSliceValuesBack]->Fill(jFexSRJSimSubleadingEtValuesBack->at(0), backgroundEventWeight);
         }
 
+        if (jFexSRJEtValuesBack->size() > 3)
+            back_h_jFEX_4thleading_SRJ_Et->Fill(clamp200(jFexSRJEtValuesBack->at(3)), backgroundEventWeight);
+        if (jFexSRJSimEtValuesBack->size() > 3)
+            back_h_jFEX_Sim_4thleading_SRJ_Et->Fill(clamp200(jFexSRJSimEtValuesBack->at(3)), backgroundEventWeight);
+        if(gFexSRJSimLeadingEtValuesBack->size() > 0)
+            back_h_gFEX_Sim_leading_SRJ_Et->Fill(gFexSRJSimLeadingEtValuesBack->at(0), backgroundEventWeight);
+        if (gFexSRJSimEtValuesBack->size() > 3)
+            back_h_gFEX_Sim_4thleading_SRJ_Et->Fill(clamp200(gFexSRJSimEtValuesBack->at(3)), backgroundEventWeight);
+        if(gFexSRJLeadingEtValuesBack->size() > 0)
+            back_h_gFEX_leading_SRJ_Et->Fill(gFexSRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+        if (gFexSRJEtValuesBack->size() > 3)
+            back_h_gFEX_4thleading_SRJ_Et->Fill(clamp200(gFexSRJEtValuesBack->at(3)), backgroundEventWeight);
+
         for(unsigned int iBackLRJ = 0; iBackLRJ < jetTaggerLRJPsi_RValuesBack->size(); iBackLRJ++){
             back_h_LRJ_substruct->Fill(jetTaggerLRJPsi_RValuesBack->at(iBackLRJ), backgroundEventWeight);
             backDiamvsEt->Fill(jetTaggerLRJEtValuesBack->at(iBackLRJ), jetTaggerLRJPsi_RValuesBack->at(iBackLRJ), backgroundEventWeight);
@@ -4764,6 +5000,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
     }
 
+    _lap(Form("[file %u] background loop 1 (rate) — event loop only", fileIt));
     // --- HSTP debug summary (loop 1: rate loop) ---
     std::cout << "\n=== [HSTP debug] Loop 1 (rate loop) — events per JZ slice ===\n";
     std::cout << "  JZ | Total events | Pass HSTP | Pass fraction\n";
@@ -4828,7 +5065,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_4thLeadCone.hRate_vsThr->Draw("HIST");
-    c1_4thleadcone->SaveAs(rateVsEffFileDir + "threshold_views_4thleadcone.pdf");
+    c1_4thleadcone->cd(); DrawATLASLabel(); c1_4thleadcone->SaveAs(rateVsEffFileDir + "threshold_views_4thleadcone.pdf");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_4thleadcone = new TCanvas("c2_4thleadcone","Rate vs Eff",700,600);
@@ -4870,7 +5107,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // ---- Save ----
     gPad->RedrawAxis();}
 
-    c2_4thleadcone->SaveAs(rateVsEffFileDir + "rate_vs_eff_4thleadcone.pdf");
+    c2_4thleadcone->cd(); DrawATLASLabel(); c2_4thleadcone->SaveAs(rateVsEffFileDir + "rate_vs_eff_4thleadcone.pdf");
 
     // Compute 10 kHz rate E_T cut:
     double cone_4th_lead_threshold = FindThrForRate(out_4thLeadCone.hRate_vsThr, 10000.0);
@@ -4902,13 +5139,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
         gPad->SetLogy();
         out_leading_cone.hRate_vsThr->Draw("HIST");
-        c1_leadcone->SaveAs(rateVsEffFileDir + "threshold_views_leading_conejets.pdf");
+        c1_leadcone->cd(); DrawATLASLabel(); c1_leadcone->SaveAs(rateVsEffFileDir + "threshold_views_leading_conejets.pdf");
 
         auto c2_leadcone = new TCanvas("c2_leadcone", "Rate vs Eff", 700, 600);
         c2_leadcone->SetLeftMargin(0.16); c2_leadcone->SetBottomMargin(0.16); c2_leadcone->SetTicks(1,1);
         c2_leadcone->SetLogy();
         out_leading_cone.gRate_vsEff->Draw("AP");
-        c2_leadcone->SaveAs(rateVsEffFileDir + "rate_vs_eff_leading_conejets.pdf");
+        c2_leadcone->cd(); DrawATLASLabel(); c2_leadcone->SaveAs(rateVsEffFileDir + "rate_vs_eff_leading_conejets.pdf");
     }
 
     double cone_singleJet_25kHz_threshold = FindThrForRate(out_leading_cone.hRate_vsThr, 25000.0);
@@ -4936,13 +5173,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
         gPad->SetLogy();
         out_HT_cone.hRate_vsThr->Draw("HIST");
-        c1_HT->SaveAs(rateVsEffFileDir + "threshold_views_HT_conejets.pdf");
+        c1_HT->cd(); DrawATLASLabel(); c1_HT->SaveAs(rateVsEffFileDir + "threshold_views_HT_conejets.pdf");
 
         auto c2_HT = new TCanvas("c2_HT", "Rate vs Eff", 700, 600);
         c2_HT->SetLeftMargin(0.16); c2_HT->SetBottomMargin(0.16); c2_HT->SetTicks(1,1);
         c2_HT->SetLogy();
         out_HT_cone.gRate_vsEff->Draw("AP");
-        c2_HT->SaveAs(rateVsEffFileDir + "rate_vs_eff_HT_conejets.pdf");
+        c2_HT->cd(); DrawATLASLabel(); c2_HT->SaveAs(rateVsEffFileDir + "rate_vs_eff_HT_conejets.pdf");
     }
 
     double cone_HT_50kHz_threshold = FindThrForRate(out_HT_cone.hRate_vsThr, 50000.0);
@@ -4979,13 +5216,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
         gPad->SetLogy();
         out_unique_leading.hRate_vsThr->Draw("HIST");
-        c1_unique_lead->SaveAs(rateVsEffFileDir + "threshold_views_unique_leading_LRJ.pdf");
+        c1_unique_lead->cd(); DrawATLASLabel(); c1_unique_lead->SaveAs(rateVsEffFileDir + "threshold_views_unique_leading_LRJ.pdf");
 
         auto c2_unique_lead = new TCanvas("c2_unique_lead", "Unique rate vs eff", 700, 600);
         c2_unique_lead->SetLeftMargin(0.16); c2_unique_lead->SetBottomMargin(0.16); c2_unique_lead->SetTicks(1,1);
         c2_unique_lead->SetLogy();
         out_unique_leading.gRate_vsEff->Draw("AP");
-        c2_unique_lead->SaveAs(rateVsEffFileDir + "rate_vs_eff_unique_leading_LRJ.pdf");
+        c2_unique_lead->cd(); DrawATLASLabel(); c2_unique_lead->SaveAs(rateVsEffFileDir + "rate_vs_eff_unique_leading_LRJ.pdf");
     }
 
     double uniqueLead_10kHz_thr = FindThrForRate(out_unique_leading.hRate_vsThr, 10000.0);
@@ -5034,14 +5271,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out.hRate_vsThr->Draw("HIST");
-    c1->SaveAs(rateVsEffFileDir + "threshold_views.pdf");
+    c1->cd(); DrawATLASLabel(); c1->SaveAs(rateVsEffFileDir + "threshold_views.pdf");
 
     // Main plot: rate vs efficiency (graph)
     auto c2 = new TCanvas("c2","Rate vs Eff",700,600);
     c2->SetLeftMargin(0.16); c2->SetBottomMargin(0.16); c2->SetTicks(1,1);
     c2->SetLogy();
     out.gRate_vsEff->Draw("AP");   // A=axes, P=points
-    c2->SaveAs(rateVsEffFileDir + "rate_vs_eff.pdf");
+    c2->cd(); DrawATLASLabel(); c2->SaveAs(rateVsEffFileDir + "rate_vs_eff.pdf");
 
     // Compute 10 kHz rate E_T cut:
     double jetTagger_10kHz_Threshold_Leading = FindThrForRate(out.hRate_vsThr, 10000.0);
@@ -5084,14 +5321,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_subleading.hRate_vsThr->Draw("HIST");
-    c1_subleading->SaveAs(rateVsEffFileDir + "threshold_views_subleading.pdf");
+    c1_subleading->cd(); DrawATLASLabel(); c1_subleading->SaveAs(rateVsEffFileDir + "threshold_views_subleading.pdf");
 
     // Main plot
     auto c2_subleading = new TCanvas("c2_subleading","Rate vs Eff",700,600);
     c2_subleading->SetLeftMargin(0.16); c2_subleading->SetBottomMargin(0.16); c2_subleading->SetTicks(1,1);
     c2_subleading->SetLogy();
     out_subleading.gRate_vsEff->Draw("AP");
-    c2_subleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_subleading.pdf");
+    c2_subleading->cd(); DrawATLASLabel(); c2_subleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_subleading.pdf");
 
     // ---- gFEX LEADING --------------------------------------------------------------
     auto out_gFEX_leading = MakeRateVsEff(sig_h_gFEX_leading_LRJ_Et, back_h_gFEX_leading_LRJ_Et);
@@ -5117,14 +5354,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_gFEX_leading.hRate_vsThr->Draw("HIST");
-    c1_gFEX_leading->SaveAs(rateVsEffFileDir + "threshold_views_gfex_leading.pdf");
+    c1_gFEX_leading->cd(); DrawATLASLabel(); c1_gFEX_leading->SaveAs(rateVsEffFileDir + "threshold_views_gfex_leading.pdf");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_gFEX_leading = new TCanvas("c2_gFEX_leading","Rate vs Eff",700,600);
     c2_gFEX_leading->SetLeftMargin(0.16); c2_gFEX_leading->SetBottomMargin(0.16); c2_gFEX_leading->SetTicks(1,1);
     c2_gFEX_leading->SetLogy();
     out_gFEX_leading.gRate_vsEff->Draw("AP");   // A=axes, P=points
-    c2_gFEX_leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gfex_leading.pdf");
+    c2_gFEX_leading->cd(); DrawATLASLabel(); c2_gFEX_leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gfex_leading.pdf");
 
     // Compute 10 kHz rate E_T cut:
     double gFEX_10kHz_Threshold_Leading = FindThrForRate(out_gFEX_leading.hRate_vsThr, 10000.0);
@@ -5156,14 +5393,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_gFEX_subleading.hRate_vsThr->Draw("HIST");
-    c1_gFEX_subleading->SaveAs(rateVsEffFileDir + "threshold_views_gfex_subleading.pdf");
+    c1_gFEX_subleading->cd(); DrawATLASLabel(); c1_gFEX_subleading->SaveAs(rateVsEffFileDir + "threshold_views_gfex_subleading.pdf");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_gFEX_subleading = new TCanvas("c2_gFEX_subleading","Rate vs Eff",700,600);
     c2_gFEX_subleading->SetLeftMargin(0.16); c2_gFEX_subleading->SetBottomMargin(0.16); c2_gFEX_subleading->SetTicks(1,1);
     c2_gFEX_subleading->SetLogy();
     out_gFEX_subleading.gRate_vsEff->Draw("AP");   // A=axes, P=points
-    c2_gFEX_subleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gfex_subleading.pdf");
+    c2_gFEX_subleading->cd(); DrawATLASLabel(); c2_gFEX_subleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gfex_subleading.pdf");
 
     // ---- gFEX LRJ Sim (resimulated) LEADING --------------------------------------
     auto out_gFEX_Sim_leading = MakeRateVsEff(sig_h_gFEX_Sim_leading_LRJ_Et, back_h_gFEX_Sim_leading_LRJ_Et);
@@ -5183,16 +5420,23 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_gFEX_Sim_leading.hRate_vsThr->Draw("HIST");
-    c1_gFEX_Sim_leading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_Sim_leading.pdf");
+    c1_gFEX_Sim_leading->cd(); DrawATLASLabel(); c1_gFEX_Sim_leading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_Sim_leading.pdf");
 
     auto c2_gFEX_Sim_leading = new TCanvas("c2_gFEX_Sim_leading","Rate vs Eff gFEX Sim",700,600);
     c2_gFEX_Sim_leading->SetLeftMargin(0.16); c2_gFEX_Sim_leading->SetBottomMargin(0.16); c2_gFEX_Sim_leading->SetTicks(1,1);
     c2_gFEX_Sim_leading->SetLogy();
     out_gFEX_Sim_leading.gRate_vsEff->Draw("AP");
-    c2_gFEX_Sim_leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gFEX_Sim_leading.pdf");
+    c2_gFEX_Sim_leading->cd(); DrawATLASLabel(); c2_gFEX_Sim_leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gFEX_Sim_leading.pdf");
 
     double gFEX_Sim_10kHz_Threshold_Leading = FindThrForRate(out_gFEX_Sim_leading.hRate_vsThr, 10000.0);
     double gFEX_Sim_40kHz_Threshold_Leading = FindThrForRate(out_gFEX_Sim_leading.hRate_vsThr, 40000.0);
+
+    // Store gFEX (Resim) leading LRJ E_T-only rate-vs-eff scan for the subjetBased_ET_Scan overlay
+    gFEX_Sim_ET_Scan_RatesVsEff_vec.push_back(
+        (TGraph*) out_gFEX_Sim_leading.gRate_vsEff->Clone(
+            Form("%s_clone_%u", out_gFEX_Sim_leading.gRate_vsEff->GetName(), fileIt)
+        )
+    );
 
     auto out_gFEX_Sim_subleading = MakeRateVsEff(sig_h_gFEX_Sim_subleading_LRJ_Et, back_h_gFEX_Sim_subleading_LRJ_Et);
     double gFEX_Sim_10kHz_Threshold_Subleading = FindThrForRate(out_gFEX_Sim_subleading.hRate_vsThr, 10000.0);
@@ -5231,19 +5475,206 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
         gPad->SetLogy();
         out_jFEX_Sim_leading.hRate_vsThr->Draw("HIST");
-        c1_jFEX_Sim_leading->SaveAs(rateVsEffFileDir + "threshold_views_jFEX_Sim_leading.pdf");
+        c1_jFEX_Sim_leading->cd(); DrawATLASLabel(); c1_jFEX_Sim_leading->SaveAs(rateVsEffFileDir + "threshold_views_jFEX_Sim_leading.pdf");
 
         auto c2_jFEX_Sim_leading = new TCanvas("c2_jFEX_Sim_leading","Rate vs Eff jFEX SRJ Sim",700,600);
         c2_jFEX_Sim_leading->SetLeftMargin(0.16); c2_jFEX_Sim_leading->SetBottomMargin(0.16); c2_jFEX_Sim_leading->SetTicks(1,1);
         c2_jFEX_Sim_leading->SetLogy();
         out_jFEX_Sim_leading.gRate_vsEff->Draw("AP");
-        c2_jFEX_Sim_leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_jFEX_Sim_leading.pdf");
+        c2_jFEX_Sim_leading->cd(); DrawATLASLabel(); c2_jFEX_Sim_leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_jFEX_Sim_leading.pdf");
     }
 
     double jFEX_Sim_25kHz_Threshold_Leading = FindThrForRate(out_jFEX_Sim_leading.hRate_vsThr, 25000.0);
     std::cout << "jFEX SRJ Sim 25kHz leading threshold: " << jFEX_Sim_25kHz_Threshold_Leading << " GeV\n";
 
-    // ---- jFEX SRJ (existing hardware) LEADING ---------------------------------------
+    // ---- jFEX SRJ Sim (resimulated) 4th LEADING ----------------------------------------
+    auto out_jFEX_Sim_4thleading = MakeRateVsEff(sig_h_jFEX_Sim_4thleading_SRJ_Et, back_h_jFEX_Sim_4thleading_SRJ_Et);
+    SetAxes(out_jFEX_Sim_4thleading.hEff_vsThr ->GetXaxis(), "4th Leading jFEX SRJ (Resim) E_{T} threshold [GeV]");
+    SetAxes(out_jFEX_Sim_4thleading.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
+    SetAxes(out_jFEX_Sim_4thleading.hRate_vsThr->GetXaxis(), "4th Leading jFEX SRJ (Resim) E_{T} threshold [GeV]");
+    SetAxes(out_jFEX_Sim_4thleading.hRate_vsThr->GetYaxis(), "Estimated Background Rate [Hz]");
+    SetAxes(out_jFEX_Sim_4thleading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_jFEX_Sim_4thleading.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
+
+    {
+        auto c1_jFEX_Sim_4thleading = new TCanvas("c1_jFEX_Sim_4thleading","jFEX SRJ Sim vs threshold",1200,500);
+        c1_jFEX_Sim_4thleading->Divide(2,1);
+        c1_jFEX_Sim_4thleading->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        out_jFEX_Sim_4thleading.hEff_vsThr->Draw("HIST");
+        c1_jFEX_Sim_4thleading->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_jFEX_Sim_4thleading.hRate_vsThr->Draw("HIST");
+        c1_jFEX_Sim_4thleading->cd(); DrawATLASLabel(); c1_jFEX_Sim_4thleading->SaveAs(rateVsEffFileDir + "threshold_views_jFEX_Sim_4thleading.pdf");
+
+        auto c2_jFEX_Sim_4thleading = new TCanvas("c2_jFEX_Sim_4thleading","Rate vs Eff jFEX SRJ Sim",700,600);
+        c2_jFEX_Sim_4thleading->SetLeftMargin(0.16); c2_jFEX_Sim_4thleading->SetBottomMargin(0.16); c2_jFEX_Sim_4thleading->SetTicks(1,1);
+        c2_jFEX_Sim_4thleading->SetLogy();
+        out_jFEX_Sim_4thleading.gRate_vsEff->Draw("AP");
+        c2_jFEX_Sim_4thleading->cd(); DrawATLASLabel(); c2_jFEX_Sim_4thleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_jFEX_Sim_4thleading.pdf");
+    }
+
+    double jFEX_Sim_100kHz_Threshold_4thLeading = FindThrForRate(out_jFEX_Sim_4thleading.hRate_vsThr, 100000.0);
+    std::cout << "jFEX SRJ Sim 100kHz 4th leading threshold: " << jFEX_Sim_100kHz_Threshold_4thLeading << " GeV\n";
+
+    // ---- jFEX SRJ Sim (resimulated) 4th LEADING ----------------------------------------
+    auto out_jFEX_4thleading = MakeRateVsEff(sig_h_jFEX_4thleading_SRJ_Et, back_h_jFEX_4thleading_SRJ_Et);
+    SetAxes(out_jFEX_4thleading.hEff_vsThr ->GetXaxis(), "4th Leading jFEX SRJ E_{T} threshold [GeV]");
+    SetAxes(out_jFEX_4thleading.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
+    SetAxes(out_jFEX_4thleading.hRate_vsThr->GetXaxis(), "4th Leading jFEX SRJ E_{T} threshold [GeV]");
+    SetAxes(out_jFEX_4thleading.hRate_vsThr->GetYaxis(), "Estimated Background Rate [Hz]");
+    SetAxes(out_jFEX_4thleading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_jFEX_4thleading.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
+
+    {
+        auto c1_jFEX_4thleading = new TCanvas("c1_jFEX_4thleading","jFEX SRJ Sim vs threshold",1200,500);
+        c1_jFEX_4thleading->Divide(2,1);
+        c1_jFEX_4thleading->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        out_jFEX_4thleading.hEff_vsThr->Draw("HIST");
+        c1_jFEX_4thleading->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_jFEX_4thleading.hRate_vsThr->Draw("HIST");
+        c1_jFEX_4thleading->cd(); DrawATLASLabel(); c1_jFEX_4thleading->SaveAs(rateVsEffFileDir + "threshold_views_jFEX_4thleading.pdf");
+
+        auto c2_jFEX_4thleading = new TCanvas("c2_jFEX_4thleading","Rate vs Eff jFEX SRJ Sim",700,600);
+        c2_jFEX_4thleading->SetLeftMargin(0.16); c2_jFEX_4thleading->SetBottomMargin(0.16); c2_jFEX_4thleading->SetTicks(1,1);
+        c2_jFEX_4thleading->SetLogy();
+        out_jFEX_4thleading.gRate_vsEff->Draw("AP");
+        c2_jFEX_4thleading->cd(); DrawATLASLabel(); c2_jFEX_4thleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_jFEX_4thleading.pdf");
+    }
+
+    double jFEX_100kHz_Threshold_4thLeading = FindThrForRate(out_jFEX_4thleading.hRate_vsThr, 100000.0);
+    std::cout << "jFEX SRJ 100kHz 4th leading threshold: " << jFEX_100kHz_Threshold_4thLeading << " GeV\n";
+
+
+    // ---- gFEX SRJ Sim (resimulated) LEADING ----------------------------------------
+    auto out_gFEX_SRJ_Sim_leading = MakeRateVsEff(sig_h_gFEX_Sim_leading_SRJ_Et, back_h_gFEX_Sim_leading_SRJ_Et);
+    SetAxes(out_gFEX_SRJ_Sim_leading.hEff_vsThr ->GetXaxis(), "Leading gFEX SRJ (Resim) E_{T} threshold [GeV]");
+    SetAxes(out_gFEX_SRJ_Sim_leading.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
+    SetAxes(out_gFEX_SRJ_Sim_leading.hRate_vsThr->GetXaxis(), "Leading gFEX SRJ (Resim) E_{T} threshold [GeV]");
+    SetAxes(out_gFEX_SRJ_Sim_leading.hRate_vsThr->GetYaxis(), "Estimated Background Rate [Hz]");
+    SetAxes(out_gFEX_SRJ_Sim_leading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_gFEX_SRJ_Sim_leading.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
+
+    {
+        auto c1_gFEX_Sim_leading = new TCanvas("c1_gFEX_Sim_leading","gFEX SRJ Sim vs threshold",1200,500);
+        c1_gFEX_Sim_leading->Divide(2,1);
+        c1_gFEX_Sim_leading->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        out_gFEX_SRJ_Sim_leading.hEff_vsThr->Draw("HIST");
+        c1_gFEX_Sim_leading->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_gFEX_SRJ_Sim_leading.hRate_vsThr->Draw("HIST");
+        c1_gFEX_Sim_leading->cd(); DrawATLASLabel(); c1_gFEX_Sim_leading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_SRJ_Sim_leading.pdf");
+
+        auto c2_gFEX_Sim_leading = new TCanvas("c2_gFEX_Sim_leading","Rate vs Eff gFEX SRJ Sim",700,600);
+        c2_gFEX_Sim_leading->SetLeftMargin(0.16); c2_gFEX_Sim_leading->SetBottomMargin(0.16); c2_gFEX_Sim_leading->SetTicks(1,1);
+        c2_gFEX_Sim_leading->SetLogy();
+        out_gFEX_SRJ_Sim_leading.gRate_vsEff->Draw("AP");
+        c2_gFEX_Sim_leading->cd(); DrawATLASLabel(); c2_gFEX_Sim_leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gFEX_SRJ_Sim_leading.pdf");
+    }
+
+    double gFEX_Sim_25kHz_Threshold_Leading = FindThrForRate(out_gFEX_SRJ_Sim_leading.hRate_vsThr, 25000.0);
+    std::cout << "gFEX SRJ Sim 25kHz leading threshold: " << gFEX_Sim_25kHz_Threshold_Leading << " GeV\n";
+
+    // ---- gFEX SRJ Sim (resimulated) 4th LEADING ----------------------------------------
+    auto out_gFEX_Sim_4thleading = MakeRateVsEff(sig_h_gFEX_Sim_4thleading_SRJ_Et, back_h_gFEX_Sim_4thleading_SRJ_Et);
+    SetAxes(out_gFEX_Sim_4thleading.hEff_vsThr ->GetXaxis(), "4th Leading gFEX SRJ (Resim) E_{T} threshold [GeV]");
+    SetAxes(out_gFEX_Sim_4thleading.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
+    SetAxes(out_gFEX_Sim_4thleading.hRate_vsThr->GetXaxis(), "4th Leading gFEX SRJ (Resim) E_{T} threshold [GeV]");
+    SetAxes(out_gFEX_Sim_4thleading.hRate_vsThr->GetYaxis(), "Estimated Background Rate [Hz]");
+    SetAxes(out_gFEX_Sim_4thleading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_gFEX_Sim_4thleading.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
+
+    {
+        auto c1_gFEX_Sim_4thleading = new TCanvas("c1_gFEX_Sim_4thleading","gFEX SRJ Sim vs threshold",1200,500);
+        c1_gFEX_Sim_4thleading->Divide(2,1);
+        c1_gFEX_Sim_4thleading->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        out_gFEX_Sim_4thleading.hEff_vsThr->Draw("HIST");
+        c1_gFEX_Sim_4thleading->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_gFEX_Sim_4thleading.hRate_vsThr->Draw("HIST");
+        c1_gFEX_Sim_4thleading->cd(); DrawATLASLabel(); c1_gFEX_Sim_4thleading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_Sim_4thleading.pdf");
+
+        auto c2_gFEX_Sim_4thleading = new TCanvas("c2_gFEX_Sim_4thleading","Rate vs Eff gFEX SRJ Sim",700,600);
+        c2_gFEX_Sim_4thleading->SetLeftMargin(0.16); c2_gFEX_Sim_4thleading->SetBottomMargin(0.16); c2_gFEX_Sim_4thleading->SetTicks(1,1);
+        c2_gFEX_Sim_4thleading->SetLogy();
+        out_gFEX_Sim_4thleading.gRate_vsEff->Draw("AP");
+        c2_gFEX_Sim_4thleading->cd(); DrawATLASLabel(); c2_gFEX_Sim_4thleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gFEX_Sim_4thleading.pdf");
+    }
+
+    double gFEX_Sim_100kHz_Threshold_4thLeading = FindThrForRate(out_gFEX_Sim_4thleading.hRate_vsThr, 100000.0);
+    std::cout << "gFEX SRJ Sim 100kHz 4th leading threshold: " << gFEX_Sim_100kHz_Threshold_4thLeading << " GeV\n";
+
+    // ---- gFEX SRJ Sim (resimulated) LEADING ----------------------------------------
+    auto out_gFEX_SRJ_leading = MakeRateVsEff(sig_h_gFEX_leading_SRJ_Et, back_h_gFEX_leading_SRJ_Et);
+    SetAxes(out_gFEX_SRJ_leading.hEff_vsThr ->GetXaxis(), "Leading gFEX SRJ E_{T} threshold [GeV]");
+    SetAxes(out_gFEX_SRJ_leading.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
+    SetAxes(out_gFEX_SRJ_leading.hRate_vsThr->GetXaxis(), "Leading gFEX SRJ E_{T} threshold [GeV]");
+    SetAxes(out_gFEX_SRJ_leading.hRate_vsThr->GetYaxis(), "Estimated Background Rate [Hz]");
+    SetAxes(out_gFEX_SRJ_leading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_gFEX_SRJ_leading.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
+
+    {
+        auto c1_gFEX_leading = new TCanvas("c1_gFEX_leading","gFEX SRJ Sim vs threshold",1200,500);
+        c1_gFEX_leading->Divide(2,1);
+        c1_gFEX_leading->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        out_gFEX_SRJ_leading.hEff_vsThr->Draw("HIST");
+        c1_gFEX_leading->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_gFEX_SRJ_leading.hRate_vsThr->Draw("HIST");
+        c1_gFEX_leading->cd(); DrawATLASLabel(); c1_gFEX_leading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_SRJ_leading.pdf");
+
+        auto c2_gFEX_leading = new TCanvas("c2_gFEX_leading","Rate vs Eff gFEX SRJ",700,600);
+        c2_gFEX_leading->SetLeftMargin(0.16); c2_gFEX_leading->SetBottomMargin(0.16); c2_gFEX_leading->SetTicks(1,1);
+        c2_gFEX_leading->SetLogy();
+        out_gFEX_SRJ_leading.gRate_vsEff->Draw("AP");
+        c2_gFEX_leading->cd(); DrawATLASLabel(); c2_gFEX_leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gFEX_SRJ_leading.pdf");
+    }
+
+    double gFEX_25kHz_Threshold_Leading = FindThrForRate(out_gFEX_SRJ_leading.hRate_vsThr, 25000.0);
+    std::cout << "gFEX SRJ 25kHz leading threshold: " << gFEX_25kHz_Threshold_Leading << " GeV\n";
+
+    // ---- gFEX SRJ 4th LEADING ----------------------------------------
+    auto out_gFEX_4thleading = MakeRateVsEff(sig_h_gFEX_4thleading_SRJ_Et, back_h_gFEX_4thleading_SRJ_Et);
+    SetAxes(out_gFEX_4thleading.hEff_vsThr ->GetXaxis(), "4th Leading gFEX SRJ E_{T} threshold [GeV]");
+    SetAxes(out_gFEX_4thleading.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
+    SetAxes(out_gFEX_4thleading.hRate_vsThr->GetXaxis(), "4th Leading gFEX SRJ E_{T} threshold [GeV]");
+    SetAxes(out_gFEX_4thleading.hRate_vsThr->GetYaxis(), "Estimated Background Rate [Hz]");
+    SetAxes(out_gFEX_4thleading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
+    SetAxes(out_gFEX_4thleading.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
+
+    {
+        auto c1_gFEX_4thleading = new TCanvas("c1_gFEX_4thleading","gFEX SRJ vs threshold",1200,500);
+        c1_gFEX_4thleading->Divide(2,1);
+        c1_gFEX_4thleading->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        out_gFEX_4thleading.hEff_vsThr->Draw("HIST");
+        c1_gFEX_4thleading->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        out_gFEX_4thleading.hRate_vsThr->Draw("HIST");
+        c1_gFEX_4thleading->cd(); DrawATLASLabel(); c1_gFEX_4thleading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_4thleading.pdf");
+
+        auto c2_gFEX_4thleading = new TCanvas("c2_gFEX_4thleading","Rate vs Eff gFEX SRJ",700,600);
+        c2_gFEX_4thleading->SetLeftMargin(0.16); c2_gFEX_4thleading->SetBottomMargin(0.16); c2_gFEX_4thleading->SetTicks(1,1);
+        c2_gFEX_4thleading->SetLogy();
+        out_gFEX_4thleading.gRate_vsEff->Draw("AP");
+        c2_gFEX_4thleading->cd(); DrawATLASLabel(); c2_gFEX_4thleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_gFEX_4thleading.pdf");
+    }
+
+    double gFEX_100kHz_Threshold_4thLeading = FindThrForRate(out_gFEX_4thleading.hRate_vsThr, 100000.0);
+    std::cout << "gFEX SRJ 100kHz 4th leading threshold: " << gFEX_100kHz_Threshold_4thLeading << " GeV\n";
+
+    // ---- jFEX SRJ (AOD) LEADING ---------------------------------------
     auto out_jFEX_SRJ_leading = MakeRateVsEff(sig_h_jFEX_leading_SRJ_Et, back_h_jFEX_leading_SRJ_Et);
     SetAxes(out_jFEX_SRJ_leading.hEff_vsThr ->GetXaxis(), "Leading jFEX SRJ E_{T} threshold [GeV]");
     SetAxes(out_jFEX_SRJ_leading.hEff_vsThr ->GetYaxis(), "Signal Efficiency");
@@ -5256,9 +5687,158 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::cout << "jFEX SRJ     25kHz leading threshold: " << jFEX_SRJ_25kHz_Threshold_Leading << " GeV\n";
     std::cout << "WTA cone     25kHz leading threshold: " << cone_singleJet_25kHz_threshold << " GeV\n";
 
+    // ---- 5-way overlay: jFEX SRJ vs jFEX SRJ Sim vs gFEX SRJ vs gFEX SRJ WTA cone leading ---------------
+    {
+        const Int_t jc5cols[5]    = {  kP6Violet, kP6Gray, kP6Grape, kP6Red, kP6Yellow };
+        const Int_t jc5mstyles[5] = { 20, 21, 22, 23, 24 };
+        const char* jc5labels[5]  = { "jFEX SRJ", "jFEX SRJ (Resim)", "gFEX SRJ", "gFEX SRJ (Resim)", "GEP Cone Jet" };
+
+        TH1*    jc5effH [5] = { out_jFEX_SRJ_leading.hEff_vsThr,  out_jFEX_Sim_leading.hEff_vsThr, out_gFEX_SRJ_leading.hEff_vsThr,  out_gFEX_SRJ_Sim_leading.hEff_vsThr,  out_leading_cone.hEff_vsThr };
+        TH1*    jc5rateH[5] = { out_jFEX_SRJ_leading.hRate_vsThr, out_jFEX_Sim_leading.hRate_vsThr, out_gFEX_SRJ_leading.hRate_vsThr, out_gFEX_SRJ_Sim_leading.hRate_vsThr, out_leading_cone.hRate_vsThr };
+        TGraph* jc5rocG [5] = { out_jFEX_SRJ_leading.gRate_vsEff, out_jFEX_Sim_leading.gRate_vsEff, out_gFEX_SRJ_leading.gRate_vsEff, out_gFEX_SRJ_Sim_leading.gRate_vsEff, out_leading_cone.gRate_vsEff };
+
+        auto cjFEXSimThr = new TCanvas("cjFEXSimThr","jFEX SRJ Sim: threshold overlays",1200,500);
+        cjFEXSimThr->Divide(2,1);
+
+        cjFEXSimThr->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        for (int ic=0; ic<5; ++ic) { jc5effH[ic]->SetLineColor(jc5cols[ic]); jc5effH[ic]->SetLineWidth(2); }
+        jc5effH[0]->GetXaxis()->SetTitle("Leading E_{T} Threshold [GeV]");
+        jc5effH[0]->GetYaxis()->SetTitle("Signal Efficiency");
+        jc5effH[0]->Draw("HIST");
+        jc5effH[1]->Draw("HIST SAME");
+        jc5effH[2]->Draw("HIST SAME");
+        {
+            auto legE3j = new TLegend(0.45,0.65,0.88,0.88);
+            legE3j->SetBorderSize(0); legE3j->SetFillStyle(0); legE3j->SetTextSize(0.04);
+            for (int ic=0;ic<5;++ic) legE3j->AddEntry(jc5effH[ic], jc5labels[ic], "l");
+            legE3j->Draw();
+        }
+
+        cjFEXSimThr->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        for (int ic=0; ic<5; ++ic) { jc5rateH[ic]->SetLineColor(jc5cols[ic]); jc5rateH[ic]->SetLineWidth(2); }
+        jc5rateH[0]->GetXaxis()->SetTitle("Leading E_{T} Threshold [GeV]");
+        jc5rateH[0]->GetYaxis()->SetTitle("Estimated Background Rate [Hz]");
+        jc5rateH[0]->Draw("HIST");
+        jc5rateH[1]->Draw("HIST SAME");
+        jc5rateH[2]->Draw("HIST SAME");
+        jc5rateH[3]->Draw("HIST SAME");
+        jc5rateH[4]->Draw("HIST SAME");
+        {
+            auto legR3j = new TLegend(0.45,0.65,0.88,0.88);
+            legR3j->SetBorderSize(0); legR3j->SetFillStyle(0); legR3j->SetTextSize(0.04);
+            for (int ic=0;ic<5;++ic) legR3j->AddEntry(jc5rateH[ic], jc5labels[ic], "l");
+            legR3j->Draw();
+        }
+        cjFEXSimThr->cd(); DrawATLASLabel(); cjFEXSimThr->SaveAs(rateVsEffFileDir + "threshold_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone.pdf");
+
+        auto cjFEXgFEXSimROC = new TCanvas("cjFEXgFEXSimROC","jFEX SRJ Sim: rate vs eff overlay",700,600);
+        cjFEXgFEXSimROC->SetLeftMargin(0.16); cjFEXgFEXSimROC->SetBottomMargin(0.16); cjFEXgFEXSimROC->SetTicks(1,1);
+        cjFEXgFEXSimROC->SetLogy();
+        for (int ic=0;ic<5;++ic) {
+            jc5rocG[ic]->SetMarkerStyle(jc5mstyles[ic]);
+            jc5rocG[ic]->SetMarkerSize(1.1);
+            jc5rocG[ic]->SetMarkerColor(jc5cols[ic]);
+            jc5rocG[ic]->SetLineColor(jc5cols[ic]);
+            jc5rocG[ic]->SetLineWidth(2);
+        }
+        jc5rocG[0]->SetMinimum(10.0);   // show background-rate axis down to ~10 Hz
+        jc5rocG[0]->SetMaximum(1e8);
+        jc5rocG[0]->Draw("AP");
+        jc5rocG[0]->GetXaxis()->SetLimits(0.0, 1.05);  // show full signal-efficiency range from 0
+        gPad->Modified(); gPad->Update();
+        jc5rocG[1]->Draw("P SAME");
+        jc5rocG[2]->Draw("P SAME");
+        jc5rocG[3]->Draw("P SAME");
+        jc5rocG[4]->Draw("P SAME");
+        {
+            auto legROC3j = new TLegend(0.52,0.2,0.82,0.46);
+            legROC3j->SetBorderSize(0); legROC3j->SetFillStyle(0); legROC3j->SetTextSize(0.04);
+            for (int ic=0;ic<5;++ic) legROC3j->AddEntry(jc5rocG[ic], jc5labels[ic], "lp");
+            legROC3j->Draw();
+        }
+        cjFEXgFEXSimROC->cd(); DrawATLASLabel(); cjFEXgFEXSimROC->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone.pdf");
+    }
+
+    
+
+
+    // ---- 5-way overlay: jFEX SRJ vs jFEX SRJ Sim vs gFEX SRJ vs gFEX SRJ WTA cone 4th leading ---------------
+    {
+        const Int_t jc5cols[5]    = { kP6Violet, kP6Gray, kP6Grape,kP6Red, kP6Yellow };
+        const Int_t jc5mstyles[5] = { 20, 21, 22, 23, 24 };
+        const char* jc5labels[5]  = { "jFEX SRJ", "jFEX SRJ (Resim)", "gFEX SRJ", "gFEX SRJ (Resim)", "GEP Cone Jet" };
+
+        TH1*    jc5effH [5] = { out_jFEX_4thleading.hEff_vsThr,  out_jFEX_Sim_4thleading.hEff_vsThr, out_gFEX_4thleading.hEff_vsThr,  out_gFEX_Sim_4thleading.hEff_vsThr,  out_4thLeadCone.hEff_vsThr };
+        TH1*    jc5rateH[5] = { out_jFEX_4thleading.hRate_vsThr, out_jFEX_Sim_4thleading.hRate_vsThr, out_gFEX_4thleading.hRate_vsThr, out_gFEX_Sim_4thleading.hRate_vsThr, out_4thLeadCone.hRate_vsThr };
+        TGraph* jc5rocG [5] = { out_jFEX_4thleading.gRate_vsEff, out_jFEX_Sim_4thleading.gRate_vsEff, out_gFEX_4thleading.gRate_vsEff, out_gFEX_Sim_4thleading.gRate_vsEff, out_4thLeadCone.gRate_vsEff };
+
+        auto cjFEXSimThr = new TCanvas("cjFEXSimThr","jFEX SRJ Sim: threshold overlays",1200,500);
+        cjFEXSimThr->Divide(2,1);
+
+        cjFEXSimThr->cd(1);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        for (int ic=0; ic<5; ++ic) { jc5effH[ic]->SetLineColor(jc5cols[ic]); jc5effH[ic]->SetLineWidth(2); }
+        jc5effH[0]->GetXaxis()->SetTitle("4th Leading E_{T} Threshold [GeV]");
+        jc5effH[0]->GetYaxis()->SetTitle("Signal Efficiency");
+        jc5effH[0]->Draw("HIST");
+        jc5effH[1]->Draw("HIST SAME");
+        jc5effH[2]->Draw("HIST SAME");
+        {
+            auto legE3j = new TLegend(0.45,0.65,0.88,0.88);
+            legE3j->SetBorderSize(0); legE3j->SetFillStyle(0); legE3j->SetTextSize(0.04);
+            for (int ic=0;ic<5;++ic) legE3j->AddEntry(jc5effH[ic], jc5labels[ic], "l");
+            legE3j->Draw();
+        }
+
+        cjFEXSimThr->cd(2);
+        gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
+        gPad->SetLogy();
+        for (int ic=0; ic<5; ++ic) { jc5rateH[ic]->SetLineColor(jc5cols[ic]); jc5rateH[ic]->SetLineWidth(2); }
+        jc5rateH[0]->GetXaxis()->SetTitle("4th Leading E_{T} Threshold [GeV]");
+        jc5rateH[0]->GetYaxis()->SetTitle("Estimated Background Rate [Hz]");
+        jc5rateH[0]->Draw("HIST");
+        jc5rateH[1]->Draw("HIST SAME");
+        jc5rateH[2]->Draw("HIST SAME");
+        jc5rateH[3]->Draw("HIST SAME");
+        jc5rateH[4]->Draw("HIST SAME");
+        {
+            auto legR3j = new TLegend(0.45,0.65,0.88,0.88);
+            legR3j->SetBorderSize(0); legR3j->SetFillStyle(0); legR3j->SetTextSize(0.04);
+            for (int ic=0;ic<5;++ic) legR3j->AddEntry(jc5rateH[ic], jc5labels[ic], "l");
+            legR3j->Draw();
+        }
+        cjFEXSimThr->cd(); DrawATLASLabel(); cjFEXSimThr->SaveAs(rateVsEffFileDir + "threshold_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone_4thLead.pdf");
+
+        auto cjFEXgFEXSimROC = new TCanvas("cjFEXgFEXSimROC","jFEX SRJ Sim: rate vs eff overlay",700,600);
+        cjFEXgFEXSimROC->SetLeftMargin(0.16); cjFEXgFEXSimROC->SetBottomMargin(0.16); cjFEXgFEXSimROC->SetTicks(1,1);
+        cjFEXgFEXSimROC->SetLogy();
+        for (int ic=0;ic<5;++ic) {
+            jc5rocG[ic]->SetMarkerStyle(jc5mstyles[ic]);
+            jc5rocG[ic]->SetMarkerSize(1.1);
+            jc5rocG[ic]->SetMarkerColor(jc5cols[ic]);
+            jc5rocG[ic]->SetLineColor(jc5cols[ic]);
+            jc5rocG[ic]->SetLineWidth(2);
+        }
+        jc5rocG[0]->Draw("AP");
+        jc5rocG[1]->Draw("P SAME");
+        jc5rocG[2]->Draw("P SAME");
+        jc5rocG[3]->Draw("P SAME");
+        jc5rocG[4]->Draw("P SAME");
+        {
+            auto legROC3j = new TLegend(0.45,0.65,0.88,0.88);
+            legROC3j->SetBorderSize(0); legROC3j->SetFillStyle(0); legROC3j->SetTextSize(0.04);
+            for (int ic=0;ic<5;++ic) legROC3j->AddEntry(jc5rocG[ic], jc5labels[ic], "lp");
+            legROC3j->Draw();
+        }
+        cjFEXgFEXSimROC->cd(); DrawATLASLabel(); cjFEXgFEXSimROC->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone_4thLead.pdf");
+    }
+
     // ---- 3-way overlay: jFEX SRJ vs jFEX SRJ Sim vs WTA cone leading ---------------
     {
-        const Int_t jc3cols[3]    = { kBlue+1, kViolet+1, kGreen+2 };
+        const Int_t jc3cols[3]    = { kP10Blue, kP10Violet, kP10Green };
         const Int_t jc3mstyles[3] = { 20, 21, 22 };
         const char* jc3labels[3]  = { "jFEX SRJ", "jFEX SRJ (Resim)", "WTA Cone Jet" };
 
@@ -5299,7 +5879,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             for (int ic=0;ic<3;++ic) legR3j->AddEntry(jc3rateH[ic], jc3labels[ic], "l");
             legR3j->Draw();
         }
-        cjFEXSimThr->SaveAs(rateVsEffFileDir + "threshold_overlay_jFEX_jFEXSim_cone.pdf");
+        cjFEXSimThr->cd(); DrawATLASLabel(); cjFEXSimThr->SaveAs(rateVsEffFileDir + "threshold_overlay_jFEX_jFEXSim_cone.pdf");
 
         auto cjFEXSimROC = new TCanvas("cjFEXSimROC","jFEX SRJ Sim: rate vs eff overlay",700,600);
         cjFEXSimROC->SetLeftMargin(0.16); cjFEXSimROC->SetBottomMargin(0.16); cjFEXSimROC->SetTicks(1,1);
@@ -5320,12 +5900,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             for (int ic=0;ic<3;++ic) legROC3j->AddEntry(jc3rocG[ic], jc3labels[ic], "lp");
             legROC3j->Draw();
         }
-        cjFEXSimROC->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jFEX_jFEXSim_cone.pdf");
+        cjFEXSimROC->cd(); DrawATLASLabel(); cjFEXSimROC->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jFEX_jFEXSim_cone.pdf");
     }
 
     // ---- 3-way overlay: JetTagger LRJ vs gFEX LRJ vs gFEX LRJ Sim ---------------
     {
-        const Int_t c3cols[3]    = { kBlack, kRed+1, kViolet+1 };
+        const Int_t c3cols[3]    = { kBlack, kP10Red, kP10Violet };
         const Int_t c3mstyles[3] = { 20, 21, 22 };
         const char* c3labels[3]  = { "Jet Tagger LRJ", "gFEX LRJ", "gFEX (Resim) LRJ" };
 
@@ -5371,7 +5951,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             for (int ic=0;ic<3;++ic) legR3->AddEntry(c3rateH[ic], c3labels[ic], "l");
             legR3->Draw();
         }
-        cGFEXSimThr->SaveAs(rateVsEffFileDir + "threshold_overlay_jetTagger_gFEX_gFEXSim.pdf");
+        cGFEXSimThr->cd(); DrawATLASLabel(); cGFEXSimThr->SaveAs(rateVsEffFileDir + "threshold_overlay_jetTagger_gFEX_gFEXSim.pdf");
 
         // --- Rate vs Efficiency overlay ---
         auto cGFEXSimROC = new TCanvas("cGFEXSimROC","gFEX Sim: rate vs eff overlay",700,600);
@@ -5388,12 +5968,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         c3rocG[1]->Draw("P SAME");
         c3rocG[2]->Draw("P SAME");
         {
-            auto legROC3 = new TLegend(0.45,0.65,0.88,0.88);
+            auto legROC3 = new TLegend(0.45,0.25,0.88,0.48);
             legROC3->SetBorderSize(0); legROC3->SetFillStyle(0); legROC3->SetTextSize(0.04);
             for (int ic=0;ic<3;++ic) legROC3->AddEntry(c3rocG[ic], c3labels[ic], "lp");
             legROC3->Draw();
         }
-        cGFEXSimROC->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jetTagger_gFEX_gFEXSim.pdf");
+        cGFEXSimROC->cd(); DrawATLASLabel(); cGFEXSimROC->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jetTagger_gFEX_gFEXSim.pdf");
     }
 
     // ---- Turn-on histograms (efficiency vs offline leading LRJ Et) ---------------
@@ -5427,10 +6007,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         "Turn-on jFEX SRJ (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
     TH1F* sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp = new TH1F("sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp",
         "Turn-on WTA Cone (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
+    TH1F* sig_h_truthSRJ_Et_num_gFEX_SRJ = new TH1F("sig_h_truthSRJ_Et_num_gFEX_SRJ",
+        "Turn-on gFEX SRJ (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
+    TH1F* sig_h_truthSRJ_Et_num_gFEX_Sim = new TH1F("sig_h_truthSRJ_Et_num_gFEX_Sim",
+        "Turn-on gFEX SRJ Resim (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
+
+    // 4th-leading SRJ turn-on @ 100 kHz vs truth 4th-leading AntiKt4 dressedWZ jet E_T
+    TH1F* sig_h_truth4thSRJ_Et_denom_turnon = new TH1F("sig_h_truth4thSRJ_Et_denom_turnon",
+        "Turn-on denominator (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
+    TH1F* sig_h_truth4thSRJ_Et_num_jFEX_SRJ = new TH1F("sig_h_truth4thSRJ_Et_num_jFEX_SRJ",
+        "Turn-on jFEX SRJ (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
+    TH1F* sig_h_truth4thSRJ_Et_num_jFEX_Sim = new TH1F("sig_h_truth4thSRJ_Et_num_jFEX_Sim",
+        "Turn-on jFEX SRJ Resim (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
+    TH1F* sig_h_truth4thSRJ_Et_num_gFEX_SRJ = new TH1F("sig_h_truth4thSRJ_Et_num_gFEX_SRJ",
+        "Turn-on gFEX SRJ (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
+    TH1F* sig_h_truth4thSRJ_Et_num_gFEX_Sim = new TH1F("sig_h_truth4thSRJ_Et_num_gFEX_Sim",
+        "Turn-on gFEX SRJ Resim (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
+    TH1F* sig_h_truth4thSRJ_Et_num_WTA_cone = new TH1F("sig_h_truth4thSRJ_Et_num_WTA_cone",
+        "Turn-on WTA Cone (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
 
     // ******************** OVERLAYS (LEADING only): JetTagger vs gFEX vs gFEX Resim ********************
     // Colors/markers per algorithm
-    const Int_t cols[3]    = { kBlack, kRed+1, kViolet+1 };
+    const Int_t cols[3]    = { kBlack, kP10Red, kP10Violet };
     const Int_t mstyles[3] = { 20, 21, 22 };
     const char* labels[3]  = { "JetTagger LRJ", "gFEX LRJ", "gFEX (Resim) LRJ" };
 
@@ -5487,7 +6085,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legRate->AddEntry(rateH[2], labels[2], "l");
     legRate->Draw();
 
-    cLeadThrOverlay->SaveAs(rateVsEffFileDir + "leading_threshold_overlays.pdf");
+    cLeadThrOverlay->cd(); DrawATLASLabel(); cLeadThrOverlay->SaveAs(rateVsEffFileDir + "leading_threshold_overlays.pdf");
 
     // ---------- Overlay: Rate vs Efficiency (ROC-like) ----------
     auto cLeadRocOverlay = new TCanvas("cLeadRocOverlay","Leading: rate vs eff overlay",700,600);
@@ -5517,7 +6115,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legROC->AddEntry(rocG[2], labels[2], "lp");
     legROC->Draw();
 
-    cLeadRocOverlay->SaveAs(rateVsEffFileDir + "leading_rate_vs_eff_overlay.pdf");
+    cLeadRocOverlay->cd(); DrawATLASLabel(); cLeadRocOverlay->SaveAs(rateVsEffFileDir + "leading_rate_vs_eff_overlay.pdf");
 
     // ******************** OVERLAYS (SUBLEADING): JetTagger vs gFEX vs jFEX ********************
     // Convenience handles (SUBLEADING)
@@ -5571,7 +6169,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legRate_sub->AddEntry(rateH_sub[1], labels[1], "l");
     legRate_sub->Draw();
 
-    cSubLeadThrOverlay->SaveAs(rateVsEffFileDir + "subleading_threshold_overlays.pdf");
+    cSubLeadThrOverlay->cd(); DrawATLASLabel(); cSubLeadThrOverlay->SaveAs(rateVsEffFileDir + "subleading_threshold_overlays.pdf");
 
     // ---------- Overlay: Rate vs Efficiency (ROC-like) ----------
     auto cSubLeadRocOverlay = new TCanvas("cSubLeadRocOverlay","Subleading: rate vs eff overlay",700,600);
@@ -5601,7 +6199,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legROC_sub->AddEntry(rocG_sub[1], labels[1], "lp");
     legROC_sub->Draw();
 
-    cSubLeadRocOverlay->SaveAs(rateVsEffFileDir + "subleading_rate_vs_eff_overlay.pdf");
+    cSubLeadRocOverlay->cd(); DrawATLASLabel(); cSubLeadRocOverlay->SaveAs(rateVsEffFileDir + "subleading_rate_vs_eff_overlay.pdf");
 
     // ================== COMBINED OVERLAY: Rate vs Efficiency (all 6) ==================
     // Curves: (JetTagger, gFEX, jFEX) × (Leading, Subleading)
@@ -5609,7 +6207,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     // ---- Style palette ----
     // Colors per algorithm
-    const Int_t algoCols[2] = { kBlack, kRed+1}; // JetTagger, gFEX, jFEX
+    const Int_t algoCols[2] = { kBlack, kP10Red}; // JetTagger, gFEX, jFEX
 
     // Marker styles: leading vs subleading per algorithm
     const Int_t mLead [2] = { 20, 21};  // solid markers
@@ -5727,7 +6325,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     // ---- Save ----
     gPad->RedrawAxis();
-    cAllROC->SaveAs(rateVsEffFileDir + "all_algos_leading_subleading_rate_vs_eff_overlay.pdf");
+    cAllROC->cd(); DrawATLASLabel(); cAllROC->SaveAs(rateVsEffFileDir + "all_algos_leading_subleading_rate_vs_eff_overlay.pdf");
+    _lap(Form("[file %u] background loop 1 (rate)", fileIt));
 
     // initialize with size and zero-fill
     std::vector<unsigned int> nSubjetsLeadingLRJSignal(
@@ -5742,6 +6341,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double> sig_lead_constituent_mass_vec(num_processed_events_signal, 0.0);
     std::vector<double> sig_subl_constituent_mass_vec(num_processed_events_signal, 0.0);
     for (unsigned int i = 0; i < num_processed_events_signal; i++) {
+        // Total signal-event cap (kMaxEventsPerSlice). Disabled when < 0.
+        if (kMaxEventsPerSlice >= 0 && i >= (unsigned int)kMaxEventsPerSlice) break;
         //std::cout << "signal event: " << i << "\n";
 
         jetTaggerLRJsSignal->GetEntry(i);
@@ -5790,7 +6391,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gFexLeadingLRJSimTreeSignal->GetEntry(i);
         gFexSubleadingLRJSimTreeSignal->GetEntry(i);
         jFexSRJSimTreeSignal->GetEntry(i);
+        jFexSRJTreeSignal->GetEntry(i);
         jFexLeadingSRJSimTreeSignal->GetEntry(i);
+        gFexSRJSimTreeSignal->GetEntry(i);
+        gFexLeadingSRJSimTreeSignal->GetEntry(i);
+        gFexSRJTreeSignal->GetEntry(i);
+        gFexLeadingSRJTreeSignal->GetEntry(i);
         jFexLeadingSRJTreeSignal->GetEntry(i);
 
         // Pointer aliases for tower/cone collections — select SK or non-SK based on useSoftKiller
@@ -5933,7 +6539,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
         sig_h_jFEX_Mult->Fill(jFexSRJEtValuesSignal->size());
 
-        if(i < 50) std::cout << "jFexSRJSimEtValuesSignal->size(): " << jFexSRJSimEtValuesSignal->size() << "\n";
+        //if(i < 50) std::cout << "jFexSRJSimEtValuesSignal->size(): " << jFexSRJSimEtValuesSignal->size() << "\n";
         for(unsigned int ijFEX = 0; ijFEX < jFexSRJSimEtValuesSignal->size(); ijFEX++){
             sig_h_jFEX_Sim_Et->Fill(jFexSRJSimEtValuesSignal->at(ijFEX));
         }
@@ -6722,17 +7328,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             sig_h2_JetTagger_lead_TOBEt_vs_offlineEt->Fill(
                 clamp800(recoAntiKt10LRJLeadingEtValuesSignal->at(0)),
                 clamp800(jetTaggerLeadingLRJEtValuesSignal->at(0)));
-            sig_h2_gFEX_lead_TOBEt_vs_offlineEt->Fill(
-                clamp800(recoAntiKt10LRJLeadingEtValuesSignal->at(0)),
-                clamp800(gFexLRJLeadingEtValuesSignal->at(0)));
+            if (gFexLRJSimLeadingEtValuesSignal->size() > 0)   // resimulated (Sim) gFEX objects
+                sig_h2_gFEX_lead_TOBEt_vs_offlineEt->Fill(
+                    clamp800(recoAntiKt10LRJLeadingEtValuesSignal->at(0)),
+                    clamp800(gFexLRJSimLeadingEtValuesSignal->at(0)));
             if (recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0) {
                 sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt->Fill(
                     clamp800(recoAntiKt10LRJSubleadingEtValuesSignal->at(0)),
                     clamp800(jetTaggerSubleadingLRJEtValuesSignal->at(0)));
-                if (gFexLRJSubleadingEtValuesSignal->size() > 0)
+                if (gFexLRJSimSubleadingEtValuesSignal->size() > 0)
                     sig_h2_gFEX_sublead_TOBEt_vs_offlineEt->Fill(
                         clamp800(recoAntiKt10LRJSubleadingEtValuesSignal->at(0)),
-                        clamp800(gFexLRJSubleadingEtValuesSignal->at(0)));
+                        clamp800(gFexLRJSimSubleadingEtValuesSignal->at(0)));
             }
         }
         // JetTagger constituent mass vs. reference mass (signal)
@@ -6923,22 +7530,32 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sigOfflineLeadingLRJEtvsSubjetMult->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0), signalSubjetCounterLeading);
         sigOfflineLeadingLRJMassvsSubjetMult->Fill(signalSubjetCounterLeading, recoAntiKt10LRJLeadingMassValuesSignal->at(0));
         // Delta R, delta Et for leading gFEX, jFEX SRJ (seeds), Offline LRJs
-        sig_h_leading_LRJ_gFexLRJ_deltaEt->Fill(gFexLRJLeadingEtValuesSignal->at(0) - jetTaggerLeadingLRJEtValuesSignal->at(0));
+        // gFEX-LRJ diagnostics use resimulated (Sim) objects; the vs-JetTagger overlay
+        // keeps the AOD histogram (sig_h_leading_offlineLRJ_gFexLRJ_deltaEt), so the
+        // standalone resim version is filled into a separate *_resim twin.
+        const bool   hasGFexSimLeadDiagSig = (gFexLRJSimLeadingEtValuesSignal->size() > 0);
+        const double gFexSimLeadEtDiagSig  = hasGFexSimLeadDiagSig ? gFexLRJSimLeadingEtValuesSignal->at(0) : 0.0;
+        if (hasGFexSimLeadDiagSig)
+            sig_h_leading_LRJ_gFexLRJ_deltaEt->Fill(gFexSimLeadEtDiagSig - jetTaggerLeadingLRJEtValuesSignal->at(0));
         sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0) - gFexLRJLeadingEtValuesSignal->at(0));
+        if (hasGFexSimLeadDiagSig)
+            sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0) - gFexSimLeadEtDiagSig);
         sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0) - jFexLRJLeadingEtValuesSignal->at(0));
-        sig_h_leading_LRJ_offlineLRJ_deltaEt->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0) - jetTaggerLeadingLRJEtValuesSignal->at(0));   
+        sig_h_leading_LRJ_offlineLRJ_deltaEt->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0) - jetTaggerLeadingLRJEtValuesSignal->at(0));
 
         sigJetTaggerLeadingLRJEtvsSubleadingLRJEt->Fill(jetTaggerLeadingLRJEtValuesSignal->at(0), jetTaggerSubleadingLRJEtValuesSignal->at(0));
 
         // Fill Et "resolution"]
-        //std::cout << "(gFexLRJLeadingEtValuesSignal->at(0) - jetTaggerLeadingLRJEtValuesSignal->at(0)) /gFexLRJLeadingEtValuesSignal->at(0): " << (gFexLRJLeadingEtValuesSignal->at(0) - jetTaggerLeadingLRJEtValuesSignal->at(0)) /gFexLRJLeadingEtValuesSignal->at(0) << "\n";
-        sig_h_leading_LRJ_gFexLRJ_Et_resolution->Fill((gFexLRJLeadingEtValuesSignal->at(0) - jetTaggerLeadingLRJEtValuesSignal->at(0)) /gFexLRJLeadingEtValuesSignal->at(0));
-        sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Fill((recoAntiKt10LRJLeadingEtValuesSignal->at(0) - gFexLRJLeadingEtValuesSignal->at(0))/recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+        if (hasGFexSimLeadDiagSig && gFexSimLeadEtDiagSig > 0.0)
+            sig_h_leading_LRJ_gFexLRJ_Et_resolution->Fill((gFexSimLeadEtDiagSig - jetTaggerLeadingLRJEtValuesSignal->at(0)) / gFexSimLeadEtDiagSig);
+        if (hasGFexSimLeadDiagSig)
+            sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Fill((recoAntiKt10LRJLeadingEtValuesSignal->at(0) - gFexSimLeadEtDiagSig)/recoAntiKt10LRJLeadingEtValuesSignal->at(0));
         sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution->Fill((recoAntiKt10LRJLeadingEtValuesSignal->at(0) - jFexLRJLeadingEtValuesSignal->at(0))/recoAntiKt10LRJLeadingEtValuesSignal->at(0));
         sig_h_leading_LRJ_offlineLRJ_Et_resolution->Fill((recoAntiKt10LRJLeadingEtValuesSignal->at(0) - jetTaggerLeadingLRJEtValuesSignal->at(0)) / recoAntiKt10LRJLeadingEtValuesSignal->at(0)); 
 
         sig_h_lead_sublead_LRJ_deltaR->Fill(sqrt(calcDeltaR2(sig_LRJ_Eta[i][0], sig_LRJ_Phi[i][0], sig_LRJ_Eta[i][1], sig_LRJ_Phi[i][1])));
-        sig_h_leading_LRJ_gFexLRJ_deltaR->Fill(sqrt(calcDeltaR2(gFexLRJLeadingEtaValuesSignal->at(0), gFexLRJLeadingPhiValuesSignal->at(0), sig_LRJ_Eta[i][highestEtIndexLRJSig], sig_LRJ_Phi[i][highestEtIndexLRJSig])));
+        if (gFexLRJSimLeadingEtaValuesSignal->size() > 0)
+            sig_h_leading_LRJ_gFexLRJ_deltaR->Fill(sqrt(calcDeltaR2(gFexLRJSimLeadingEtaValuesSignal->at(0), gFexLRJSimLeadingPhiValuesSignal->at(0), sig_LRJ_Eta[i][highestEtIndexLRJSig], sig_LRJ_Phi[i][highestEtIndexLRJSig])));
         sig_h_first_LRJ_jFexSRJ_deltaR->Fill(sqrt(calcDeltaR2(jFEXSRJLeadingEta, jFEXSRJLeadingPhi, sig_LRJ_Eta[i][0], sig_LRJ_Phi[i][0])));
         sig_h_second_LRJ_jFexSRJ_deltaR->Fill(sqrt(calcDeltaR2(jFEXSRJSubleadingEta, jFEXSRJSubleadingPhi, sig_LRJ_Eta[i][1], sig_LRJ_Phi[i][1])));
         sig_h_leading_LRJ_offlineLRJ_deltaR->Fill(sqrt(calcDeltaR2(recoAntiKt10LRJLeadingEtaValuesSignal->at(0), recoAntiKt10LRJLeadingPhiValuesSignal->at(0), sig_LRJ_Eta[i][highestEtIndexLRJSig], sig_LRJ_Phi[i][highestEtIndexLRJSig])));
@@ -7220,7 +7837,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-                if(gFexLRJLeadingEtValuesSignal->at(0) >= gFEX_10kHz_Threshold_Leading){
+                if(gFexLRJSimLeadingEtValuesSignal->size() > 0 && gFexLRJSimLeadingEtValuesSignal->at(0) >= gFEX_Sim_10kHz_Threshold_Leading){
                     sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
@@ -7229,7 +7846,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             sig_h_offlineLRJ_Et_num10kHz->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= gFEX_10kHz_Threshold_Leading){
+            if(gFexLRJSimLeadingEtValuesSignal->size() > 0 && gFexLRJSimLeadingEtValuesSignal->at(0) >= gFEX_Sim_10kHz_Threshold_Leading){
                 sig_h_offlineLRJ_Et_num10kHz_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
@@ -7278,6 +7895,32 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 if(sig_leadConeEt_perEvt[i] >= cone_singleJet_25kHz_threshold){
                     sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp->Fill(truthLeadSRJEt);
                 }
+                // gFEX numerators: a missing gFEX SRJ counts as Et = 0 (trigger did not fire),
+                // i.e. a real inefficiency, rather than excluding the event.
+                double gFexLeadEt    = gFexSRJLeadingEtValuesSignal->size()    > 0 ? gFexSRJLeadingEtValuesSignal->at(0)    : 0.0;
+                double gFexSimLeadEt = gFexSRJSimLeadingEtValuesSignal->size() > 0 ? gFexSRJSimLeadingEtValuesSignal->at(0) : 0.0;
+                if(gFexLeadEt >= gFEX_25kHz_Threshold_Leading){
+                    sig_h_truthSRJ_Et_num_gFEX_SRJ->Fill(truthLeadSRJEt);
+                }
+                if(gFexSimLeadEt >= gFEX_Sim_25kHz_Threshold_Leading){
+                    sig_h_truthSRJ_Et_num_gFEX_Sim->Fill(truthLeadSRJEt);
+                }
+            }
+            // 4th-leading SRJ turn-on vs truth 4th-leading AntiKt4 dressedWZ jet E_T @ 100 kHz.
+            // Guard only on a truth 4th jet existing; an algorithm with < 4 jets counts its
+            // 4th-leading E_T as 0 (trigger did not fire) rather than excluding the event.
+            if(truthAntiKt4WZSRJEtValuesSignal->size() > 3){
+                double truth4thSRJEt = truthAntiKt4WZSRJEtValuesSignal->at(3);
+                sig_h_truth4thSRJ_Et_denom_turnon->Fill(truth4thSRJEt);
+                double jFex4thEt    = jFexSRJEtValuesSignal->size()    > 3 ? jFexSRJEtValuesSignal->at(3)    : 0.0;
+                double jFexSim4thEt = jFexSRJSimEtValuesSignal->size() > 3 ? jFexSRJSimEtValuesSignal->at(3) : 0.0;
+                double gFex4thEt    = gFexSRJEtValuesSignal->size()    > 3 ? gFexSRJEtValuesSignal->at(3)    : 0.0;
+                double gFexSim4thEt = gFexSRJSimEtValuesSignal->size() > 3 ? gFexSRJSimEtValuesSignal->at(3) : 0.0;
+                if(jFex4thEt    >= jFEX_100kHz_Threshold_4thLeading)     sig_h_truth4thSRJ_Et_num_jFEX_SRJ->Fill(truth4thSRJEt);
+                if(jFexSim4thEt >= jFEX_Sim_100kHz_Threshold_4thLeading) sig_h_truth4thSRJ_Et_num_jFEX_Sim->Fill(truth4thSRJEt);
+                if(gFex4thEt    >= gFEX_100kHz_Threshold_4thLeading)     sig_h_truth4thSRJ_Et_num_gFEX_SRJ->Fill(truth4thSRJEt);
+                if(gFexSim4thEt >= gFEX_Sim_100kHz_Threshold_4thLeading) sig_h_truth4thSRJ_Et_num_gFEX_Sim->Fill(truth4thSRJEt);
+                if(sig_4thConeEt_perEvt[i] >= cone_multiJet_100kHz_threshold) sig_h_truth4thSRJ_Et_num_WTA_cone->Fill(truth4thSRJEt);
             }
 
             if(signalSubjetCounterLeading == 1){
@@ -7286,7 +7929,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_1Subjet->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-                if(gFexLRJLeadingEtValuesSignal->at(0) >= gFEX_10kHz_Threshold_Leading){
+                if(gFexLRJSimLeadingEtValuesSignal->size() > 0 && gFexLRJSimLeadingEtValuesSignal->at(0) >= gFEX_Sim_10kHz_Threshold_Leading){
                     sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
@@ -7298,10 +7941,35 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-                if(gFexLRJLeadingEtValuesSignal->at(0) >= gFEX_10kHz_Threshold_Leading){
+                if(gFexLRJSimLeadingEtValuesSignal->size() > 0 && gFexLRJSimLeadingEtValuesSignal->at(0) >= gFEX_Sim_10kHz_Threshold_Leading){
                     sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+            }
+
+            // 40 kHz subjet-split fills (gFEX uses resimulated objects, as the 10 kHz version does)
+            if(signalSubjetCounterLeading == 1){
+                if(sig_LRJ_Et[i][0] >= jetTagger_40kHz_Threshold_Leading || sig_LRJ_Et[i][1] >= jetTagger_40kHz_Threshold_Leading){
+                    sig_h_offlineLRJ_Et_num40kHz_1Subjet->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                }
+                sig_h_offlineLRJ_Et_denom40kHz_1Subjet->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+
+                if(gFexLRJSimLeadingEtValuesSignal->size() > 0 && gFexLRJSimLeadingEtValuesSignal->at(0) >= gFEX_Sim_40kHz_Threshold_Leading){
+                    sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                }
+                sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+            }
+
+            if(signalSubjetCounterLeading >= 2){
+                if(sig_LRJ_Et[i][0] >= jetTagger_40kHz_Threshold_Leading || sig_LRJ_Et[i][1] >= jetTagger_40kHz_Threshold_Leading){
+                    sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                }
+                sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+
+                if(gFexLRJSimLeadingEtValuesSignal->size() > 0 && gFexLRJSimLeadingEtValuesSignal->at(0) >= gFEX_Sim_40kHz_Threshold_Leading){
+                    sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
+                }
+                sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
         }
         
@@ -7311,7 +7979,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 sig_h_offlineLRJ_Et_num10kHz_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= gFEX_10kHz_Threshold_Subleading){
+            if(gFexLRJSimSubleadingEtValuesSignal->size() > 0 && gFexLRJSimSubleadingEtValuesSignal->at(0) >= gFEX_Sim_10kHz_Threshold_Subleading){
                 sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
@@ -7324,7 +7992,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                     }
                     sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-                    if(gFexLRJSubleadingEtValuesSignal->at(0) >= gFEX_10kHz_Threshold_Subleading){
+                    if(gFexLRJSimSubleadingEtValuesSignal->size() > 0 && gFexLRJSimSubleadingEtValuesSignal->at(0) >= gFEX_Sim_10kHz_Threshold_Subleading){
                         sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
                     }
                     sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
@@ -7338,7 +8006,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_1Subjet_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-                if(gFexLRJSubleadingEtValuesSignal->at(0) >= gFEX_10kHz_Threshold_Subleading){
+                if(gFexLRJSimSubleadingEtValuesSignal->size() > 0 && gFexLRJSimSubleadingEtValuesSignal->at(0) >= gFEX_Sim_10kHz_Threshold_Subleading){
                     sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
@@ -7350,7 +8018,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-                if(gFexLRJSubleadingEtValuesSignal->at(0) >= gFEX_10kHz_Threshold_Subleading){
+                if(gFexLRJSimSubleadingEtValuesSignal->size() > 0 && gFexLRJSimSubleadingEtValuesSignal->at(0) >= gFEX_Sim_10kHz_Threshold_Subleading){
                     sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
                 }
                 sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets_Subleading->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
@@ -7487,106 +8155,110 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             }
             sig_h_offlineLRJ_Et_denom500_jFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            // Fill gFEX Signal Trigger Efficiencies (first 1 jet)
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 50.0){
+            // Fill gFEX Signal Trigger Efficiencies (first 1 jet) — resimulated (Sim) gFEX objects
+            const bool hasGFexSimLead = (gFexLRJSimLeadingEtValuesSignal->size() > 0);
+            const double gFexSimLeadEt = hasGFexSimLead ? gFexLRJSimLeadingEtValuesSignal->at(0) : -1.0;
+            if(hasGFexSimLead && gFexSimLeadEt >= 50.0){
                 sig_h_offlineLRJ_Et_num50_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom50_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 100.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 100.0){
                 sig_h_offlineLRJ_Et_num100_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom100_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 150.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 150.0){
                 sig_h_offlineLRJ_Et_num150_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom150_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 200.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 200.0){
                 sig_h_offlineLRJ_Et_num200_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom200_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 250.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 250.0){
                 sig_h_offlineLRJ_Et_num250_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom250_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 300.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 300.0){
                 sig_h_offlineLRJ_Et_num300_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom300_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 350.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 350.0){
                 sig_h_offlineLRJ_Et_num350_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom350_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 400.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 400.0){
                 sig_h_offlineLRJ_Et_num400_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom400_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 450.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 450.0){
                 sig_h_offlineLRJ_Et_num450_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom450_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
 
-            if(gFexLRJLeadingEtValuesSignal->at(0) >= 500.0){
+            if(hasGFexSimLead && gFexSimLeadEt >= 500.0){
                 sig_h_offlineLRJ_Et_num500_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom500_gFexLRJ->Fill(recoAntiKt10LRJLeadingEtValuesSignal->at(0));
         }
 
-        // next dijet for signal
+        // next dijet for signal — resimulated (Sim) gFEX objects
         if(recoAntiKt10LRJSubleadingEtValuesSignal->size() > 0){
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 50.0){
+            const bool hasGFexSimSublead = (gFexLRJSimSubleadingEtValuesSignal->size() > 0);
+            const double gFexSimSubleadEt = hasGFexSimSublead ? gFexLRJSimSubleadingEtValuesSignal->at(0) : -1.0;
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 50.0){
                 sig_h_offlineLRJ_Et_num50_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom50_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 100.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 100.0){
                 sig_h_offlineLRJ_Et_num100_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom100_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 150.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 150.0){
                 sig_h_offlineLRJ_Et_num150_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom150_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 200.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 200.0){
                 sig_h_offlineLRJ_Et_num200_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom200_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 250.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 250.0){
                 sig_h_offlineLRJ_Et_num250_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom250_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 300.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 300.0){
                 sig_h_offlineLRJ_Et_num300_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom300_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 350.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 350.0){
                 sig_h_offlineLRJ_Et_num350_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom350_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 400.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 400.0){
                 sig_h_offlineLRJ_Et_num400_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom400_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 450.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 450.0){
                 sig_h_offlineLRJ_Et_num450_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom450_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
 
-            if(gFexLRJSubleadingEtValuesSignal->at(0) >= 500.0){
+            if(hasGFexSimSublead && gFexSimSubleadEt >= 500.0){
                 sig_h_offlineLRJ_Et_num500_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
             }
             sig_h_offlineLRJ_Et_denom500_gFexLRJ_Dijet->Fill(recoAntiKt10LRJSubleadingEtValuesSignal->at(0));
@@ -7914,6 +8586,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             }
         }
     } // loop through signal events
+    _lap(Form("[file %u] signal loop 2 (detailed)", fileIt));
 
     std::vector<unsigned int> nSubjetsLeadingLRJBack(
         num_processed_events_background, 0);
@@ -7930,12 +8603,20 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     unsigned long dbgTotal2[nJZSlices_]   = {};
     unsigned long dbgPass2[nJZSlices_]    = {};
 
+    // Per-JZ-slice counter for the background event-cap (kMaxEventsPerSlice) — see rate loop.
+    std::array<unsigned int, nJZSlices_> back_jz_count_detailed = {};
     for (unsigned int i = 0; i < num_processed_events_background; i++) {
-        if(i % 1000 == 0) std::cout << "i:  "<< i << "\n";
+        //if(i % 1000 == 0) std::cout << "i:  "<< i << "\n";
         jetTaggerLRJsBack->GetEntry(i);
         jetTaggerLeadingLRJsBack->GetEntry(i);
         jetTaggerSubleadingLRJsBack->GetEntry(i);
         eventInfoTreeBack->GetEntry(i);
+        if (kMaxEventsPerSlice >= 0) {
+            const int _jz = sampleJZSliceValuesBack;
+            if (_jz < 0 || (unsigned)_jz >= nJZSlices_) continue;
+            if (back_jz_count_detailed[_jz] >= (unsigned int)kMaxEventsPerSlice) continue;
+            back_jz_count_detailed[_jz]++;
+        }
         truthAntiKt4TruthDressedWZJetsBack->GetEntry(i);
         leadingTruthAntiKt4TruthDressedWZJetsBack->GetEntry(i);
         subleadingTruthAntiKt4TruthDressedWZJetsBack->GetEntry(i);
@@ -7949,7 +8630,6 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         subleadingAntiKt10TruthSoftDropJetsTreeBack->GetEntry(i);
         jFexLeadingLRJTreeBack->GetEntry(i);
         gFexLeadingLRJTreeBack->GetEntry(i);
-        gFexSRJTreeBack->GetEntry(i);
         jFexSubleadingLRJTreeBack->GetEntry(i);
         gFexSubleadingLRJTreeBack->GetEntry(i);
         jFexLeadingSRJTreeBack->GetEntry(i);
@@ -7977,7 +8657,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gFexLeadingLRJSimTreeBack->GetEntry(i);
         gFexSubleadingLRJSimTreeBack->GetEntry(i);
         jFexSRJSimTreeBack->GetEntry(i);
+        jFexSRJTreeBack->GetEntry(i);
         jFexLeadingSRJSimTreeBack->GetEntry(i);
+        gFexSRJSimTreeBack->GetEntry(i);
+        gFexLeadingSRJSimTreeBack->GetEntry(i);
+        gFexSRJTreeBack->GetEntry(i);
+        gFexLeadingSRJTreeBack->GetEntry(i);
         jFexSubleadingSRJSimTreeBack->GetEntry(i);
         gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->GetEntry(i);
         gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack->GetEntry(i);
@@ -8005,7 +8690,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
 
         // --- HSTP debug (loop 2) ---
-        if ((unsigned)sampleJZSliceValuesBack < nJZSlices_) {
+        /*if ((unsigned)sampleJZSliceValuesBack < nJZSlices_) {
             unsigned jz2 = (unsigned)sampleJZSliceValuesBack;
             dbgTotal2[jz2]++;
             if (i < 100) {
@@ -8021,7 +8706,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                           << " hasPileup=" << hasPileup
                           << " inTimePileupLeadEt=" << leadPileupEt << " GeV\n";
             }
-        }
+        }*/
 
         // HSTP filter for all remaining fills
         if (applyHSTPFilter && !passHSTPValuesBack) continue;
@@ -8861,17 +9546,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             back_h2_JetTagger_lead_TOBEt_vs_offlineEt->Fill(
                 clamp800(recoAntiKt10LRJLeadingEtValuesBack->at(0)),
                 clamp800(jetTaggerLeadingLRJEtValuesBack->at(0)), backgroundEventWeight);
-            back_h2_gFEX_lead_TOBEt_vs_offlineEt->Fill(
-                clamp800(recoAntiKt10LRJLeadingEtValuesBack->at(0)),
-                clamp800(gFexLRJLeadingEtValuesBack->at(0)), backgroundEventWeight);
+            if (gFexLRJSimLeadingEtValuesBack->size() > 0)   // resimulated (Sim) gFEX objects
+                back_h2_gFEX_lead_TOBEt_vs_offlineEt->Fill(
+                    clamp800(recoAntiKt10LRJLeadingEtValuesBack->at(0)),
+                    clamp800(gFexLRJSimLeadingEtValuesBack->at(0)), backgroundEventWeight);
             if (recoAntiKt10LRJSubleadingEtValuesBack->size() > 0) {
                 back_h2_JetTagger_sublead_TOBEt_vs_offlineEt->Fill(
                     clamp800(recoAntiKt10LRJSubleadingEtValuesBack->at(0)),
                     clamp800(jetTaggerSubleadingLRJEtValuesBack->at(0)), backgroundEventWeight);
-                if (gFexLRJSubleadingEtValuesBack->size() > 0)
+                if (gFexLRJSimSubleadingEtValuesBack->size() > 0)
                     back_h2_gFEX_sublead_TOBEt_vs_offlineEt->Fill(
                         clamp800(recoAntiKt10LRJSubleadingEtValuesBack->at(0)),
-                        clamp800(gFexLRJSubleadingEtValuesBack->at(0)), backgroundEventWeight);
+                        clamp800(gFexLRJSimSubleadingEtValuesBack->at(0)), backgroundEventWeight);
             }
         }
         // JetTagger constituent mass vs. reference mass (background)
@@ -9069,17 +9755,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         backJetTaggerLeadingLRJEtvsSubleadingLRJEt->Fill(jetTaggerLeadingLRJEtValuesBack->at(0), jetTaggerSubleadingLRJEtValuesBack->at(0), backgroundEventWeight);
 
         // Delta R, delta Et for leading gFEX, jFEX SRJ (seeds), Offline LRJs
-        back_h_leading_LRJ_gFexLRJ_deltaEt->Fill(gFexLRJLeadingEtValuesBack->at(0) - jetTaggerLeadingLRJEtValuesBack->at(0), backgroundEventWeight);
+        // gFEX-LRJ diagnostics use resimulated (Sim) objects; the vs-JetTagger overlay
+        // keeps the AOD histogram (back_h_leading_offlineLRJ_gFexLRJ_deltaEt), so the
+        // standalone resim version is filled into a separate *_resim twin.
+        const bool   hasGFexSimLeadDiagBack = (gFexLRJSimLeadingEtValuesBack->size() > 0);
+        const double gFexSimLeadEtDiagBack  = hasGFexSimLeadDiagBack ? gFexLRJSimLeadingEtValuesBack->at(0) : 0.0;
+        if (hasGFexSimLeadDiagBack)
+            back_h_leading_LRJ_gFexLRJ_deltaEt->Fill(gFexSimLeadEtDiagBack - jetTaggerLeadingLRJEtValuesBack->at(0), backgroundEventWeight);
         back_h_leading_offlineLRJ_gFexLRJ_deltaEt->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0) - gFexLRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+        if (hasGFexSimLeadDiagBack)
+            back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0) - gFexSimLeadEtDiagBack, backgroundEventWeight);
         back_h_leading_offlineLRJ_jFexLRJ_deltaEt->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0) - jFexLRJLeadingEtValuesBack->at(0), backgroundEventWeight);
         back_h_leading_LRJ_offlineLRJ_deltaEt->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0) - jetTaggerLeadingLRJEtValuesBack->at(0), backgroundEventWeight);
         // Fill "resolution"
-        back_h_leading_LRJ_gFexLRJ_Et_resolution->Fill(((gFexLRJLeadingEtValuesBack->at(0) - jetTaggerLeadingLRJEtValuesBack->at(0))/ gFexLRJLeadingEtValuesBack->at(0)), backgroundEventWeight);
-        back_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Fill((recoAntiKt10LRJLeadingEtValuesBack->at(0) - gFexLRJLeadingEtValuesBack->at(0))/recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+        if (hasGFexSimLeadDiagBack && gFexSimLeadEtDiagBack > 0.0)
+            back_h_leading_LRJ_gFexLRJ_Et_resolution->Fill(((gFexSimLeadEtDiagBack - jetTaggerLeadingLRJEtValuesBack->at(0))/ gFexSimLeadEtDiagBack), backgroundEventWeight);
+        if (hasGFexSimLeadDiagBack)
+            back_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Fill((recoAntiKt10LRJLeadingEtValuesBack->at(0) - gFexSimLeadEtDiagBack)/recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
         back_h_leading_offlineLRJ_jFexLRJ_Et_resolution->Fill((recoAntiKt10LRJLeadingEtValuesBack->at(0) - jFexLRJLeadingEtValuesBack->at(0))/recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
         back_h_leading_LRJ_offlineLRJ_Et_resolution->Fill(((recoAntiKt10LRJLeadingEtValuesBack->at(0) - jetTaggerLeadingLRJEtValuesBack->at(0))/ recoAntiKt10LRJLeadingEtValuesBack->at(0)), backgroundEventWeight);
 
-        back_h_leading_LRJ_gFexLRJ_deltaR->Fill(sqrt(calcDeltaR2(gFexLRJLeadingEtaValuesBack->at(0), gFexLRJLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][highestEtIndexLRJBack], back_LRJ_Phi[i][highestEtIndexLRJBack])), backgroundEventWeight);
+        if (gFexLRJSimLeadingEtaValuesBack->size() > 0)
+            back_h_leading_LRJ_gFexLRJ_deltaR->Fill(sqrt(calcDeltaR2(gFexLRJSimLeadingEtaValuesBack->at(0), gFexLRJSimLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][highestEtIndexLRJBack], back_LRJ_Phi[i][highestEtIndexLRJBack])), backgroundEventWeight);
         //std::cout << "test 6" << "\n";
         back_h_leading_LRJ_offlineLRJ_deltaR->Fill(sqrt(calcDeltaR2(recoAntiKt10LRJLeadingEtaValuesBack->at(0), recoAntiKt10LRJLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][highestEtIndexLRJBack], back_LRJ_Phi[i][highestEtIndexLRJBack])), backgroundEventWeight);
         back_h_first_LRJ_jFexSRJ_deltaR->Fill(sqrt(calcDeltaR2(jFexSRJLeadingEtaValuesBack->at(0), jFexSRJLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][0], back_LRJ_Phi[i][0])));
@@ -9453,6 +10150,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             }
         }
     } // end of background event loop
+    _lap(Form("[file %u] background loop 2 (detailed)", fileIt));
 
     // --- HSTP debug summary (loop 2: detailed loop) ---
     std::cout << "\n=== [HSTP debug] Loop 2 (detailed loop) — events per JZ slice ===\n";
@@ -9488,12 +10186,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     prof_AvgDR_vs_HpT->Draw("E1");
 
     // ΔR=1 guide (optional)
-    TLine lDR1(ptMin, 1.0, ptMax, 1.0); lDR1.SetLineColor(kBlue+1); lDR1.SetLineStyle(2); lDR1.Draw("same");
+    TLine lDR1(ptMin, 1.0, ptMax, 1.0); lDR1.SetLineColor(kP10Blue); lDR1.SetLineStyle(2); lDR1.Draw("same");
 
     // 2 mH_ / pT^H curve
     
     TF1 f_opening("f_opening", Form("%g*2.0/x", mH_), ptMin, ptMax);
-    f_opening.SetLineColor(kRed);
+    f_opening.SetLineColor(kP10Red);
     f_opening.SetLineStyle(2);
     f_opening.Draw("same");
     std::cout << "test 3" << "\n";
@@ -9505,13 +10203,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legdRvsHiggspTProfile.AddEntry(&f_opening, "2 m_{H} / p_{T}^{H}", "l");
     legdRvsHiggspTProfile.Draw();
 
-    cAvgDR_vs_HpT.SaveAs(modifiedOutputFileDir + "avg_dR_vs_HpT_profile.pdf");
+    cAvgDR_vs_HpT.cd(); DrawATLASLabel(); cAvgDR_vs_HpT.SaveAs(modifiedOutputFileDir + "avg_dR_vs_HpT_profile.pdf");
 
 
     TCanvas c2_TH2F("c2_TH2F","dR vs HpT 2D", 900, 700);
     h2_DR_vs_HpT->Draw("COLZ");
     // Legend in top-right for the fit and normalization info
-    TLegend leg_TH2f(0.52, 0.80, 0.82, 0.93);
+    TLegend leg_TH2f(0.52, 0.70, 0.82, 0.83);
     TF1 f_opening2("f_opening2", Form("%g*2.0/x", mH_), ptMin, ptMax);
     f_opening2.SetLineColor(kBlack);
     f_opening2.SetLineStyle(3); // dotted
@@ -9524,7 +10222,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     //leg_TH2f.AddEntry(h2_DR_vs_HpT, "Normalized counts", "f");
     leg_TH2f.Draw();
     h2_DR_vs_HpT->Scale(1.0 / h2_DR_vs_HpT->Integral());
-    c2_TH2F.SaveAs(modifiedOutputFileDir + "dR_vs_HpT_2D.pdf");
+    c2_TH2F.cd(); DrawATLASLabel(); c2_TH2F.SaveAs(modifiedOutputFileDir + "dR_vs_HpT_2D.pdf");
 
     // Fill these with clones s.t. they can be later overlaid
     sig_h_leading_LRJ_Et_vec.push_back(static_cast<TH1F*>(sig_h_leading_LRJ_Et_normalbinning->Clone())); // These will later be filled with clones of the original histograms
@@ -9552,11 +10250,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             TH1F* sA = normClone(hs_aft, "_na"); TH1F* bA = normClone(hb_aft, "_na");
 
             // Signal: red solid (before), red dashed (after)
-            sB->SetLineColor(kRed);  sB->SetLineStyle(1); sB->SetLineWidth(2);
-            sA->SetLineColor(kRed);  sA->SetLineStyle(2); sA->SetLineWidth(2);
+            sB->SetLineColor(kP10Red);  sB->SetLineStyle(1); sB->SetLineWidth(2);
+            sA->SetLineColor(kP10Red);  sA->SetLineStyle(2); sA->SetLineWidth(2);
             // Background: blue solid (before), blue dashed (after)
-            bB->SetLineColor(kBlue); bB->SetLineStyle(1); bB->SetLineWidth(2);
-            bA->SetLineColor(kBlue); bA->SetLineStyle(2); bA->SetLineWidth(2);
+            bB->SetLineColor(kP10Blue); bB->SetLineStyle(1); bB->SetLineWidth(2);
+            bA->SetLineColor(kP10Blue); bA->SetLineStyle(2); bA->SetLineWidth(2);
 
             double ymax = std::max({sB->GetMaximum(), bB->GetMaximum(),
                                     sA->GetMaximum(), bA->GetMaximum()}) * 5.0;
@@ -9580,7 +10278,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg.AddEntry(bB, "Background (all)", "l");
             leg.AddEntry(bA, "Background (unique)", "l");
             leg.Draw();
-            cu.SaveAs(path);
+            cu.cd(); DrawATLASLabel(); cu.SaveAs(path);
             delete sB; delete bB; delete sA; delete bA;
         };
 
@@ -9664,14 +10362,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_0subjetEtScan.hRate_vsThr->Draw("HIST");
-    c1_0Subjets->SaveAs(rateVsEffFileDir + "threshold_views_0subjets_EtScan.pdf");
+    c1_0Subjets->cd(); DrawATLASLabel(); c1_0Subjets->SaveAs(rateVsEffFileDir + "threshold_views_0subjets_EtScan.pdf");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_0Subjets = new TCanvas("c2_0Subjets","Rate vs Eff",700,600);
     c2_0Subjets->SetLeftMargin(0.16); c2_0Subjets->SetBottomMargin(0.16); c2_0Subjets->SetTicks(1,1);
     c2_0Subjets->SetLogy();
     out_0subjetEtScan.gRate_vsEff->Draw("AP");   // A=axes, P=points
-    c2_0Subjets->SaveAs(rateVsEffFileDir + "rate_vs_eff_0subjets_EtScan.pdf");
+    c2_0Subjets->cd(); DrawATLASLabel(); c2_0Subjets->SaveAs(rateVsEffFileDir + "rate_vs_eff_0subjets_EtScan.pdf");
 
     std::cout << "test 6" << "\n";
     // ===================== LEADING (ET_th vs Leading psi_R scan [1 Subjet!]) =======================
@@ -9706,14 +10404,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogz();
     out2D_leading_1Subjet.hRate_vsThr_vsR->SetTitle(";Leading JetTagger LRJ E_{T} threshold [GeV];Max. #psi_{R,lead};Estimated Background Rate [Hz] [1 SUBJET ONLY]");
     out2D_leading_1Subjet.hRate_vsThr_vsR->Draw("COLZ");
-    c1_leading2D_1Subjet->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_psi_R_leading_1Subjet.pdf");
+    c1_leading2D_1Subjet->cd(); DrawATLASLabel(); c1_leading2D_1Subjet->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_psi_R_leading_1Subjet.pdf");
 
     // Main plot: rate vs efficiency (all points from the 2D scan)
     auto c2_leading2D_1Subjet = new TCanvas("c2_leading2D_1Subjet","Rate vs Eff (2D scan, leading)",700,600);
     c2_leading2D_1Subjet->SetLeftMargin(0.16); c2_leading2D_1Subjet->SetBottomMargin(0.16); c2_leading2D_1Subjet->SetTicks(1,1);
     c2_leading2D_1Subjet->SetLogy();
     out2D_leading_1Subjet.gRate_vsEff_all->Draw("AP");   // A=axes, P=points
-    c2_leading2D_1Subjet->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_1Subjet.pdf");*/
+    c2_leading2D_1Subjet->cd(); DrawATLASLabel(); c2_leading2D_1Subjet->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_1Subjet.pdf");*/
 
     // INSTEAD SCAN ONLY OVER E_T FOR 1 SUBJET CASE!
     auto out_1subjetEtScan = MakeRateVsEff(sig_h_leading_LRJ_Et_With1ConeSubjet, back_h_leading_LRJ_Et_With1ConeSubjet);
@@ -9739,14 +10437,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_1subjetEtScan.hRate_vsThr->Draw("HIST");
-    c1_1Subjet->SaveAs(rateVsEffFileDir + "threshold_views_1Subjet_EtScan.pdf");
+    c1_1Subjet->cd(); DrawATLASLabel(); c1_1Subjet->SaveAs(rateVsEffFileDir + "threshold_views_1Subjet_EtScan.pdf");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_1Subjet = new TCanvas("c2_1Subjet","Rate vs Eff",700,600);
     c2_1Subjet->SetLeftMargin(0.16); c2_1Subjet->SetBottomMargin(0.16); c2_1Subjet->SetTicks(1,1);
     c2_1Subjet->SetLogy();
     out_1subjetEtScan.gRate_vsEff->Draw("AP");   // A=axes, P=points
-    c2_1Subjet->SaveAs(rateVsEffFileDir + "rate_vs_eff_1Subjet_EtScan.pdf");
+    c2_1Subjet->cd(); DrawATLASLabel(); c2_1Subjet->SaveAs(rateVsEffFileDir + "rate_vs_eff_1Subjet_EtScan.pdf");
 
     // ===================== LEADING (ET_th vs Mass Approx [>= 2 Subjets!]) =======================
     /*auto out2D_leading_GrEq2Subjets = MakeRateVsEff_ScanRMin(
@@ -9781,14 +10479,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogz();
     out2D_leading_GrEq2Subjets.hRate_vsThr_vsR->SetTitle(";Leading JetTagger LRJ E_{T} threshold [GeV];Min. Approx. Mass;Estimated Background Rate [Hz] [>= 2 SUBJETS ONLY]");
     out2D_leading_GrEq2Subjets.hRate_vsThr_vsR->Draw("COLZ");
-    c1_leading2D_GrEq2Subjets->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_approxMass_GrEq2Subjets.pdf");
+    c1_leading2D_GrEq2Subjets->cd(); DrawATLASLabel(); c1_leading2D_GrEq2Subjets->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_approxMass_GrEq2Subjets.pdf");
 
     // Main plot: rate vs efficiency (all points from the 2D scan)
     auto c2_leading2D_GrEq2Subjets = new TCanvas("c2_leading2D_GrEq2Subjets","Rate vs Eff (2D scan, leading)",700,600);
     c2_leading2D_GrEq2Subjets->SetLeftMargin(0.16); c2_leading2D_GrEq2Subjets->SetBottomMargin(0.16); c2_leading2D_GrEq2Subjets->SetTicks(1,1);
     c2_leading2D_GrEq2Subjets->SetLogy();
     out2D_leading_GrEq2Subjets.gRate_vsEff_all->Draw("AP");   // A=axes, P=points
-    c2_leading2D_GrEq2Subjets->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_GrEq2Subjets.pdf");
+    c2_leading2D_GrEq2Subjets->cd(); DrawATLASLabel(); c2_leading2D_GrEq2Subjets->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_GrEq2Subjets.pdf");
         */
     // ======= 2D scan: ET threshold vs minimum constituent mass (>= 2 subjets) =======
     auto out2D_leading_ConstituentMass = MakeRateVsEff_ScanRMin(
@@ -9818,16 +10516,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogz();
     out2D_leading_ConstituentMass.hRate_vsThr_vsR->SetTitle(";Leading JetTagger LRJ E_{T} threshold [GeV];Min. Constituent Mass [GeV];Estimated Background Rate [Hz]");
     out2D_leading_ConstituentMass.hRate_vsThr_vsR->Draw("COLZ");
-    c1_ConstituentMass2D->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_constituentMass_AllEvents.pdf");
+    c1_ConstituentMass2D->cd(); DrawATLASLabel(); c1_ConstituentMass2D->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_constituentMass_AllEvents.pdf");
 
     // Rate vs efficiency graph — overlaid with ET-only scan
     auto c2_ConstituentMass2D = new TCanvas("c2_ConstituentMass2D", "Rate vs Eff (ET+constituent mass 2D scan)", 700, 600);
     c2_ConstituentMass2D->SetLeftMargin(0.16); c2_ConstituentMass2D->SetBottomMargin(0.16); c2_ConstituentMass2D->SetTicks(1,1);
     c2_ConstituentMass2D->SetLogy();
-    out2D_leading_ConstituentMass.gRate_vsEff_all->SetMarkerColor(kBlue+1);
-    out2D_leading_ConstituentMass.gRate_vsEff_all->SetLineColor(kBlue+1);
-    out.gRate_vsEff->SetMarkerColor(kRed+1);
-    out.gRate_vsEff->SetLineColor(kRed+1);
+    out2D_leading_ConstituentMass.gRate_vsEff_all->SetMarkerColor(kP10Blue);
+    out2D_leading_ConstituentMass.gRate_vsEff_all->SetLineColor(kP10Blue);
+    out.gRate_vsEff->SetMarkerColor(kP10Red);
+    out.gRate_vsEff->SetLineColor(kP10Red);
     out.gRate_vsEff->SetMarkerStyle(21);
     out2D_leading_ConstituentMass.gRate_vsEff_all->GetXaxis()->SetLimits(0.0, 1.0);
     out2D_leading_ConstituentMass.gRate_vsEff_all->Draw("AP");
@@ -9876,7 +10574,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         auto best2D_pt = FindBestPointBelowRate(out2D_leading_ConstituentMass.gRate_vsEff_all, 1e4);
         if(best2D_pt.first > 0.0){
             TLine *vline2D = new TLine(best2D_pt.first, gPad->GetUymin(), best2D_pt.first, 1e4);
-            vline2D->SetLineColor(kBlue+1); vline2D->SetLineStyle(2); vline2D->SetLineWidth(2);
+            vline2D->SetLineColor(kP10Blue); vline2D->SetLineStyle(2); vline2D->SetLineWidth(2);
             vline2D->Draw("SAME");
         }
 
@@ -9884,7 +10582,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         auto bestEt_pt = FindBestPointBelowRate(out.gRate_vsEff, 1e4);
         if(bestEt_pt.first > 0.0){
             TLine *vlineEt = new TLine(bestEt_pt.first, gPad->GetUymin(), bestEt_pt.first, 1e4);
-            vlineEt->SetLineColor(kRed+1); vlineEt->SetLineStyle(2); vlineEt->SetLineWidth(2);
+            vlineEt->SetLineColor(kP10Red); vlineEt->SetLineStyle(2); vlineEt->SetLineWidth(2);
             vlineEt->Draw("SAME");
         }
 
@@ -9892,12 +10590,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         TLatex latex;
         latex.SetTextSize(0.028);
         if(best2D_ET >= 0.0){
-            latex.SetTextColor(kBlue+1);
+            latex.SetTextColor(kP10Blue);
             latex.DrawLatexNDC(0.38, 0.26, Form("2D @ 10 kHz: E_{T} > %.0f GeV, m > %.0f GeV (#varepsilon = %.3f)", best2D_ET, best2D_mass, best2D_eff));
             std::cout << "2D scan @ 10 kHz: ET_thr = " << best2D_ET << " GeV, mass_min = " << best2D_mass << " GeV, eff = " << best2D_eff << "\n";
         }
         if(bestEt_thr >= 0.0){
-            latex.SetTextColor(kRed+1);
+            latex.SetTextColor(kP10Red);
             latex.DrawLatexNDC(0.38, 0.21, Form("E_{T} only @ 10 kHz: E_{T} > %.0f GeV (#varepsilon = %.3f)", bestEt_thr, bestEt_eff));
             std::cout << "ET-only @ 10 kHz: ET_thr = " << bestEt_thr << " GeV, eff = " << bestEt_eff << "\n";
         }
@@ -9909,7 +10607,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legConstituentMassROC->AddEntry(out.gRate_vsEff,                               "E_{T} threshold only",                               "p");
     legConstituentMassROC->Draw();
     gPad->RedrawAxis();
-    c2_ConstituentMass2D->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_ConstituentMass_AllEvents.pdf");
+    c2_ConstituentMass2D->cd(); DrawATLASLabel(); c2_ConstituentMass2D->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_ConstituentMass_AllEvents.pdf");
 
     {
         auto* roc_clone = (TGraphErrors*)out2D_leading_ConstituentMass.gRate_vsEff_all->Clone(
@@ -9942,14 +10640,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_0subjetEtScan_LeadingEt.hRate_vsThr->Draw("HIST");
-    c1_0Subjets_Leading ->SaveAs(rateVsEffFileDir + "threshold_views_0or1subjets_EtScan_Leading.pdf");
+    c1_0Subjets_Leading->cd(); DrawATLASLabel(); c1_0Subjets_Leading->SaveAs(rateVsEffFileDir + "threshold_views_0or1subjets_EtScan_Leading.pdf");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_0Subjets_Leading = new TCanvas("c2_0Subjets_Leading ","Rate vs Eff",700,600);
     c2_0Subjets_Leading ->SetLeftMargin(0.16); c2_0Subjets_Leading ->SetBottomMargin(0.16); c2_0Subjets_Leading ->SetTicks(1,1);
     c2_0Subjets_Leading ->SetLogy();
     out_0subjetEtScan_LeadingEt.gRate_vsEff->Draw("AP");   // A=axes, P=points
-    c2_0Subjets_Leading ->SaveAs(rateVsEffFileDir + "rate_vs_eff_0or1subjets_EtScan_Leading.pdf");
+    c2_0Subjets_Leading->cd(); DrawATLASLabel(); c2_0Subjets_Leading->SaveAs(rateVsEffFileDir + "rate_vs_eff_0or1subjets_EtScan_Leading.pdf");
 
     // Rates vs. Eff with different selections based on the number of subjets.
     auto out_0subjetEtScan_SubleadingEt = MakeRateVsEff(sig_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead, back_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead);
@@ -9975,14 +10673,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.16); gPad->SetTicks(1,1);
     gPad->SetLogy();
     out_0subjetEtScan_SubleadingEt.hRate_vsThr->Draw("HIST");
-    c1_0Subjets_Subleading ->SaveAs(rateVsEffFileDir + "threshold_views_0or1subjets_EtScan_Subleading.pdf");
+    c1_0Subjets_Subleading->cd(); DrawATLASLabel(); c1_0Subjets_Subleading->SaveAs(rateVsEffFileDir + "threshold_views_0or1subjets_EtScan_Subleading.pdf");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_0Subjets_Subleading = new TCanvas("c2_0Subjets_Subleading ","Rate vs Eff",700,600);
     c2_0Subjets_Subleading ->SetLeftMargin(0.16); c2_0Subjets_Subleading ->SetBottomMargin(0.16); c2_0Subjets_Subleading ->SetTicks(1,1);
     c2_0Subjets_Subleading ->SetLogy();
     out_0subjetEtScan_SubleadingEt.gRate_vsEff->Draw("AP");   // A=axes, P=points
-    c2_0Subjets_Subleading ->SaveAs(rateVsEffFileDir + "rate_vs_eff_0or1subjets_EtScan_Subleading.pdf");
+    c2_0Subjets_Subleading->cd(); DrawATLASLabel(); c2_0Subjets_Subleading->SaveAs(rateVsEffFileDir + "rate_vs_eff_0or1subjets_EtScan_Subleading.pdf");
 
     std::cout << "test 7.1" << "\n";
     // FIXME allow controlling whether scanning over mass approx or tau21 - probably don't want to do both here as very computationally expensive
@@ -10023,14 +10721,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogz();
     out2D_leading_GrEq2Subjets_LeadingOnly.hRate_vsThr_vsR->SetTitle(";Leading JetTagger LRJ E_{T} threshold [GeV];Min. Approx. Mass;Estimated Background Rate [Hz] [>= 2 lead SUBJETS]");
     out2D_leading_GrEq2Subjets_LeadingOnly.hRate_vsThr_vsR->Draw("COLZ");
-    c1_leading2D_GrEq2Subjets_LeadingOnly->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_approxMass_GrEq2Subjets_LeadingOnly.pdf");
+    c1_leading2D_GrEq2Subjets_LeadingOnly->cd(); DrawATLASLabel(); c1_leading2D_GrEq2Subjets_LeadingOnly->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_approxMass_GrEq2Subjets_LeadingOnly.pdf");
 
     // Main plot: rate vs efficiency (all points from the 2D scan)
     auto c2_leading2D_GrEq2Subjets_LeadingOnly = new TCanvas("c2_leading2D_GrEq2Subjets_LeadingOnly","Rate vs Eff (2D scan, leading)",700,600);
     c2_leading2D_GrEq2Subjets_LeadingOnly->SetLeftMargin(0.16); c2_leading2D_GrEq2Subjets_LeadingOnly->SetBottomMargin(0.16); c2_leading2D_GrEq2Subjets_LeadingOnly->SetTicks(1,1);
     c2_leading2D_GrEq2Subjets_LeadingOnly->SetLogy();
     out2D_leading_GrEq2Subjets_LeadingOnly.gRate_vsEff_all->Draw("AP");   // A=axes, P=points
-    c2_leading2D_GrEq2Subjets_LeadingOnly->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_GrEq2Subjets_LeadingOnly.pdf");
+    c2_leading2D_GrEq2Subjets_LeadingOnly->cd(); DrawATLASLabel(); c2_leading2D_GrEq2Subjets_LeadingOnly->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_GrEq2Subjets_LeadingOnly.pdf");
 
     // ===================== LEADING (ET_th vs Mass Approx [>= 2 Subjets!]) =======================
     auto out2D_leading_GrEq2Subjets_SubleadingOnly = MakeRateVsEff_ScanRMin(
@@ -10068,14 +10766,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogz();
     out2D_leading_GrEq2Subjets_SubleadingOnly.hRate_vsThr_vsR->SetTitle(";Subleading JetTagger LRJ E_{T} threshold [GeV];Min. Approx. Mass;Estimated Background Rate [Hz] [>= 2 subl SUBJETS]");
     out2D_leading_GrEq2Subjets_SubleadingOnly.hRate_vsThr_vsR->Draw("COLZ");
-    c1_leading2D_GrEq2Subjets_SubleadingOnly->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_approxMass_GrEq2Subjets_SubleadingOnly.pdf");
+    c1_leading2D_GrEq2Subjets_SubleadingOnly->cd(); DrawATLASLabel(); c1_leading2D_GrEq2Subjets_SubleadingOnly->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_approxMass_GrEq2Subjets_SubleadingOnly.pdf");
 
     // Main plot: rate vs efficiency (all points from the 2D scan)
     auto c2_leading2D_GrEq2Subjets_SubleadingOnly = new TCanvas("c2_leading2D_GrEq2Subjets_SubleadingOnly","Rate vs Eff (2D scan, leading)",700,600);
     c2_leading2D_GrEq2Subjets_SubleadingOnly->SetLeftMargin(0.16); c2_leading2D_GrEq2Subjets_SubleadingOnly->SetBottomMargin(0.16); c2_leading2D_GrEq2Subjets_SubleadingOnly->SetTicks(1,1);
     c2_leading2D_GrEq2Subjets_SubleadingOnly->SetLogy();
     out2D_leading_GrEq2Subjets_SubleadingOnly.gRate_vsEff_all->Draw("AP");   // A=axes, P=points
-    c2_leading2D_GrEq2Subjets_SubleadingOnly->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_GrEq2Subjets_SubleadingOnly.pdf");
+    c2_leading2D_GrEq2Subjets_SubleadingOnly->cd(); DrawATLASLabel(); c2_leading2D_GrEq2Subjets_SubleadingOnly->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_GrEq2Subjets_SubleadingOnly.pdf");
 
     auto out2D_leading_GrEq2Subjets_Both = MakeRateVsEff_ScanRMax(
         sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead,    backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead      // R = psi_lead/psi_subl
@@ -10108,14 +10806,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogz();
     out2D_leading_GrEq2Subjets_Both.hRate_vsThr_vsR->SetTitle(";Subleading JetTagger LRJ E_{T} threshold [GeV];Max. Tau21 Product;Estimated Background Rate [Hz] [>= 2 SUBJETS]");
     out2D_leading_GrEq2Subjets_Both.hRate_vsThr_vsR->Draw("COLZ");
-    c1_leading2D_GrEq2Subjets_Both->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_approxMass_GrEq2Subjets_Tau21Product.pdf");
+    c1_leading2D_GrEq2Subjets_Both->cd(); DrawATLASLabel(); c1_leading2D_GrEq2Subjets_Both->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_approxMass_GrEq2Subjets_Tau21Product.pdf");
 
     // Main plot: rate vs efficiency (all points from the 2D scan)
     auto c2_leading2D_GrEq2Subjets_Both = new TCanvas("c2_leading2D_GrEq2Subjets_Both","Rate vs Eff (2D scan, leading)",700,600);
     c2_leading2D_GrEq2Subjets_Both->SetLeftMargin(0.16); c2_leading2D_GrEq2Subjets_Both->SetBottomMargin(0.16); c2_leading2D_GrEq2Subjets_Both->SetTicks(1,1);
     c2_leading2D_GrEq2Subjets_Both->SetLogy();
     out2D_leading_GrEq2Subjets_Both.gRate_vsEff_all->Draw("AP");   // A=axes, P=points
-    c2_leading2D_GrEq2Subjets_Both->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_GrEq2Subjets_Tau21Product.pdf");*/
+    c2_leading2D_GrEq2Subjets_Both->cd(); DrawATLASLabel(); c2_leading2D_GrEq2Subjets_Both->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_leading_GrEq2Subjets_Tau21Product.pdf");*/
 
     /*auto out3D_sublead_GrEq2Subjets_Lead_Sublead = MakeRateVsEff_Scan3DMin(
         sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead,
@@ -10137,7 +10835,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     c_rateEff_3D_frontier->SetLogy();
 
     out3D_sublead_GrEq2Subjets_Lead_Sublead.gRate_vsEff_frontier->Draw("AP");
-    c_rateEff_3D_frontier->SaveAs(
+    c_rateEff_3D_frontier->cd(); DrawATLASLabel(); c_rateEff_3D_frontier->SaveAs(
         rateVsEffFileDir + "rate_vs_eff_scan3D_frontier_subleadingEt_leadSubleadMass_GrEq2Subjets.pdf");*/
     std::cout << "test 7.2" << "\n";
         // ============================
@@ -10180,7 +10878,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_EtScan_A_leadGe2_subleadLt2.hRate_vsThr->Draw("HIST");
 
-        c_thr_A_leadGe2_subleadLt2->SaveAs(
+        c_thr_A_leadGe2_subleadLt2->cd(); DrawATLASLabel(); c_thr_A_leadGe2_subleadLt2->SaveAs(
             rateVsEffFileDir + "threshold_views_EtScan_A_leadGe2_subleadLt2.pdf"
         );
 
@@ -10205,7 +10903,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                         "p");
         leg_A->Draw();
 
-        c_re_A_leadGe2_subleadLt2->SaveAs(
+        c_re_A_leadGe2_subleadLt2->cd(); DrawATLASLabel(); c_re_A_leadGe2_subleadLt2->SaveAs(
             rateVsEffFileDir + "rate_vs_eff_EtScan_A_leadGe2_subleadLt2.pdf"
         );
 
@@ -10250,7 +10948,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_EtScan_B_subleadGe2_leadLt2.hRate_vsThr->Draw("HIST");
 
-        c_thr_B_subleadGe2_leadLt2->SaveAs(
+        c_thr_B_subleadGe2_leadLt2->cd(); DrawATLASLabel(); c_thr_B_subleadGe2_leadLt2->SaveAs(
             rateVsEffFileDir + "threshold_views_EtScan_B_subleadGe2_leadLt2.pdf"
         );
 
@@ -10275,7 +10973,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                         "p");
         leg_B->Draw();
 
-        c_re_B_subleadGe2_leadLt2->SaveAs(
+        c_re_B_subleadGe2_leadLt2->cd(); DrawATLASLabel(); c_re_B_subleadGe2_leadLt2->SaveAs(
             rateVsEffFileDir + "rate_vs_eff_EtScan_B_subleadGe2_leadLt2.pdf"
         );
 
@@ -10320,7 +11018,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_EtScan_C_leadGe2_subleadGe2.hRate_vsThr->Draw("HIST");
 
-        c_thr_C_leadGe2_subleadGe2->SaveAs(
+        c_thr_C_leadGe2_subleadGe2->cd(); DrawATLASLabel(); c_thr_C_leadGe2_subleadGe2->SaveAs(
             rateVsEffFileDir + "threshold_views_EtScan_C_leadGe2_subleadGe2.pdf"
         );
 
@@ -10345,7 +11043,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                         "p");
         leg_C->Draw();
 
-        c_re_C_leadGe2_subleadGe2->SaveAs(
+        c_re_C_leadGe2_subleadGe2->cd(); DrawATLASLabel(); c_re_C_leadGe2_subleadGe2->SaveAs(
             rateVsEffFileDir + "rate_vs_eff_EtScan_C_leadGe2_subleadGe2.pdf"
         );
         std::cout << "test 7.3" << "\n";
@@ -10355,15 +11053,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         TH1F* sig_eff_offlineLRJ_SubjetBased_40kHz = nullptr;
         TH1F* eff_ET_only_10kHz = nullptr;
         TH1F* eff_ET_mass_10kHz = nullptr;
-        TH1F* eff_ET_only_35kHz = nullptr;
-        TH1F* eff_ET_mass_35kHz = nullptr;
+        TH1F* eff_ET_only_40kHz = nullptr;
+        TH1F* eff_ET_mass_40kHz = nullptr;
         double thr_ET_only_10kHz_p = -1.0, thr_ET_mass_10kHz_p = -1.0, thr_mass_min_10kHz_p = -1.0;
-        double thr_ET_only_35kHz_p = -1.0, thr_ET_mass_35kHz_p = -1.0, thr_mass_min_35kHz_p = -1.0;
+        double thr_ET_only_40kHz_p = -1.0, thr_ET_mass_40kHz_p = -1.0, thr_mass_min_40kHz_p = -1.0;
         // Mass-split efficiency histograms (assigned in event loops below)
         TH1F* eff_ET_only_10kHz_MassSel  = nullptr; TH1F* eff_ET_only_10kHz_NoMassSel  = nullptr;
         TH1F* eff_ET_mass_10kHz_MassSel  = nullptr; TH1F* eff_ET_mass_10kHz_NoMassSel  = nullptr;
-        TH1F* eff_ET_only_35kHz_MassSel  = nullptr; TH1F* eff_ET_only_35kHz_NoMassSel  = nullptr;
-        TH1F* eff_ET_mass_35kHz_MassSel  = nullptr; TH1F* eff_ET_mass_35kHz_NoMassSel  = nullptr;
+        TH1F* eff_ET_only_40kHz_MassSel  = nullptr; TH1F* eff_ET_only_40kHz_NoMassSel  = nullptr;
+        TH1F* eff_ET_mass_40kHz_MassSel  = nullptr; TH1F* eff_ET_mass_40kHz_NoMassSel  = nullptr;
+        // gFEX (resim) E_T-only mass-split efficiency histograms (assigned in the 40 kHz event loop)
+        TH1F* eff_gFEX_ETonly_40kHz_MassSel = nullptr; TH1F* eff_gFEX_ETonly_40kHz_NoMassSel = nullptr;
         //TH1F* sig_eff_offlineLRJ10kHz_SubjetBased_MassSel  = nullptr;
         TH1F* sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel = nullptr;
         TH1F* sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel  = nullptr;
@@ -10372,8 +11072,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         double intEff_ETonly_10kHz_all = 0, intEff_ETonly_10kHz_massSel = 0, intEff_ETonly_10kHz_noMassSel = 0;
         double intEff_ETmass_10kHz_all = 0, intEff_ETmass_10kHz_massSel = 0, intEff_ETmass_10kHz_noMassSel = 0;
         double intEff_SubjetBased_35kHz_all = 0, intEff_SubjetBased_35kHz_massSel = 0, intEff_SubjetBased_35kHz_noMassSel = 0;
-        double intEff_ETonly_35kHz_all = 0, intEff_ETonly_35kHz_massSel = 0, intEff_ETonly_35kHz_noMassSel = 0;
-        double intEff_ETmass_35kHz_all = 0, intEff_ETmass_35kHz_massSel = 0, intEff_ETmass_35kHz_noMassSel = 0;
+        double intEff_ETonly_40kHz_all = 0, intEff_ETonly_40kHz_massSel = 0, intEff_ETonly_40kHz_noMassSel = 0;
+        double intEff_ETmass_40kHz_all = 0, intEff_ETmass_40kHz_massSel = 0, intEff_ETmass_40kHz_noMassSel = 0;
+        // gFEX (resim) E_T-only integrated efficiencies @ 40 kHz (mass-inclusive + split)
+        double intEff_gFEX_ETonly_40kHz_all = 0, intEff_gFEX_ETonly_40kHz_massSel = 0, intEff_gFEX_ETonly_40kHz_noMassSel = 0;
 
         // 2D (ET + constituent mass) scans for cats 0, 2, 3, 4
         // ============================
@@ -10417,7 +11119,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         auto c_global5_mass = new TCanvas("c_global5_mass", "Combined 5-cat ET+mass ROC", 700, 600);
         c_global5_mass->SetLeftMargin(0.16); c_global5_mass->SetBottomMargin(0.16);
         c_global5_mass->SetTicks(1,1); c_global5_mass->SetLogy();
-        global5_mass.gRate_vsEff_combined->SetMarkerColor(kRed+1);
+        global5_mass.gRate_vsEff_combined->SetMarkerColor(kP10Red);
         global5_mass.gRate_vsEff_combined->SetMarkerStyle(20);
         global5_mass.gRate_vsEff_combined->GetXaxis()->SetLimits(0.0, 1.0);
         global5_mass.gRate_vsEff_combined->Draw("AP");
@@ -10429,9 +11131,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             auto best = FindBestPointBelowRate(global5_mass.gRate_vsEff_combined, 1e4);
             if(best.first > 0.0){
                 TLine *vl = new TLine(best.first, gPad->GetUymin(), best.first, 1e4);
-                vl->SetLineColor(kRed+1); vl->SetLineStyle(2); vl->SetLineWidth(2);
+                vl->SetLineColor(kP10Red); vl->SetLineStyle(2); vl->SetLineWidth(2);
                 vl->Draw("SAME");
-                TLatex ltx; ltx.SetTextSize(0.028); ltx.SetTextColor(kRed+1);
+                TLatex ltx; ltx.SetTextSize(0.028); ltx.SetTextColor(kP10Red);
                 ltx.DrawLatexNDC(0.38, 0.21, Form("@ 10 kHz: #varepsilon = %.3f", best.first));
             }
         }
@@ -10440,7 +11142,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg_global5_mass->AddEntry(global5_mass.gRate_vsEff_combined, "5-cat combined: E_{T} + constituent mass", "p");
         leg_global5_mass->Draw();
         gPad->RedrawAxis();
-        c_global5_mass->SaveAs(rateVsEffFileDir + "rate_vs_eff_combined_5selections_Et_plus_ConstituentMass.pdf");
+        c_global5_mass->cd(); DrawATLASLabel(); c_global5_mass->SaveAs(rateVsEffFileDir + "rate_vs_eff_combined_5selections_Et_plus_ConstituentMass.pdf");
 
         // Combined 5-category scan with ET + constituent mass, cat0 also gets 2D scan
         auto global5_mass_cat0 = MakeCombinedRateVsEff_AllFive_NSubjetiness_Cat0Mass(
@@ -10480,7 +11182,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             auto c_cat0mass = new TCanvas("c_cat0mass", "Combined 5-cat ET+mass (cat0 2D) ROC", 700, 600);
             c_cat0mass->SetLeftMargin(0.16); c_cat0mass->SetBottomMargin(0.16);
             c_cat0mass->SetTicks(1,1); c_cat0mass->SetLogy();
-            global5_mass_cat0.gRate_vsEff_combined->SetMarkerColor(kBlue+1);
+            global5_mass_cat0.gRate_vsEff_combined->SetMarkerColor(kP10Blue);
             global5_mass_cat0.gRate_vsEff_combined->SetMarkerStyle(20);
             global5_mass_cat0.gRate_vsEff_combined->GetXaxis()->SetLimits(0.0, 1.0);
             global5_mass_cat0.gRate_vsEff_combined->Draw("AP");
@@ -10492,9 +11194,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 auto best = FindBestPointBelowRate(global5_mass_cat0.gRate_vsEff_combined, 1e4);
                 if (best.first > 0.0) {
                     TLine *vl = new TLine(best.first, gPad->GetUymin(), best.first, 1e4);
-                    vl->SetLineColor(kBlue+1); vl->SetLineStyle(2); vl->SetLineWidth(2);
+                    vl->SetLineColor(kP10Blue); vl->SetLineStyle(2); vl->SetLineWidth(2);
                     vl->Draw("SAME");
-                    TLatex ltx; ltx.SetTextSize(0.028); ltx.SetTextColor(kBlue+1);
+                    TLatex ltx; ltx.SetTextSize(0.028); ltx.SetTextColor(kP10Blue);
                     ltx.DrawLatexNDC(0.38, 0.21, Form("@ 10 kHz: #varepsilon = %.3f", best.first));
                 }
             }
@@ -10504,7 +11206,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 "5-cat combined: E_{T} + constituent mass (cat0 2D)", "p");
             leg_cat0mass->Draw();
             gPad->RedrawAxis();
-            c_cat0mass->SaveAs(rateVsEffFileDir + "rate_vs_eff_combined_5selections_Et_plus_ConstituentMass_Cat0Mass.pdf");
+            c_cat0mass->cd(); DrawATLASLabel(); c_cat0mass->SaveAs(rateVsEffFileDir + "rate_vs_eff_combined_5selections_Et_plus_ConstituentMass_Cat0Mass.pdf");
         }*/
         std::cout << "test 7.4" << "\n";
         // 10 kHz efficiency turn-on: ET+mass vs ET-only (both from all-event 2D/1D scans)
@@ -10545,6 +11247,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             TH1F* h_den_noMassSel     = new TH1F("h_den_tOn_noMassSel",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
 
             for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
+                if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
                 jetTaggerLeadingLRJsSignal->GetEntry(iEvt);
                 leadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
                 leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(iEvt);
@@ -10594,8 +11297,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             TH1F* eff_ET_mass = eff_ET_mass_10kHz;
 
             eff_ET_only->SetAxisRange(0.0, 1.1, "Y");
-            eff_ET_only->SetLineColor(kRed+1);   eff_ET_only->SetMarkerColor(kRed+1);   eff_ET_only->SetMarkerStyle(21); eff_ET_only->SetMarkerSize(1.0);
-            eff_ET_mass->SetLineColor(kBlue+1);  eff_ET_mass->SetMarkerColor(kBlue+1);  eff_ET_mass->SetMarkerStyle(20); eff_ET_mass->SetMarkerSize(1.0);
+            eff_ET_only->SetLineColor(kP10Red);   eff_ET_only->SetMarkerColor(kP10Red);   eff_ET_only->SetMarkerStyle(21); eff_ET_only->SetMarkerSize(1.0);
+            eff_ET_mass->SetLineColor(kP10Blue);  eff_ET_mass->SetMarkerColor(kP10Blue);  eff_ET_mass->SetMarkerStyle(20); eff_ET_mass->SetMarkerSize(1.0);
             eff_ET_only->GetXaxis()->SetTitleOffset(1.1);
             eff_ET_only->GetYaxis()->SetTitleOffset(1.2);
 
@@ -10608,16 +11311,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg_tOn->AddEntry(eff_ET_only, Form("E_{T} > %.0f GeV only",       thr_ET_only), "lp");
             leg_tOn->AddEntry(eff_ET_mass, Form("E_{T} > %.0f GeV + m > %.0f GeV", thr_ET_mass, thr_mass_min), "lp");
             leg_tOn->Draw();
-            c_turnOn_mass.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_Et_plus_ConstituentMass_overlay.pdf");
+            c_turnOn_mass.cd(); DrawATLASLabel(); c_turnOn_mass.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_Et_plus_ConstituentMass_overlay.pdf");
         }
         eff_ET_mass_10kHz_vec.push_back(eff_ET_mass_10kHz);
         thr_ET_mass_10kHz_vec.push_back(thr_ET_mass_10kHz_p);
         thr_mass_min_10kHz_vec.push_back(thr_mass_min_10kHz_p);
-        thr_ET_mass_35kHz_vec.push_back(thr_ET_mass_35kHz_p);
-        thr_mass_min_35kHz_vec.push_back(thr_mass_min_35kHz_p);
+        thr_ET_mass_40kHz_vec.push_back(thr_ET_mass_40kHz_p);
+        thr_mass_min_40kHz_vec.push_back(thr_mass_min_40kHz_p);
         nInputObjects_vec.push_back(nInputObjectsAlgorithmConfiguration);
 
-        // ======= 35 kHz versions: subjet-based, ET-only, ET+mass =======
+        // ======= 40 kHz versions: subjet-based, ET-only, ET+mass =======
         auto global5 = MakeCombinedRateVsEff_AllFive_EtOnly(
             out_0subjetEtScan_LeadingEt,
             out_0subjetEtScan_SubleadingEt,
@@ -10629,35 +11332,35 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead,
             sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead,
             sig_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead,
-            5.0e4,
+            1.0e5,  // draw/scan up to 100 kHz (subjet-based E_T cut input)
             {1.0e4, 3.5e4, 4.0e4}  // rate targets: [0]=10 kHz, [1]=35 kHz, [2]=40 kHz
         );
-        std::cout << "Best combined point with total rate <= 35 kHz:\n" << 
-            " Global eff = " << global5.bestPoints[1].bestEff << "\n" << 
-            " Total rate = " << global5.bestPoints[1].bestRate << " Hz\n" 
-            << " Selections (E_T only):\n" << " (0) cat0: E_{T} > " << global5.bestPoints[1].bestEtCut[0] << " GeV\n" 
-            << " (1) 1 subjet lead&subl: E_{T} > " << global5.bestPoints[1].bestEtCut[1] << " GeV\n" 
-            << " (2) cat2: E_{T} > " << global5.bestPoints[1].bestEtCut[2] << " GeV\n" 
-            << " (3) cat3: E_{T} > " << global5.bestPoints[1].bestEtCut[3] << " GeV\n" 
-            << " (4) cat4: E_{T} > " << global5.bestPoints[1].bestEtCut[4] << " GeV\n" 
+        std::cout << "Best combined point with total rate <= 40 kHz:\n" <<
+            " Global eff = " << global5.bestPoints[2].bestEff << "\n" <<
+            " Total rate = " << global5.bestPoints[2].bestRate << " Hz\n"
+            << " Selections (E_T only):\n" << " (0) cat0: E_{T} > " << global5.bestPoints[2].bestEtCut[0] << " GeV\n"
+            << " (1) 1 subjet lead&subl: E_{T} > " << global5.bestPoints[2].bestEtCut[1] << " GeV\n"
+            << " (2) cat2: E_{T} > " << global5.bestPoints[2].bestEtCut[2] << " GeV\n"
+            << " (3) cat3: E_{T} > " << global5.bestPoints[2].bestEtCut[3] << " GeV\n"
+            << " (4) cat4: E_{T} > " << global5.bestPoints[2].bestEtCut[4] << " GeV\n"
             << " Per-category at best point (cat, eff_cat, eff_tot, rate [Hz]):\n";
-        for (int c = 0; c < 5; ++c) { 
-            std::cout << " cat " << c 
-                << ": eff_cat = " << global5.bestPoints[1].bestEff_cat[c] <<
-                ", eff_tot = " << global5.bestPoints[1].bestEff_tot[c] <<
-                ", rate = " << global5.bestPoints[1].bestRate_cat[c] << " Hz\n"; 
+        for (int c = 0; c < 5; ++c) {
+            std::cout << " cat " << c
+                << ": eff_cat = " << global5.bestPoints[2].bestEff_cat[c] <<
+                ", eff_tot = " << global5.bestPoints[2].bestEff_tot[c] <<
+                ", rate = " << global5.bestPoints[2].bestRate_cat[c] << " Hz\n";
         }
 
         {
-            // Find best ET-only threshold at <= 35 kHz
+            // Find best ET-only threshold at <= 40 kHz
             double thr_ET_only_35 = -1.0;
             for(int ix = 1; ix <= out.hRate_vsThr->GetNbinsX(); ++ix){
-                if(out.hRate_vsThr->GetBinContent(ix) <= 3.5e4){
+                if(out.hRate_vsThr->GetBinContent(ix) <= 4.0e4){
                     thr_ET_only_35 = out.hRate_vsThr->GetXaxis()->GetBinLowEdge(ix);
                     break;
                 }
             }
-            // Find best (ET_thr, mass_min) from 2D scan at <= 35 kHz
+            // Find best (ET_thr, mass_min) from 2D scan at <= 40 kHz
             double thr_ET_mass_35 = -1.0, thr_mass_min_35 = -1.0;
             {
                 TH2* hR = out2D_leading_ConstituentMass.hRate_vsThr_vsR;
@@ -10665,7 +11368,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 double bestEff35 = -1.0;
                 for(int ix = 1; ix <= hR->GetNbinsX(); ++ix){
                     for(int iy = 1; iy <= hR->GetNbinsY(); ++iy){
-                        if(hR->GetBinContent(ix,iy) <= 3.5e4 && hE->GetBinContent(ix,iy) > bestEff35){
+                        if(hR->GetBinContent(ix,iy) <= 4.0e4 && hE->GetBinContent(ix,iy) > bestEff35){
                             bestEff35     = hE->GetBinContent(ix,iy);
                             thr_ET_mass_35  = hR->GetXaxis()->GetBinLowEdge(ix);
                             thr_mass_min_35 = hR->GetYaxis()->GetBinLowEdge(iy);
@@ -10673,13 +11376,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                     }
                 }
             }
-            std::cout << "35 kHz ET-only thr = " << thr_ET_only_35 << " GeV\n";
-            std::cout << "35 kHz ET+mass: ET > " << thr_ET_mass_35 << " GeV, mass > " << thr_mass_min_35 << " GeV\n";
-            thr_ET_only_35kHz_p = thr_ET_only_35;
-            thr_ET_mass_35kHz_p = thr_ET_mass_35;
-            thr_mass_min_35kHz_p = thr_mass_min_35;
+            std::cout << "40 kHz ET-only thr = " << thr_ET_only_35 << " GeV\n";
+            std::cout << "40 kHz ET+mass: ET > " << thr_ET_mass_35 << " GeV, mass > " << thr_mass_min_35 << " GeV\n";
+            thr_ET_only_40kHz_p = thr_ET_only_35;
+            thr_ET_mass_40kHz_p = thr_ET_mass_35;
+            thr_mass_min_40kHz_p = thr_mass_min_35;
 
-            // Turn-on event loop for 35 kHz subjet-based, ET-only, ET+mass
+            // Turn-on event loop for 40 kHz subjet-based, ET-only, ET+mass
             TH1F* h_num_Et_35   = new TH1F("h_num_Et_35",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_num_mass_35 = new TH1F("h_num_mass_35", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_num_sub_35  = new TH1F("h_num_sub_35",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
@@ -10692,18 +11395,26 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             TH1F* h_num_sub_35_noMassSel = new TH1F("h_num_sub_35_noMassSel", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_den_35_massSel       = new TH1F("h_den_35_massSel",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_den_35_noMassSel     = new TH1F("h_den_35_noMassSel",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            // gFEX (resim) E_T-only numerators (share the JetTagger denominators above)
+            TH1F* h_num_gFEXEt_35            = new TH1F("h_num_gFEXEt_35",            ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_gFEXEt_35_massSel    = new TH1F("h_num_gFEXEt_35_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_gFEXEt_35_noMassSel  = new TH1F("h_num_gFEXEt_35_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
 
             for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
+                if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
                 jetTaggerLeadingLRJsSignal->GetEntry(iEvt);
                 jetTaggerSubleadingLRJsSignal->GetEntry(iEvt);
                 leadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
                 leadingRecoAntiKt10UFOCSSKSoftDropJetsSignal->GetEntry(iEvt);
                 leadingAntiKt10TruthJetsTreeSignal->GetEntry(iEvt);
                 leadingAntiKt10TruthSoftDropJetsTreeSignal->GetEntry(iEvt);
+                gFexLeadingLRJSimTreeSignal->GetEntry(iEvt);   // resimulated gFEX leading LRJ
                 if(recoAntiKt10LRJLeadingEtValuesSignal->size() == 0) continue;
                 double offlineEt = recoAntiKt10LRJLeadingEtValuesSignal->at(0);
                 double leadEt    = jetTaggerLeadingLRJEtValuesSignal->at(0);
                 double sublEt    = jetTaggerSubleadingLRJEtValuesSignal->at(0);
+                // gFEX (resim) leading E_T; a missing gFEX jet counts as E_T = 0 (trigger did not fire)
+                double gFexSimEt = (gFexLRJSimLeadingEtValuesSignal->size() > 0) ? gFexLRJSimLeadingEtValuesSignal->at(0) : 0.0;
                 unsigned int nLead = nSubjetsLeadingLRJSignal[iEvt];
                 unsigned int nSubl = nSubjetsSubleadingLRJSignal[iEvt];
                 double mLead = sig_lead_constituent_mass_vec[iEvt];
@@ -10716,65 +11427,79 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 // ET+mass
                 if(thr_ET_mass_35 >= 0.0 && leadEt >= thr_ET_mass_35 && mLead >= thr_mass_min_35)
                     h_num_mass_35->Fill(offlineEt);
-                // Subjet-based 35 kHz
+                // Subjet-based 40 kHz
                 bool passSubj35 = false;
                 if(nLead == 1 && nSubl == 1)
-                    passSubj35 = leadEt >= global5.bestPoints[1].bestEtCut[0];
+                    passSubj35 = leadEt >= global5.bestPoints[2].bestEtCut[0];
                 else if((nLead < 1 && nSubl < 1) || (nLead == 0 && nSubl == 1) || (nLead == 1 && nSubl == 0))
                     passSubj35 = false; // category disabled: bestEtCut[1] = 0 GeV would always pass
                 else if(nLead >= 2 && nSubl <= 1)
-                    passSubj35 = leadEt >= global5.bestPoints[1].bestEtCut[2];
+                    passSubj35 = leadEt >= global5.bestPoints[2].bestEtCut[2];
                 else if(nLead <= 1 && nSubl >= 2)
-                    passSubj35 = sublEt >= global5.bestPoints[1].bestEtCut[3];
+                    passSubj35 = sublEt >= global5.bestPoints[2].bestEtCut[3];
                 else if(nLead >= 2 && nSubl >= 2)
-                    passSubj35 = sublEt >= global5.bestPoints[1].bestEtCut[4];
+                    passSubj35 = sublEt >= global5.bestPoints[2].bestEtCut[4];
                 if(passSubj35) h_num_sub_35->Fill(offlineEt);
+                // gFEX (resim) E_T-only, mass-inclusive
+                bool passGFexEt35 = gFexSimEt >= gFEX_Sim_40kHz_Threshold_Leading;
+                if(passGFexEt35) h_num_gFEXEt_35->Fill(offlineEt);
                 // Mass-split
                 if(passOfflineMass35){
                     h_den_35_massSel->Fill(offlineEt);
                     if(thr_ET_only_35 >= 0.0 && leadEt >= thr_ET_only_35) h_num_Et_35_massSel->Fill(offlineEt);
                     if(thr_ET_mass_35 >= 0.0 && leadEt >= thr_ET_mass_35 && mLead >= thr_mass_min_35) h_num_mass_35_massSel->Fill(offlineEt);
                     if(passSubj35) h_num_sub_35_massSel->Fill(offlineEt);
+                    if(passGFexEt35) h_num_gFEXEt_35_massSel->Fill(offlineEt);
                 } else {
                     h_den_35_noMassSel->Fill(offlineEt);
                     if(thr_ET_only_35 >= 0.0 && leadEt >= thr_ET_only_35) h_num_Et_35_noMassSel->Fill(offlineEt);
                     if(thr_ET_mass_35 >= 0.0 && leadEt >= thr_ET_mass_35 && mLead >= thr_mass_min_35) h_num_mass_35_noMassSel->Fill(offlineEt);
                     if(passSubj35) h_num_sub_35_noMassSel->Fill(offlineEt);
+                    if(passGFexEt35) h_num_gFEXEt_35_noMassSel->Fill(offlineEt);
                 }
             }
-            eff_ET_only_35kHz = (TH1F*)h_num_Et_35->Clone("eff_ET_only_35kHz");
-            eff_ET_only_35kHz->Divide(h_num_Et_35, h_den_35, 1.0, 1.0, "B");
-            eff_ET_mass_35kHz = (TH1F*)h_num_mass_35->Clone("eff_ET_mass_35kHz");
-            eff_ET_mass_35kHz->Divide(h_num_mass_35, h_den_35, 1.0, 1.0, "B");
+            eff_ET_only_40kHz = (TH1F*)h_num_Et_35->Clone("eff_ET_only_40kHz");
+            eff_ET_only_40kHz->Divide(h_num_Et_35, h_den_35, 1.0, 1.0, "B");
+            eff_ET_mass_40kHz = (TH1F*)h_num_mass_35->Clone("eff_ET_mass_40kHz");
+            eff_ET_mass_40kHz->Divide(h_num_mass_35, h_den_35, 1.0, 1.0, "B");
             sig_eff_offlineLRJ_SubjetBased_35kHz = (TH1F*)h_num_sub_35->Clone("eff_subjet_35kHz");
             sig_eff_offlineLRJ_SubjetBased_35kHz->Divide(h_num_sub_35, h_den_35, 1.0, 1.0, "B");
-            eff_ET_only_35kHz_MassSel = (TH1F*)h_num_Et_35_massSel->Clone("eff_ET_only_35kHz_massSel");
-            eff_ET_only_35kHz_MassSel->Divide(h_num_Et_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
-            eff_ET_only_35kHz_NoMassSel = (TH1F*)h_num_Et_35_noMassSel->Clone("eff_ET_only_35kHz_noMassSel");
-            eff_ET_only_35kHz_NoMassSel->Divide(h_num_Et_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
-            eff_ET_mass_35kHz_MassSel = (TH1F*)h_num_mass_35_massSel->Clone("eff_ET_mass_35kHz_massSel");
-            eff_ET_mass_35kHz_MassSel->Divide(h_num_mass_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
-            eff_ET_mass_35kHz_NoMassSel = (TH1F*)h_num_mass_35_noMassSel->Clone("eff_ET_mass_35kHz_noMassSel");
-            eff_ET_mass_35kHz_NoMassSel->Divide(h_num_mass_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
+            eff_ET_only_40kHz_MassSel = (TH1F*)h_num_Et_35_massSel->Clone("eff_ET_only_40kHz_massSel");
+            eff_ET_only_40kHz_MassSel->Divide(h_num_Et_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
+            eff_ET_only_40kHz_NoMassSel = (TH1F*)h_num_Et_35_noMassSel->Clone("eff_ET_only_40kHz_noMassSel");
+            eff_ET_only_40kHz_NoMassSel->Divide(h_num_Et_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
+            eff_ET_mass_40kHz_MassSel = (TH1F*)h_num_mass_35_massSel->Clone("eff_ET_mass_40kHz_massSel");
+            eff_ET_mass_40kHz_MassSel->Divide(h_num_mass_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
+            eff_ET_mass_40kHz_NoMassSel = (TH1F*)h_num_mass_35_noMassSel->Clone("eff_ET_mass_40kHz_noMassSel");
+            eff_ET_mass_40kHz_NoMassSel->Divide(h_num_mass_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
             sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel = (TH1F*)h_num_sub_35_massSel->Clone("eff_subjet_35kHz_massSel");
             sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel->Divide(h_num_sub_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
             sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel = (TH1F*)h_num_sub_35_noMassSel->Clone("eff_subjet_35kHz_noMassSel");
             sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel->Divide(h_num_sub_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
-            intEff_ETonly_35kHz_all       = (h_den_35->Integral()        > 0) ? h_num_Et_35->Integral()        / h_den_35->Integral()        : 0.0;
-            intEff_ETonly_35kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_Et_35_massSel->Integral()   / h_den_35_massSel->Integral()  : 0.0;
-            intEff_ETonly_35kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_Et_35_noMassSel->Integral()  / h_den_35_noMassSel->Integral() : 0.0;
-            intEff_ETmass_35kHz_all       = (h_den_35->Integral()        > 0) ? h_num_mass_35->Integral()       / h_den_35->Integral()        : 0.0;
-            intEff_ETmass_35kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_mass_35_massSel->Integral()  / h_den_35_massSel->Integral()  : 0.0;
-            intEff_ETmass_35kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_mass_35_noMassSel->Integral() / h_den_35_noMassSel->Integral() : 0.0;
+            intEff_ETonly_40kHz_all       = (h_den_35->Integral()        > 0) ? h_num_Et_35->Integral()        / h_den_35->Integral()        : 0.0;
+            intEff_ETonly_40kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_Et_35_massSel->Integral()   / h_den_35_massSel->Integral()  : 0.0;
+            intEff_ETonly_40kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_Et_35_noMassSel->Integral()  / h_den_35_noMassSel->Integral() : 0.0;
+            intEff_ETmass_40kHz_all       = (h_den_35->Integral()        > 0) ? h_num_mass_35->Integral()       / h_den_35->Integral()        : 0.0;
+            intEff_ETmass_40kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_mass_35_massSel->Integral()  / h_den_35_massSel->Integral()  : 0.0;
+            intEff_ETmass_40kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_mass_35_noMassSel->Integral() / h_den_35_noMassSel->Integral() : 0.0;
             intEff_SubjetBased_35kHz_all       = (h_den_35->Integral()        > 0) ? h_num_sub_35->Integral()         / h_den_35->Integral()        : 0.0;
             intEff_SubjetBased_35kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_sub_35_massSel->Integral()    / h_den_35_massSel->Integral()  : 0.0;
             intEff_SubjetBased_35kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_sub_35_noMassSel->Integral()   / h_den_35_noMassSel->Integral() : 0.0;
+            // gFEX (resim) E_T-only mass-split efficiencies + integrated efficiencies @ 40 kHz
+            eff_gFEX_ETonly_40kHz_MassSel = (TH1F*)h_num_gFEXEt_35_massSel->Clone("eff_gFEX_ETonly_40kHz_massSel");
+            eff_gFEX_ETonly_40kHz_MassSel->Divide(h_num_gFEXEt_35_massSel, h_den_35_massSel, 1.0, 1.0, "B");
+            eff_gFEX_ETonly_40kHz_NoMassSel = (TH1F*)h_num_gFEXEt_35_noMassSel->Clone("eff_gFEX_ETonly_40kHz_noMassSel");
+            eff_gFEX_ETonly_40kHz_NoMassSel->Divide(h_num_gFEXEt_35_noMassSel, h_den_35_noMassSel, 1.0, 1.0, "B");
+            intEff_gFEX_ETonly_40kHz_all       = (h_den_35->Integral()        > 0) ? h_num_gFEXEt_35->Integral()         / h_den_35->Integral()        : 0.0;
+            intEff_gFEX_ETonly_40kHz_massSel   = (h_den_35_massSel->Integral() > 0) ? h_num_gFEXEt_35_massSel->Integral()    / h_den_35_massSel->Integral()  : 0.0;
+            intEff_gFEX_ETonly_40kHz_noMassSel = (h_den_35_noMassSel->Integral()> 0) ? h_num_gFEXEt_35_noMassSel->Integral()   / h_den_35_noMassSel->Integral() : 0.0;
         }
         // Turn-on event loop for 40 kHz subjet-based selection
         {
             TH1F* h_num_sub_40 = new TH1F("h_num_sub_40", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             TH1F* h_den_40     = new TH1F("h_den_40",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
+                if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
                 jetTaggerLeadingLRJsSignal->GetEntry(iEvt);
                 jetTaggerSubleadingLRJsSignal->GetEntry(iEvt);
                 leadingRecoAntiKt10UFOCSSKJetsSignal->GetEntry(iEvt);
@@ -10841,6 +11566,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // use the thresholds to compute efficiency turn-on curves & before & after leading offline LRJ E_T distributions
         std::cout << "before another signal loop" << "\n";
         for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt ++ ){
+            if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
             unsigned int nSubjetConeCellsTowersJetTaggerLeading = nSubjetsLeadingLRJSignal[iEvt];
             unsigned int nSubjetConeCellsTowersJetTaggerSubleading = nSubjetsSubleadingLRJSignal[iEvt];
             unsigned int nOfflineLeadingLRJSubjets = nOfflineSubjetsLeadingLRJSignal[iEvt];
@@ -10936,7 +11662,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         sig_eff_offlineLRJ10kHz_SubjetBased->Draw();
 
-        c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_SubjetBased.pdf");
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_SubjetBased.pdf");
 
         sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased->Clone();
         sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet->SetName("eff_LRJ10kHz_SubjetBased_1OfflineSubjet");
@@ -10947,7 +11673,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet->Draw();
 
-        c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet.pdf");
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet.pdf");
 
         sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased->Clone();
         sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet->SetName("eff_LRJ10kHz_SubjetBased_GrEq2OfflineSubjet");
@@ -10958,7 +11684,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet->Draw();
 
-        c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet.pdf");
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet.pdf");
 
         // --- Styling ---
         // --- Style background histogram (shaded) ---
@@ -10974,8 +11700,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_eff_offlineLRJ10kHz_SubjetBased->SetMarkerStyle(20);
         sig_eff_offlineLRJ10kHz_SubjetBased->SetMarkerSize(1.0);
 
-        //sig_eff_offline_jFEX_LRJ10kHz->SetLineColor(kGreen+2);
-        //sig_eff_offline_jFEX_LRJ10kHz->SetMarkerColor(kGreen+2);
+        //sig_eff_offline_jFEX_LRJ10kHz->SetLineColor(kP10Green);
+        //sig_eff_offline_jFEX_LRJ10kHz->SetMarkerColor(kP10Green);
         //sig_eff_offline_jFEX_LRJ10kHz->SetMarkerStyle(22);
         //sig_eff_offline_jFEX_LRJ10kHz->SetMarkerSize(1.0);
 
@@ -11005,7 +11731,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg_10kHz_effs->Draw();
 
         // --- Save overlay ---
-        c_effLRJ10kHz.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_subjetbased.pdf");
+        c_effLRJ10kHz.cd(); DrawATLASLabel(); c_effLRJ10kHz.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_subjetbased.pdf");
 
 
 
@@ -11048,7 +11774,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg_10kHz_effs_Subjets->Draw();
 
         // --- Save overlay ---
-        c_effLRJ10kHz_Subjet.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets_subjetbased.pdf");
+        c_effLRJ10kHz_Subjet.cd(); DrawATLASLabel(); c_effLRJ10kHz_Subjet.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets_subjetbased.pdf");
 
         // --- Leading offline LRJ mass distributions ---
         TH1F* back_h_leading_offlineLRJ_Mass_beforeselection = new TH1F("back_h_leading_offlineLRJ_Mass_beforeselection", "Leading LRJ Et Distribution;Leading Offline LRJ Mass (Before Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
@@ -11123,6 +11849,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         TH1F* sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection", "Subleading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
         
         std::cout << "before another background loop" << "\n";
+        // Per-JZ-slice counter for this background pass — see top-level rate loop.
+        std::array<unsigned int, nJZSlices_> back_jz_count_subleadingLRJ = {};
         for(unsigned int iEvt = 0; iEvt < num_processed_events_background; iEvt ++ ){
             unsigned int nSubjetConeCellsTowersJetTaggerLeading = nSubjetsLeadingLRJBack[iEvt];
             unsigned int nSubjetConeCellsTowersJetTaggerSubleading = nSubjetsSubleadingLRJBack[iEvt];
@@ -11137,6 +11865,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leadingAntiKt10TruthSoftDropJetsTreeBack->GetEntry(iEvt);
             subleadingAntiKt10TruthSoftDropJetsTreeBack->GetEntry(iEvt);
             eventInfoTreeBack->GetEntry(iEvt);
+            if (kMaxEventsPerSlice >= 0) {
+                const int _jz = sampleJZSliceValuesBack;
+                if (_jz < 0 || (unsigned)_jz >= nJZSlices_) continue;
+                if (back_jz_count_subleadingLRJ[_jz] >= (unsigned int)kMaxEventsPerSlice) continue;
+                back_jz_count_subleadingLRJ[_jz]++;
+            }
             double backgroundEventWeight = eventWeightsValuesBack->at(0);
             if(recoAntiKt10LRJLeadingMassValuesBack->size() == 0) continue;
             const bool hasSubleading = (recoAntiKt10LRJSubleadingMassValuesBack->size() > 0);
@@ -11272,6 +12006,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // --- Signal: before/after selection distributions (mass, eta, ET) ---
         std::cout << "before yet another signal loop" << "\n";
         for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
+            if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
             unsigned int nSubjetConeCellsTowersJetTaggerLeading = nSubjetsLeadingLRJSignal[iEvt];
             unsigned int nSubjetConeCellsTowersJetTaggerSubleading = nSubjetsSubleadingLRJSignal[iEvt];
             const double sig_lead_cm = sig_lead_constituent_mass_vec[iEvt];
@@ -11396,41 +12131,41 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         };
 
         styleHist(back_h_leading_offlineLRJ_Mass_beforeselection,        kBlack);
-        styleHist(back_h_leading_offlineLRJ_Mass_afterEtselection,       kBlue+1);
-        styleHist(back_h_leading_offlineLRJ_Mass_afterselection,         kRed+1);
-        styleHist(back_h_leading_offlineLRJ_Mass_afterEtAndMassselection, kGreen+2);
+        styleHist(back_h_leading_offlineLRJ_Mass_afterEtselection,       kP10Blue);
+        styleHist(back_h_leading_offlineLRJ_Mass_afterselection,         kP10Red);
+        styleHist(back_h_leading_offlineLRJ_Mass_afterEtAndMassselection, kP10Green);
 
         styleHist(back_h_subleading_offlineLRJ_Mass_beforeselection,        kBlack);
-        styleHist(back_h_subleading_offlineLRJ_Mass_afterEtselection,       kBlue+1);
-        styleHist(back_h_subleading_offlineLRJ_Mass_afterselection,         kRed+1);
-        styleHist(back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection, kGreen+2);
+        styleHist(back_h_subleading_offlineLRJ_Mass_afterEtselection,       kP10Blue);
+        styleHist(back_h_subleading_offlineLRJ_Mass_afterselection,         kP10Red);
+        styleHist(back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection, kP10Green);
 
         styleHist(back_h_leading_offlineLRJ_Eta_beforeselection,        kBlack);
-        styleHist(back_h_leading_offlineLRJ_Eta_afterEtselection,       kBlue+1);
-        styleHist(back_h_leading_offlineLRJ_Eta_afterselection,         kRed+1);
-        styleHist(back_h_leading_offlineLRJ_Eta_afterEtAndMassselection, kGreen+2);
+        styleHist(back_h_leading_offlineLRJ_Eta_afterEtselection,       kP10Blue);
+        styleHist(back_h_leading_offlineLRJ_Eta_afterselection,         kP10Red);
+        styleHist(back_h_leading_offlineLRJ_Eta_afterEtAndMassselection, kP10Green);
 
         styleHist(back_h_subleading_offlineLRJ_Eta_beforeselection,        kBlack);
-        styleHist(back_h_subleading_offlineLRJ_Eta_afterEtselection,       kBlue+1);
-        styleHist(back_h_subleading_offlineLRJ_Eta_afterselection,         kRed+1);
-        styleHist(back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection, kGreen+2);
+        styleHist(back_h_subleading_offlineLRJ_Eta_afterEtselection,       kP10Blue);
+        styleHist(back_h_subleading_offlineLRJ_Eta_afterselection,         kP10Red);
+        styleHist(back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection, kP10Green);
 
         styleHist(back_h_leading_offlineLRJ_Et_beforeselection,        kBlack);
-        styleHist(back_h_leading_offlineLRJ_Et_afterEtselection,       kBlue+1);
-        styleHist(back_h_leading_offlineLRJ_Et_afterselection,         kRed+1);
-        styleHist(back_h_leading_offlineLRJ_Et_afterEtAndMassselection, kGreen+2);
+        styleHist(back_h_leading_offlineLRJ_Et_afterEtselection,       kP10Blue);
+        styleHist(back_h_leading_offlineLRJ_Et_afterselection,         kP10Red);
+        styleHist(back_h_leading_offlineLRJ_Et_afterEtAndMassselection, kP10Green);
 
         styleHist(back_h_subleading_offlineLRJ_Et_beforeselection,        kBlack);
-        styleHist(back_h_subleading_offlineLRJ_Et_afterEtselection,       kBlue+1);
-        styleHist(back_h_subleading_offlineLRJ_Et_afterselection,         kRed+1);
-        styleHist(back_h_subleading_offlineLRJ_Et_afterEtAndMassselection, kGreen+2);
+        styleHist(back_h_subleading_offlineLRJ_Et_afterEtselection,       kP10Blue);
+        styleHist(back_h_subleading_offlineLRJ_Et_afterselection,         kP10Red);
+        styleHist(back_h_subleading_offlineLRJ_Et_afterEtAndMassselection, kP10Green);
 
-        styleRatio(h_ratio_subjet,         kRed+1,   20);
-        styleRatio(h_ratio_leadEt,         kBlue+1,  24);
-        styleRatio(h_ratio_EtAndMass,      kGreen+2, 21);
-        styleRatio(h_ratio_subl_subjet,    kRed+1,   20);
-        styleRatio(h_ratio_subl_leadEt,    kBlue+1,  24);
-        styleRatio(h_ratio_subl_EtAndMass, kGreen+2, 21);
+        styleRatio(h_ratio_subjet,         kP10Red,   20);
+        styleRatio(h_ratio_leadEt,         kP10Blue,  24);
+        styleRatio(h_ratio_EtAndMass,      kP10Green, 21);
+        styleRatio(h_ratio_subl_subjet,    kP10Red,   20);
+        styleRatio(h_ratio_subl_leadEt,    kP10Blue,  24);
+        styleRatio(h_ratio_subl_EtAndMass, kP10Green, 21);
 
         // ----------------------------
         // Helper: mass canvas with top-overlay + bottom-ratio pads
@@ -11499,7 +12234,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                    rSubjet->GetXaxis()->GetXmax(), 1.0);
             l1r->SetLineStyle(2); l1r->SetLineWidth(2); l1r->SetLineColor(kGray+2);
             l1r->Draw("SAME");
-            c->SaveAs(saveFile);
+            c->cd(); DrawATLASLabel(); c->SaveAs(saveFile);
         };
 
         makeMassCanvas(
@@ -11554,7 +12289,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg->AddEntry(hSubjet,  "After Subjet-based E_{T} Sel.", "l");
             leg->AddEntry(hEtMass,  Form("Lead. E_{T} > %.0f GeV, m_{lead} > %.0f GeV", thr_ET_mass_10kHz_p, thr_mass_min_10kHz_p), "l");
             leg->Draw();
-            c->SaveAs(saveFile);
+            c->cd(); DrawATLASLabel(); c->SaveAs(saveFile);
         };
 
         makeEtaCanvas(
@@ -11600,6 +12335,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         std::cout << "test 8" << "\n";
+        _lap(Form("[file %u] leadingLRJSubjetScan turn-on loops", fileIt));
         // =======================
         // PAGE 1: PLOT ONLY
         // =======================
@@ -11623,7 +12359,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gBest5->Draw("P SAME");
 
         // open multipage pdf + write page 1
-        c_combined5->Print(outPdf + "(");
+        c_combined5->cd(); DrawATLASLabel(); c_combined5->Print(outPdf + "(");
 
         // =======================
         // PAGE 2: TEXT ONLY (Legend-based, wraps nicely)
@@ -11685,17 +12421,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg->Draw();
 
         // write page 2 + close pdf
-        c_text5->Print(outPdf + ")");
+        c_text5->cd(); DrawATLASLabel(); c_text5->Print(outPdf + ")");
 
 
 
         // --- Style global5 and standard-Et curves (always computed) ---
-        global5.gRate_vsEff_combined->SetMarkerColor(kBlue+1);
-        global5.gRate_vsEff_combined->SetLineColor(kBlue+1);
+        global5.gRate_vsEff_combined->SetMarkerColor(kP10Blue);
+        global5.gRate_vsEff_combined->SetLineColor(kP10Blue);
         global5.gRate_vsEff_combined->SetMarkerStyle(20);
 
-        out.gRate_vsEff->SetMarkerColor(kRed+1);
-        out.gRate_vsEff->SetLineColor(kRed+1);
+        out.gRate_vsEff->SetMarkerColor(kP10Red);
+        out.gRate_vsEff->SetLineColor(kP10Red);
         out.gRate_vsEff->SetMarkerStyle(21);
 
         subjetBased_ET_Scan_RatesVsEff_vec.push_back(global5.gRate_vsEff_combined);
@@ -11734,36 +12470,36 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         TH1F* sig_ratio_subl_EtAndMass = makeRatio(sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection, sig_h_subleading_offlineLRJ_Mass_beforeselection, "sig_ratio_subl_EtMass");
 
         styleHist(sig_h_leading_offlineLRJ_Mass_beforeselection,         kBlack);
-        styleHist(sig_h_leading_offlineLRJ_Mass_afterEtselection,        kBlue+1);
-        styleHist(sig_h_leading_offlineLRJ_Mass_afterselection,          kRed+1);
-        styleHist(sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_leading_offlineLRJ_Mass_afterEtselection,        kP10Blue);
+        styleHist(sig_h_leading_offlineLRJ_Mass_afterselection,          kP10Red);
+        styleHist(sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection, kP10Green);
         styleHist(sig_h_subleading_offlineLRJ_Mass_beforeselection,         kBlack);
-        styleHist(sig_h_subleading_offlineLRJ_Mass_afterEtselection,        kBlue+1);
-        styleHist(sig_h_subleading_offlineLRJ_Mass_afterselection,          kRed+1);
-        styleHist(sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_subleading_offlineLRJ_Mass_afterEtselection,        kP10Blue);
+        styleHist(sig_h_subleading_offlineLRJ_Mass_afterselection,          kP10Red);
+        styleHist(sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection, kP10Green);
         styleHist(sig_h_leading_offlineLRJ_Eta_beforeselection,         kBlack);
-        styleHist(sig_h_leading_offlineLRJ_Eta_afterEtselection,        kBlue+1);
-        styleHist(sig_h_leading_offlineLRJ_Eta_afterselection,          kRed+1);
-        styleHist(sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_leading_offlineLRJ_Eta_afterEtselection,        kP10Blue);
+        styleHist(sig_h_leading_offlineLRJ_Eta_afterselection,          kP10Red);
+        styleHist(sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection, kP10Green);
         styleHist(sig_h_subleading_offlineLRJ_Eta_beforeselection,         kBlack);
-        styleHist(sig_h_subleading_offlineLRJ_Eta_afterEtselection,        kBlue+1);
-        styleHist(sig_h_subleading_offlineLRJ_Eta_afterselection,          kRed+1);
-        styleHist(sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_subleading_offlineLRJ_Eta_afterEtselection,        kP10Blue);
+        styleHist(sig_h_subleading_offlineLRJ_Eta_afterselection,          kP10Red);
+        styleHist(sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection, kP10Green);
         styleHist(sig_h_leading_offlineLRJ_Et_beforeselection,         kBlack);
-        styleHist(sig_h_leading_offlineLRJ_Et_afterEtselection,        kBlue+1);
-        styleHist(sig_h_leading_offlineLRJ_Et_afterselection,          kRed+1);
-        styleHist(sig_h_leading_offlineLRJ_Et_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_leading_offlineLRJ_Et_afterEtselection,        kP10Blue);
+        styleHist(sig_h_leading_offlineLRJ_Et_afterselection,          kP10Red);
+        styleHist(sig_h_leading_offlineLRJ_Et_afterEtAndMassselection, kP10Green);
         styleHist(sig_h_subleading_offlineLRJ_Et_beforeselection,         kBlack);
-        styleHist(sig_h_subleading_offlineLRJ_Et_afterEtselection,        kBlue+1);
-        styleHist(sig_h_subleading_offlineLRJ_Et_afterselection,          kRed+1);
-        styleHist(sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection, kGreen+2);
+        styleHist(sig_h_subleading_offlineLRJ_Et_afterEtselection,        kP10Blue);
+        styleHist(sig_h_subleading_offlineLRJ_Et_afterselection,          kP10Red);
+        styleHist(sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection, kP10Green);
 
-        styleRatio(sig_ratio_subjet,         kRed+1,   20);
-        styleRatio(sig_ratio_leadEt,         kBlue+1,  24);
-        styleRatio(sig_ratio_EtAndMass,      kGreen+2, 21);
-        styleRatio(sig_ratio_subl_subjet,    kRed+1,   20);
-        styleRatio(sig_ratio_subl_leadEt,    kBlue+1,  24);
-        styleRatio(sig_ratio_subl_EtAndMass, kGreen+2, 21);
+        styleRatio(sig_ratio_subjet,         kP10Red,   20);
+        styleRatio(sig_ratio_leadEt,         kP10Blue,  24);
+        styleRatio(sig_ratio_EtAndMass,      kP10Green, 21);
+        styleRatio(sig_ratio_subl_subjet,    kP10Red,   20);
+        styleRatio(sig_ratio_subl_leadEt,    kP10Blue,  24);
+        styleRatio(sig_ratio_subl_EtAndMass, kP10Green, 21);
 
         std::cout << "test 8.1" << "\n";
 
@@ -11863,8 +12599,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                         << ", rate = " << global6.bestRate_cat[c] << " Hz\n";
             }
 
-            global6.gRate_vsEff_combined->SetMarkerColor(kGreen+2);
-            global6.gRate_vsEff_combined->SetLineColor(kGreen+2);
+            global6.gRate_vsEff_combined->SetMarkerColor(kP10Green);
+            global6.gRate_vsEff_combined->SetLineColor(kP10Green);
             global6.gRate_vsEff_combined->SetMarkerStyle(22);  // filled triangle
 
             subjetBased_ET_OR_4thLeadConeJet_Scan_RatesVsEff_vec.push_back(global6.gRate_vsEff_combined);
@@ -11898,7 +12634,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
             leg_SubjetSelectionOverlay->Draw();
 
-            c_overlay_subjetbased->SaveAs(rateVsEffFileDir + "rate_vs_eff_SubjetBasedSelectionOverlay.pdf");
+            c_overlay_subjetbased->cd(); DrawATLASLabel(); c_overlay_subjetbased->SaveAs(rateVsEffFileDir + "rate_vs_eff_SubjetBasedSelectionOverlay.pdf");
 
             // Standalone ROC canvas: 5-cat OR 4th cone jet
             {
@@ -11929,7 +12665,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                             "5-cat subjet E_{T} OR 4th lead. cone jet E_{T}", "p");
             leg_6cat->Draw();
 
-            c_roc_6cat->SaveAs(rateVsEffFileDir + "rate_vs_eff_combined_5selections_OR_4thCone_EtOnly.pdf");
+            c_roc_6cat->cd(); DrawATLASLabel(); c_roc_6cat->SaveAs(rateVsEffFileDir + "rate_vs_eff_combined_5selections_OR_4thCone_EtOnly.pdf");
             }
 
             // Et-only combined scan: 5-cat OR 4th cone jet with proper overlap subtraction.
@@ -11989,8 +12725,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                         << ", rate = "    << global6_overlapSub.bestRate_cat[c] << " Hz\n";
             }
 
-            global6_overlapSub.gRate_vsEff_combined->SetMarkerColor(kOrange+7);
-            global6_overlapSub.gRate_vsEff_combined->SetLineColor(kOrange+7);
+            global6_overlapSub.gRate_vsEff_combined->SetMarkerColor(kP10Orange);
+            global6_overlapSub.gRate_vsEff_combined->SetLineColor(kP10Orange);
             global6_overlapSub.gRate_vsEff_combined->SetMarkerStyle(23);  // inverted filled triangle
 
             // Overlay: additive-approx OR vs. overlap-subtracted OR vs. 5-cat only
@@ -12028,7 +12764,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                             "5-cat subjet E_{T} only", "p");
             leg_cmp->Draw();
 
-            c_roc_6cat_cmp->SaveAs(rateVsEffFileDir + "rate_vs_eff_5cat_OR_4thCone_overlapSubtracted_comparison.pdf");
+            c_roc_6cat_cmp->cd(); DrawATLASLabel(); c_roc_6cat_cmp->SaveAs(rateVsEffFileDir + "rate_vs_eff_5cat_OR_4thCone_overlapSubtracted_comparison.pdf");
             }
 
             // ---- Leading LRJ OR 4th leading cone jet (2-way OR with overlap subtraction) ----
@@ -12049,8 +12785,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
             // Style the OR curve
             auto* gOR_leadCone = outOR_leadCone.gRate_vsEff;
-            gOR_leadCone->SetMarkerColor(kMagenta+1);
-            gOR_leadCone->SetLineColor(kMagenta+1);
+            gOR_leadCone->SetMarkerColor(kP10Violet);
+            gOR_leadCone->SetLineColor(kP10Violet);
             gOR_leadCone->SetMarkerStyle(33);  // filled diamond
             gOR_leadCone->SetMarkerSize(1.3);
             gOR_leadCone->SetLineWidth(2);
@@ -12062,20 +12798,20 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             out.gRate_vsEff->SetMarkerSize(0.9);
             out.gRate_vsEff->SetLineWidth(2);
 
-            out_4thLeadCone.gRate_vsEff->SetMarkerColor(kOrange+7);
-            out_4thLeadCone.gRate_vsEff->SetLineColor(kOrange+7);
+            out_4thLeadCone.gRate_vsEff->SetMarkerColor(kP10Orange);
+            out_4thLeadCone.gRate_vsEff->SetLineColor(kP10Orange);
             out_4thLeadCone.gRate_vsEff->SetMarkerStyle(23);  // down triangle
             out_4thLeadCone.gRate_vsEff->SetMarkerSize(0.9);
             out_4thLeadCone.gRate_vsEff->SetLineWidth(2);
 
-            global5.gRate_vsEff_combined->SetMarkerColor(kBlue+1);
-            global5.gRate_vsEff_combined->SetLineColor(kBlue+1);
+            global5.gRate_vsEff_combined->SetMarkerColor(kP10Blue);
+            global5.gRate_vsEff_combined->SetLineColor(kP10Blue);
             global5.gRate_vsEff_combined->SetMarkerStyle(21);
             global5.gRate_vsEff_combined->SetMarkerSize(0.9);
             global5.gRate_vsEff_combined->SetLineWidth(2);
 
-            global6_overlapSub.gRate_vsEff_combined->SetMarkerColor(kGreen+2);
-            global6_overlapSub.gRate_vsEff_combined->SetLineColor(kGreen+2);
+            global6_overlapSub.gRate_vsEff_combined->SetMarkerColor(kP10Green);
+            global6_overlapSub.gRate_vsEff_combined->SetLineColor(kP10Green);
             global6_overlapSub.gRate_vsEff_combined->SetMarkerStyle(22);
             global6_overlapSub.gRate_vsEff_combined->SetMarkerSize(0.9);
             global6_overlapSub.gRate_vsEff_combined->SetLineWidth(2);
@@ -12117,7 +12853,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg_allSel->Draw();
 
             gPad->RedrawAxis();
-            c_allSel->SaveAs(rateVsEffFileDir + "rate_vs_eff_all_selections_overlay.pdf");
+            c_allSel->cd(); DrawATLASLabel(); c_allSel->SaveAs(rateVsEffFileDir + "rate_vs_eff_all_selections_overlay.pdf");
 
         } // end if (compute4thConeOR)
 
@@ -12157,7 +12893,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             sig_h_leading_LRJ_Et_Category5,
             sig_h_leading_LRJ_Et_Category6,
             sig_h_leading_LRJ_Et_Category7,
-            5.0e4,  // draw up to 50 kHz
+            1.0e5,  // draw/scan up to 100 kHz (subjet-based E_T cut input)
             1.0e4   // best-point constraint: 10 kHz
         );
 
@@ -12205,7 +12941,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gBest8->Draw("P SAME");
 
         // open multipage pdf + write page 1
-        c_combined8->Print(outPdf + "(");
+        c_combined8->cd(); DrawATLASLabel(); c_combined8->Print(outPdf + "(");
 
         // =======================
         // PAGE 2: TEXT ONLY (Legend-based, wraps nicely)
@@ -12283,7 +13019,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg8->Draw();
 
         // write page 2 + close pdf
-        c_text8->Print(outPdf + ")");
+        c_text8->cd(); DrawATLASLabel(); c_text8->Print(outPdf + ")");
 
         // =======================
         // OPTIONAL: overlay on your "standard Et" curve (same style as your 5-cat)
@@ -12299,12 +13035,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         subjetBased_ET_Scan_RatesVsEff_vec.push_back(global8.gRate_vsEff_combined);
 
-        global8.gRate_vsEff_combined->SetMarkerColor(kBlue+1);
-        global8.gRate_vsEff_combined->SetLineColor(kBlue+1);
+        global8.gRate_vsEff_combined->SetMarkerColor(kP10Blue);
+        global8.gRate_vsEff_combined->SetLineColor(kP10Blue);
         global8.gRate_vsEff_combined->SetMarkerStyle(20);
 
-        out.gRate_vsEff->SetMarkerColor(kRed+1);
-        out.gRate_vsEff->SetLineColor(kRed+1);
+        out.gRate_vsEff->SetMarkerColor(kP10Red);
+        out.gRate_vsEff->SetLineColor(kP10Red);
         out.gRate_vsEff->SetMarkerStyle(21);
 
         out.gRate_vsEff->SetMinimum(50.);
@@ -12323,7 +13059,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                                 "Standard E_{T} selection", "lp");
         leg_SubjetSelectionOverlay8->Draw();
 
-        c_overlay_subjetbased8->SaveAs(rateVsEffFileDir + "rate_vs_eff_SubjetBasedSelectionOverlay_8cats.pdf");
+        c_overlay_subjetbased8->cd(); DrawATLASLabel(); c_overlay_subjetbased8->SaveAs(rateVsEffFileDir + "rate_vs_eff_SubjetBasedSelectionOverlay_8cats.pdf");
         }
 
     }*/
@@ -12359,14 +13095,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogz();
     out2D_lead_tau21_ConesubjetProduct.hRate_vsThr_vsR->SetTitle(";Leading JetTagger LRJ E_{T} threshold [GeV]; Max #tau_{2,lead}/#tau_{1,lead} #times #tau_{2,subl.}/#tau_{1,subl.};Estimated Background Rate [Hz]");
     out2D_lead_tau21_ConesubjetProduct.hRate_vsThr_vsR->Draw("COLZ");
-    c1_leading2D_tau21_Cone_Product->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_tau21_leading_Cone_Product.pdf");
+    c1_leading2D_tau21_Cone_Product->cd(); DrawATLASLabel(); c1_leading2D_tau21_Cone_Product->SaveAs(rateVsEffFileDir + "surfaces_ETthr_vs_tau21_leading_Cone_Product.pdf");
 
     // Main plot: rate vs efficiency (all points from the 2D scan)
     auto c2_leading2D_tau21_Cone_Product = new TCanvas("c2_leading2D_tau21_Cone_Product","Rate vs Eff (2D scan, leading)",700,600);
     c2_leading2D_tau21_Cone_Product->SetLeftMargin(0.16); c2_leading2D_tau21_Cone_Product->SetBottomMargin(0.16); c2_leading2D_tau21_Cone_Product->SetTicks(1,1);
     c2_leading2D_tau21_Cone_Product->SetLogy();
     out2D_lead_tau21_ConesubjetProduct.gRate_vsEff_all->Draw("AP");   // A=axes, P=points
-    c2_leading2D_tau21_Cone_Product->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_tau21_leading_Cone_Product.pdf");
+    c2_leading2D_tau21_Cone_Product->cd(); DrawATLASLabel(); c2_leading2D_tau21_Cone_Product->SaveAs(rateVsEffFileDir + "rate_vs_eff_scan2D_tau21_leading_Cone_Product.pdf");
     
     // --- Canvas ---
     auto cLeadOverlay_Pmax = new TCanvas("cLeadOverlay_Pmax","Leading: 1D vs 2D Pmax Scan",700,600);
@@ -12381,8 +13117,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     gLead1D_tau21max_Cone_Product->SetMarkerStyle(20);
     gLead1D_tau21max_Cone_Product->SetMarkerSize(1.8);
-    gLead1D_tau21max_Cone_Product->SetMarkerColor(kRed+1);
-    gLead1D_tau21max_Cone_Product->SetLineColor(kRed+1);
+    gLead1D_tau21max_Cone_Product->SetMarkerColor(kP10Red);
+    gLead1D_tau21max_Cone_Product->SetLineColor(kP10Red);
     gLead1D_tau21max_Cone_Product->SetLineWidth(2);
 
     gLead2D_tau21max_Cone_Product->SetMarkerStyle(24);
@@ -12428,7 +13164,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     vline_2D->SetLineWidth(2);
     vline_2D->Draw("SAME");}
 
-    cLeadOverlay_tau21_Cone_leading_Product->SaveAs(rateVsEffFileDir + "overlay_leading_1D_vs_2D_tau21_Cone_scan_Product.pdf");*/
+    cLeadOverlay_tau21_Cone_leading_Product->cd(); DrawATLASLabel(); cLeadOverlay_tau21_Cone_leading_Product->SaveAs(rateVsEffFileDir + "overlay_leading_1D_vs_2D_tau21_Cone_scan_Product.pdf");*/
 
 
     //gSystem->RedirectOutput(0); // back to normal
@@ -12471,17 +13207,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_Psi_R->AddEntry(sig_h_LRJ_Et, "Signal", "l");
     leg_Psi_R->AddEntry(back_h_LRJ_Et, "Background", "l");
 
-    // Normalize both histograms, set sig=kRed / back=kBlue, overlay, save.
+    // Normalize both histograms, set sig=kP10Red / back=kP10Blue, overlay, save.
     // Captures leg and modifiedOutputFileDir from enclosing scope.
     auto drawSigBack = [&](TH1* sig, TH1* back, TCanvas& can, const TString& fname) {
         if (sig ->Integral() > 0) sig ->Scale(1.0 / sig ->Integral());
         if (back->Integral() > 0) back->Scale(1.0 / back->Integral());
-        sig ->SetLineColor(kRed);
-        back->SetLineColor(kBlue);
+        sig ->SetLineColor(kP10Red);
+        back->SetLineColor(kP10Blue);
         back->Draw("HIST");
         sig ->Draw("HIST SAME");
         leg->Draw();
-        can.SaveAs(modifiedOutputFileDir + fname);
+        can.cd(); DrawATLASLabel(); can.SaveAs(modifiedOutputFileDir + fname);
     };
 
     TLegend *legEffb = new TLegend(0.8,0.2,0.95,0.35);
@@ -12533,25 +13269,25 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     //std::cout << "Signal mean: " << sig_h_LRJ_Et->GetMean() << " and background mean: " << back_h_LRJ_Et->GetMean() << "\n";
     sig_h_LRJ_Et->Scale(1.0 / sig_h_LRJ_Et->Integral());
     back_h_LRJ_Et->Scale(1.0 / back_h_LRJ_Et->Integral());
-    sig_h_LRJ_Et->SetLineColor(kRed);
-    back_h_LRJ_Et->SetLineColor(kBlue);
+    sig_h_LRJ_Et->SetLineColor(kP10Red);
+    back_h_LRJ_Et->SetLineColor(kP10Blue);
     sig_h_LRJ_Et->Draw("HIST");
     back_h_LRJ_Et->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LRJ_Et.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LRJ_Et.pdf");
     //gStyle->SetOptTitle(0); // disable title
 
     sig_h_leading_LRJ_psi_R->Scale(1.0 / sig_h_leading_LRJ_psi_R->Integral());
     back_h_leading_LRJ_psi_R->Scale(1.0 / back_h_leading_LRJ_psi_R->Integral());
-    sig_h_leading_LRJ_psi_R->SetLineColor(kRed);
-    back_h_leading_LRJ_psi_R->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R->SetLineColor(kP10Red);
+    back_h_leading_LRJ_psi_R->SetLineColor(kP10Blue);
     
     back_h_leading_LRJ_psi_R->Draw("HIST");
     sig_h_leading_LRJ_psi_R->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R_JetTagger.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R_JetTagger.pdf");
 
     TLegend *legBackPsi_R_MassOverlay_Back = new TLegend(0.6,0.8,0.85,0.95);
     legBackPsi_R_MassOverlay_Back->SetTextSize(0.025);
@@ -12563,9 +13299,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     back_h_leading_LRJ_psi_R->SetLineStyle(kSolid);
     back_h_leading_LRJ_psi_R->SetLineStyle(kBlack);
     back_h_leading_LRJ_psi_R_MassWindow->SetLineStyle(kDashed);
-    back_h_leading_LRJ_psi_R_MassWindow->SetLineColor(kRed);
+    back_h_leading_LRJ_psi_R_MassWindow->SetLineColor(kP10Red);
     back_h_leading_LRJ_psi_R_OutsideMassWindow->SetLineStyle(kDashed);
-    back_h_leading_LRJ_psi_R_OutsideMassWindow->SetLineColor(kBlue);
+    back_h_leading_LRJ_psi_R_OutsideMassWindow->SetLineColor(kP10Blue);
 
     back_h_leading_LRJ_psi_R->Draw("HIST");
     back_h_leading_LRJ_psi_R_MassWindow->Draw("HIST SAME");
@@ -12574,7 +13310,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legBackPsi_R_MassOverlay_Back->AddEntry(back_h_leading_LRJ_psi_R_MassWindow, "m_{Lead. Offline} >= 50 GeV", "l");
     legBackPsi_R_MassOverlay_Back->AddEntry(back_h_leading_LRJ_psi_R_OutsideMassWindow, "m_{Lead. Offline} < 50 GeV", "l");
     legBackPsi_R_MassOverlay_Back->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R_JetTagger_Back_MassOverlay.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R_JetTagger_Back_MassOverlay.pdf");
 
     TLegend *legBackPsi_R_MassOverlay_Sig = new TLegend(0.7,0.8,0.85,0.95);
     legBackPsi_R_MassOverlay_Sig->SetTextSize(0.025);
@@ -12585,9 +13321,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     
     sig_h_leading_LRJ_psi_R->SetLineStyle(kSolid);
     sig_h_leading_LRJ_psi_R->SetLineStyle(kBlack);
-    sig_h_leading_LRJ_psi_R_MassWindow->SetLineColor(kRed);
+    sig_h_leading_LRJ_psi_R_MassWindow->SetLineColor(kP10Red);
     sig_h_leading_LRJ_psi_R_MassWindow->SetLineStyle(kDashed);
-    sig_h_leading_LRJ_psi_R_OutsideMassWindow->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R_OutsideMassWindow->SetLineColor(kP10Blue);
     sig_h_leading_LRJ_psi_R_OutsideMassWindow->SetLineStyle(kDashed);
 
     sig_h_leading_LRJ_psi_R->Draw("HIST");
@@ -12597,134 +13333,134 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legBackPsi_R_MassOverlay_Sig->AddEntry(sig_h_leading_LRJ_psi_R_MassWindow, "m_{Lead. Offline} in [100, 150] GeV", "l");
     legBackPsi_R_MassOverlay_Sig->AddEntry(sig_h_leading_LRJ_psi_R_OutsideMassWindow, "m_{Lead. Offline} outside [100, 150] GeV", "l");
     legBackPsi_R_MassOverlay_Sig->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R_JetTagger_Signal_MassOverlay.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R_JetTagger_Signal_MassOverlay.pdf");
     
     //sigOfflineLeadingLRJMassvsPsi_R->Draw("COLZ");
     //sigOfflineLeadingLRJMassvsPsi_R->Scale(1.0 / sigOfflineLeadingLRJMassvsPsi_R->Integral());
-    //c.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJMassvsPsi_R.pdf");
+    //c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJMassvsPsi_R.pdf");
 
     sig_h_LRJ_psi_R_12->Scale(1.0 / sig_h_LRJ_psi_R_12->Integral());
     back_h_LRJ_psi_R_12->Scale(1.0 / back_h_LRJ_psi_R_12->Integral());
-    sig_h_LRJ_psi_R_12->SetLineColor(kRed);
-    back_h_LRJ_psi_R_12->SetLineColor(kBlue);
+    sig_h_LRJ_psi_R_12->SetLineColor(kP10Red);
+    back_h_LRJ_psi_R_12->SetLineColor(kP10Blue);
     
     back_h_LRJ_psi_R_12->Draw("HIST");
     sig_h_LRJ_psi_R_12->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LRJ_psi_R_Leading_over_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LRJ_psi_R_Leading_over_Subleading.pdf");
 
     sig_h_LRJ_psi_R2_12->Scale(1.0 / sig_h_LRJ_psi_R2_12->Integral());
     back_h_LRJ_psi_R2_12->Scale(1.0 / back_h_LRJ_psi_R2_12->Integral());
-    sig_h_LRJ_psi_R2_12->SetLineColor(kRed);
-    back_h_LRJ_psi_R2_12->SetLineColor(kBlue);
+    sig_h_LRJ_psi_R2_12->SetLineColor(kP10Red);
+    back_h_LRJ_psi_R2_12->SetLineColor(kP10Blue);
     
     back_h_LRJ_psi_R2_12->Draw("HIST");
     sig_h_LRJ_psi_R2_12->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LRJ_psi_R2_Leading_over_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LRJ_psi_R2_Leading_over_Subleading.pdf");
 
     TCanvas cLogY2;
     cLogY2.SetLogy();
     sig_h_LRJ_psi_R_squared->Scale(1.0 / sig_h_LRJ_psi_R_squared->Integral());
     back_h_LRJ_psi_R_squared->Scale(1.0 / back_h_LRJ_psi_R_squared->Integral());
-    sig_h_LRJ_psi_R_squared->SetLineColor(kRed);
-    back_h_LRJ_psi_R_squared->SetLineColor(kBlue);
+    sig_h_LRJ_psi_R_squared->SetLineColor(kP10Red);
+    back_h_LRJ_psi_R_squared->SetLineColor(kP10Blue);
     
     back_h_LRJ_psi_R_squared->Draw("HIST");
     sig_h_LRJ_psi_R_squared->Draw("HIST SAME");
     
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R_squared_JetTagger.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R_squared_JetTagger.pdf");
 
     
     sig_h_LRJ_psi_R2_squared->Scale(1.0 / sig_h_LRJ_psi_R2_squared->Integral());
     back_h_LRJ_psi_R2_squared->Scale(1.0 / back_h_LRJ_psi_R2_squared->Integral());
-    sig_h_LRJ_psi_R2_squared->SetLineColor(kRed);
-    back_h_LRJ_psi_R2_squared->SetLineColor(kBlue);
+    sig_h_LRJ_psi_R2_squared->SetLineColor(kP10Red);
+    back_h_LRJ_psi_R2_squared->SetLineColor(kP10Blue);
     sig_h_LRJ_psi_R2_squared->Draw("HIST");
     back_h_LRJ_psi_R2_squared->Draw("HIST SAME");
     
     
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R2_squared_JetTagger.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "leading_LRJ_psi_R2_squared_JetTagger.pdf");
 
     c.cd();
 
     sig_h_subleading_LRJ_psi_R->Scale(1.0 / sig_h_subleading_LRJ_psi_R->Integral());
     back_h_subleading_LRJ_psi_R->Scale(1.0 / back_h_subleading_LRJ_psi_R->Integral());
-    sig_h_subleading_LRJ_psi_R->SetLineColor(kRed);
-    back_h_subleading_LRJ_psi_R->SetLineColor(kBlue);
+    sig_h_subleading_LRJ_psi_R->SetLineColor(kP10Red);
+    back_h_subleading_LRJ_psi_R->SetLineColor(kP10Blue);
     back_h_subleading_LRJ_psi_R->Draw("HIST");
     sig_h_subleading_LRJ_psi_R->Draw("HIST SAME");
     
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "subleading_LRJ_psi_R_JetTagger.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "subleading_LRJ_psi_R_JetTagger.pdf");
 
     sig_h_LRJ1_deltaEt_digitized_double->Scale(1.0 / sig_h_LRJ1_deltaEt_digitized_double->Integral());
     back_h_LRJ1_deltaEt_digitized_double->Scale(1.0 / back_h_LRJ1_deltaEt_digitized_double->Integral());
-    sig_h_LRJ1_deltaEt_digitized_double->SetLineColor(kRed);
-    back_h_LRJ1_deltaEt_digitized_double->SetLineColor(kBlue);
+    sig_h_LRJ1_deltaEt_digitized_double->SetLineColor(kP10Red);
+    back_h_LRJ1_deltaEt_digitized_double->SetLineColor(kP10Blue);
     sig_h_LRJ1_deltaEt_digitized_double->Draw("HIST");
     back_h_LRJ1_deltaEt_digitized_double->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LRJ1_JetTagger_deltaEt_digitized_floatingpoint.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LRJ1_JetTagger_deltaEt_digitized_floatingpoint.pdf");
 
     sig_h_LRJ2_deltaEt_digitized_double->Scale(1.0 / sig_h_LRJ2_deltaEt_digitized_double->Integral());
     back_h_LRJ2_deltaEt_digitized_double->Scale(1.0 / back_h_LRJ2_deltaEt_digitized_double->Integral());
-    sig_h_LRJ2_deltaEt_digitized_double->SetLineColor(kRed);
-    back_h_LRJ2_deltaEt_digitized_double->SetLineColor(kBlue);
+    sig_h_LRJ2_deltaEt_digitized_double->SetLineColor(kP10Red);
+    back_h_LRJ2_deltaEt_digitized_double->SetLineColor(kP10Blue);
     sig_h_LRJ2_deltaEt_digitized_double->Draw("HIST");
     back_h_LRJ2_deltaEt_digitized_double->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LRJ2_JetTagger_deltaEt_digitized_floatingpoint.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LRJ2_JetTagger_deltaEt_digitized_floatingpoint.pdf");
 
     sig_h_Mjj->Scale(1.0 / sig_h_Mjj->Integral());
     back_h_Mjj->Scale(1.0 / back_h_Mjj->Integral());
-    sig_h_Mjj->SetLineColor(kRed);
-    back_h_Mjj->SetLineColor(kBlue);
+    sig_h_Mjj->SetLineColor(kP10Red);
+    back_h_Mjj->SetLineColor(kP10Blue);
     back_h_Mjj->Draw("HIST");
     sig_h_Mjj->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "Mjj.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "Mjj.pdf");
 
-    sig_h_LeadingOfflineLRJ_SubjetMultiplicity->SetLineColor(kRed);
-    back_h_LeadingOfflineLRJ_SubjetMultiplicity->SetLineColor(kBlue);
+    sig_h_LeadingOfflineLRJ_SubjetMultiplicity->SetLineColor(kP10Red);
+    back_h_LeadingOfflineLRJ_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_LeadingOfflineLRJ_SubjetMultiplicity->Scale(1.0 / back_h_LeadingOfflineLRJ_SubjetMultiplicity->Integral());
     back_h_LeadingOfflineLRJ_SubjetMultiplicity->Draw("HIST");
     sig_h_LeadingOfflineLRJ_SubjetMultiplicity->Scale(1.0 / sig_h_LeadingOfflineLRJ_SubjetMultiplicity->Integral());
     sig_h_LeadingOfflineLRJ_SubjetMultiplicity->Draw("HIST SAME");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LeadingOfflineLRJ_SubjetMultiplicity.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LeadingOfflineLRJ_SubjetMultiplicity.pdf");
 
     
-    sig_h_SubleadingOfflineLRJ_SubjetMultiplicity->SetLineColor(kRed);
-    back_h_SubleadingOfflineLRJ_SubjetMultiplicity->SetLineColor(kBlue);
+    sig_h_SubleadingOfflineLRJ_SubjetMultiplicity->SetLineColor(kP10Red);
+    back_h_SubleadingOfflineLRJ_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_SubleadingOfflineLRJ_SubjetMultiplicity->Scale(1.0 / back_h_SubleadingOfflineLRJ_SubjetMultiplicity->Integral());
     back_h_SubleadingOfflineLRJ_SubjetMultiplicity->Draw("HIST");
     sig_h_SubleadingOfflineLRJ_SubjetMultiplicity->Scale(1.0 / sig_h_SubleadingOfflineLRJ_SubjetMultiplicity->Integral());
     sig_h_SubleadingOfflineLRJ_SubjetMultiplicity->Draw("HIST SAME");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "SubleadingOfflineLRJ_SubjetMultiplicity.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "SubleadingOfflineLRJ_SubjetMultiplicity.pdf");
 
-    sig_h_JetTagger_Leading_MergedIO_Multiplicity->SetLineColor(kRed);
-    back_h_JetTagger_Leading_MergedIO_Multiplicity->SetLineColor(kBlue);
+    sig_h_JetTagger_Leading_MergedIO_Multiplicity->SetLineColor(kP10Red);
+    back_h_JetTagger_Leading_MergedIO_Multiplicity->SetLineColor(kP10Blue);
     back_h_JetTagger_Leading_MergedIO_Multiplicity->Scale(1.0 / back_h_JetTagger_Leading_MergedIO_Multiplicity->Integral());
     sig_h_JetTagger_Leading_MergedIO_Multiplicity->Scale(1.0 / sig_h_JetTagger_Leading_MergedIO_Multiplicity->Integral());
     sig_h_JetTagger_Leading_MergedIO_Multiplicity->Draw("HIST");
     back_h_JetTagger_Leading_MergedIO_Multiplicity->Draw("HIST SAME");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "JetTagger_Leading_MergedIO_Multiplicity.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "JetTagger_Leading_MergedIO_Multiplicity.pdf");
 
-    sig_h_JetTagger_CellTowerSK_Multiplicity->SetLineColor(kRed);
-    back_h_JetTagger_CellTowerSK_Multiplicity->SetLineColor(kBlue);
-    sig_h_JetTagger_CellTowerEtaSK_Multiplicity->SetLineColor(kMagenta);
-    back_h_JetTagger_CellTowerEtaSK_Multiplicity->SetLineColor(kCyan+1);
+    sig_h_JetTagger_CellTowerSK_Multiplicity->SetLineColor(kP10Red);
+    back_h_JetTagger_CellTowerSK_Multiplicity->SetLineColor(kP10Blue);
+    sig_h_JetTagger_CellTowerEtaSK_Multiplicity->SetLineColor(kP10Violet);
+    back_h_JetTagger_CellTowerEtaSK_Multiplicity->SetLineColor(kP10Cyan);
     sig_h_JetTagger_CellTowerEtaSK_Multiplicity->SetLineStyle(2);
     back_h_JetTagger_CellTowerEtaSK_Multiplicity->SetLineStyle(2);
     back_h_JetTagger_CellTowerSK_Multiplicity->Scale(1.0 / back_h_JetTagger_CellTowerSK_Multiplicity->Integral());
@@ -12736,47 +13472,47 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_JetTagger_CellTowerEtaSK_Multiplicity->Draw("HIST SAME");
     back_h_JetTagger_CellTowerEtaSK_Multiplicity->Draw("HIST SAME");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "JetTagger_CellTowersSK_Multiplicity.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "JetTagger_CellTowersSK_Multiplicity.pdf");
 
-    sig_h_JetTagger_Subleading_MergedIO_Multiplicity->SetLineColor(kRed);
-    back_h_JetTagger_Subleading_MergedIO_Multiplicity->SetLineColor(kBlue);
+    sig_h_JetTagger_Subleading_MergedIO_Multiplicity->SetLineColor(kP10Red);
+    back_h_JetTagger_Subleading_MergedIO_Multiplicity->SetLineColor(kP10Blue);
     back_h_JetTagger_Subleading_MergedIO_Multiplicity->Scale(1.0 / back_h_JetTagger_Subleading_MergedIO_Multiplicity->Integral());
     back_h_JetTagger_Subleading_MergedIO_Multiplicity->Draw("HIST");
     sig_h_JetTagger_Subleading_MergedIO_Multiplicity->Scale(1.0 / sig_h_JetTagger_Subleading_MergedIO_Multiplicity->Integral());
     sig_h_JetTagger_Subleading_MergedIO_Multiplicity->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "JetTagger_Subleading_MergedIO_Multiplicity.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "JetTagger_Subleading_MergedIO_Multiplicity.pdf");
 
     TCanvas cLogYLogX;
     cLogYLogX.SetLogy();
     cLogYLogX.SetLogx();
     cLogYLogX.cd();
 
-    sig_h_JetTagger_Leading_MergedIO_Et->SetLineColor(kRed);
-    back_h_JetTagger_Leading_MergedIO_Et->SetLineColor(kBlue);
+    sig_h_JetTagger_Leading_MergedIO_Et->SetLineColor(kP10Red);
+    back_h_JetTagger_Leading_MergedIO_Et->SetLineColor(kP10Blue);
     back_h_JetTagger_Leading_MergedIO_Et->Scale(1.0 / sumOfBackgroundEventWeight);
     back_h_JetTagger_Leading_MergedIO_Et->Draw("HIST");
     sig_h_JetTagger_Leading_MergedIO_Et->Scale(1.0 / num_processed_events_signal);
     sig_h_JetTagger_Leading_MergedIO_Et->Draw("HIST SAME");
     leg->Draw();
-    cLogYLogX.SaveAs(modifiedOutputFileDir + "JetTagger_Leading_MergedIO_Et.pdf");
+    cLogYLogX.cd(); DrawATLASLabel(); cLogYLogX.SaveAs(modifiedOutputFileDir + "JetTagger_Leading_MergedIO_Et.pdf");
 
-    sig_h_JetTagger_CellsTowersEt->SetLineColor(kRed);
-    back_h_JetTagger_CellsTowersEt->SetLineColor(kBlue);
+    sig_h_JetTagger_CellsTowersEt->SetLineColor(kP10Red);
+    back_h_JetTagger_CellsTowersEt->SetLineColor(kP10Blue);
     sig_h_JetTagger_CellsTowersEt->Scale(1.0 / num_processed_events_signal);
     back_h_JetTagger_CellsTowersEt->Scale(1.0 / sumOfBackgroundEventWeight);
     sig_h_JetTagger_CellsTowersEt->Draw("HIST");
     back_h_JetTagger_CellsTowersEt->Draw("HIST SAME");
     leg->Draw();
-    cLogYLogX.SaveAs(modifiedOutputFileDir + "cellsTowersEtByEvent.pdf");
+    cLogYLogX.cd(); DrawATLASLabel(); cLogYLogX.SaveAs(modifiedOutputFileDir + "cellsTowersEtByEvent.pdf");
 
-    sig_h_JetTagger_CellsTowersSKEt->SetLineColor(kRed);
+    sig_h_JetTagger_CellsTowersSKEt->SetLineColor(kP10Red);
     sig_h_JetTagger_CellsTowersSKEt->SetLineStyle(2);
-    back_h_JetTagger_CellsTowersSKEt->SetLineColor(kBlue);
+    back_h_JetTagger_CellsTowersSKEt->SetLineColor(kP10Blue);
     back_h_JetTagger_CellsTowersSKEt->SetLineStyle(2);
-    sig_h_JetTagger_CellsTowersEtaSKEt->SetLineColor(kMagenta);
-    back_h_JetTagger_CellsTowersEtaSKEt->SetLineColor(kCyan+1);
+    sig_h_JetTagger_CellsTowersEtaSKEt->SetLineColor(kP10Violet);
+    back_h_JetTagger_CellsTowersEtaSKEt->SetLineColor(kP10Cyan);
     sig_h_JetTagger_CellsTowersSKEt->Scale(1.0 / num_processed_events_signal);
     back_h_JetTagger_CellsTowersSKEt->Scale(1.0 / sumOfBackgroundEventWeight);
     sig_h_JetTagger_CellsTowersEtaSKEt->Scale(1.0 / num_processed_events_signal);
@@ -12788,42 +13524,42 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_JetTagger_CellsTowersEtaSKEt->Draw("HIST SAME");
     back_h_JetTagger_CellsTowersEtaSKEt->Draw("HIST SAME");
     leg->Draw();
-    cLogYLogX.SaveAs(modifiedOutputFileDir + "cellsTowersEtByEvent_SKComparison.pdf");
+    cLogYLogX.cd(); DrawATLASLabel(); cLogYLogX.SaveAs(modifiedOutputFileDir + "cellsTowersEtByEvent_SKComparison.pdf");
 
     TCanvas cLogYjFEX;
     cLogYjFEX.SetLogy();
     cLogYjFEX.cd();
 
-    sig_h_jFEX_Et->SetLineColor(kRed);
-    back_h_jFEX_Et->SetLineColor(kBlue);
+    sig_h_jFEX_Et->SetLineColor(kP10Red);
+    back_h_jFEX_Et->SetLineColor(kP10Blue);
     sig_h_jFEX_Et->Scale(1.0 / num_processed_events_signal);
     back_h_jFEX_Et->Scale(1.0 / sumOfBackgroundEventWeight);
     sig_h_jFEX_Et->Draw("HIST");
     back_h_jFEX_Et->Draw("HIST SAME");
     leg->Draw();
-    cLogYjFEX.SaveAs(modifiedOutputFileDir + "jFEX_Et_ByEvent.pdf");
+    cLogYjFEX.cd(); DrawATLASLabel(); cLogYjFEX.SaveAs(modifiedOutputFileDir + "jFEX_Et_ByEvent.pdf");
 
-    sig_h_jFEX_Mult->SetLineColor(kRed);
-    back_h_jFEX_Mult->SetLineColor(kBlue);
+    sig_h_jFEX_Mult->SetLineColor(kP10Red);
+    back_h_jFEX_Mult->SetLineColor(kP10Blue);
     sig_h_jFEX_Mult->Scale(1.0 / num_processed_events_signal);
     back_h_jFEX_Mult->Scale(1.0 / sumOfBackgroundEventWeight);
     sig_h_jFEX_Mult->Draw("HIST");
     back_h_jFEX_Mult->Draw("HIST SAME");
     leg->Draw();
-    cLogYjFEX.SaveAs(modifiedOutputFileDir + "jFEX_Mult.pdf");
+    cLogYjFEX.cd(); DrawATLASLabel(); cLogYjFEX.SaveAs(modifiedOutputFileDir + "jFEX_Mult.pdf");
 
     // jFEX AOD vs Resim overlay: Et per jet
     {
         sig_h_jFEX_Sim_Et->Scale(1.0 / num_processed_events_signal);
         back_h_jFEX_Sim_Et->Scale(1.0 / sumOfBackgroundEventWeight);
 
-        sig_h_jFEX_Et->SetLineColor(kRed);
+        sig_h_jFEX_Et->SetLineColor(kP10Red);
         sig_h_jFEX_Et->SetLineStyle(1);
-        back_h_jFEX_Et->SetLineColor(kBlue);
+        back_h_jFEX_Et->SetLineColor(kP10Blue);
         back_h_jFEX_Et->SetLineStyle(1);
-        sig_h_jFEX_Sim_Et->SetLineColor(kRed);
+        sig_h_jFEX_Sim_Et->SetLineColor(kP10Red);
         sig_h_jFEX_Sim_Et->SetLineStyle(2);
-        back_h_jFEX_Sim_Et->SetLineColor(kBlue);
+        back_h_jFEX_Sim_Et->SetLineColor(kP10Blue);
         back_h_jFEX_Sim_Et->SetLineStyle(2);
         sig_h_jFEX_Sim_Et->SetLineWidth(2);
         back_h_jFEX_Sim_Et->SetLineWidth(2);
@@ -12841,7 +13577,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_h_jFEX_Sim_Et->Draw("HIST SAME");
         back_h_jFEX_Sim_Et->Draw("HIST SAME");
         legJFEXEt.Draw();
-        cLogYjFEX.SaveAs(modifiedOutputFileDir + "jFEX_Et_ByEvent_AODvsResim.pdf");
+        cLogYjFEX.cd(); DrawATLASLabel(); cLogYjFEX.SaveAs(modifiedOutputFileDir + "jFEX_Et_ByEvent_AODvsResim.pdf");
     }
 
     // jFEX AOD vs Resim overlay: multiplicity
@@ -12849,13 +13585,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_h_jFEX_Sim_Mult->Scale(1.0 / num_processed_events_signal);
         back_h_jFEX_Sim_Mult->Scale(1.0 / sumOfBackgroundEventWeight);
 
-        sig_h_jFEX_Mult->SetLineColor(kRed);
+        sig_h_jFEX_Mult->SetLineColor(kP10Red);
         sig_h_jFEX_Mult->SetLineStyle(1);
-        back_h_jFEX_Mult->SetLineColor(kBlue);
+        back_h_jFEX_Mult->SetLineColor(kP10Blue);
         back_h_jFEX_Mult->SetLineStyle(1);
-        sig_h_jFEX_Sim_Mult->SetLineColor(kRed);
+        sig_h_jFEX_Sim_Mult->SetLineColor(kP10Red);
         sig_h_jFEX_Sim_Mult->SetLineStyle(2);
-        back_h_jFEX_Sim_Mult->SetLineColor(kBlue);
+        back_h_jFEX_Sim_Mult->SetLineColor(kP10Blue);
         back_h_jFEX_Sim_Mult->SetLineStyle(2);
         sig_h_jFEX_Sim_Mult->SetLineWidth(2);
         back_h_jFEX_Sim_Mult->SetLineWidth(2);
@@ -12873,34 +13609,34 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_h_jFEX_Sim_Mult->Draw("HIST SAME");
         back_h_jFEX_Sim_Mult->Draw("HIST SAME");
         legJFEXMult.Draw();
-        cLogYjFEX.SaveAs(modifiedOutputFileDir + "jFEX_Mult_AODvsResim.pdf");
+        cLogYjFEX.cd(); DrawATLASLabel(); cLogYjFEX.SaveAs(modifiedOutputFileDir + "jFEX_Mult_AODvsResim.pdf");
     }
 
-    sig_h_gFEX_Et->SetLineColor(kRed);
-    back_h_gFEX_Et->SetLineColor(kBlue);
+    sig_h_gFEX_Et->SetLineColor(kP10Red);
+    back_h_gFEX_Et->SetLineColor(kP10Blue);
     sig_h_gFEX_Et->Scale(1.0 / num_processed_events_signal);
     back_h_gFEX_Et->Scale(1.0 / sumOfBackgroundEventWeight);
     sig_h_gFEX_Et->Draw("HIST");
     back_h_gFEX_Et->Draw("HIST SAME");
     leg->Draw();
-    cLogYjFEX.SaveAs(modifiedOutputFileDir + "gFEX_Et_ByEvent.pdf");
+    cLogYjFEX.cd(); DrawATLASLabel(); cLogYjFEX.SaveAs(modifiedOutputFileDir + "gFEX_Et_ByEvent.pdf");
     
-    sig_h_gFEX_Mult->SetLineColor(kRed);
-    back_h_gFEX_Mult->SetLineColor(kBlue);
+    sig_h_gFEX_Mult->SetLineColor(kP10Red);
+    back_h_gFEX_Mult->SetLineColor(kP10Blue);
     sig_h_gFEX_Mult->Scale(1.0 / num_processed_events_signal);
     back_h_gFEX_Mult->Scale(1.0 / sumOfBackgroundEventWeight);
     sig_h_gFEX_Mult->Draw("HIST");
     back_h_gFEX_Mult->Draw("HIST SAME");
     leg->Draw();
-    cLogYjFEX.SaveAs(modifiedOutputFileDir + "gFEX_Mult.pdf");
+    cLogYjFEX.cd(); DrawATLASLabel(); cLogYjFEX.SaveAs(modifiedOutputFileDir + "gFEX_Mult.pdf");
 
-    sig_h_inTimeAntiKt4Truth_PileupJet_Mult->SetLineColor(kRed);
+    sig_h_inTimeAntiKt4Truth_PileupJet_Mult->SetLineColor(kP10Red);
     sig_h_inTimeAntiKt4Truth_PileupJet_Mult->SetLineStyle(1);
-    back_h_inTimeAntiKt4Truth_PileupJet_Mult->SetLineColor(kBlue);
+    back_h_inTimeAntiKt4Truth_PileupJet_Mult->SetLineColor(kP10Blue);
     back_h_inTimeAntiKt4Truth_PileupJet_Mult->SetLineStyle(1);
-    sig_h_outOfTimeAntiKt4Truth_PileupJet_Mult->SetLineColor(kRed);
+    sig_h_outOfTimeAntiKt4Truth_PileupJet_Mult->SetLineColor(kP10Red);
     sig_h_outOfTimeAntiKt4Truth_PileupJet_Mult->SetLineStyle(2);
-    back_h_outOfTimeAntiKt4Truth_PileupJet_Mult->SetLineColor(kBlue);
+    back_h_outOfTimeAntiKt4Truth_PileupJet_Mult->SetLineColor(kP10Blue);
     back_h_outOfTimeAntiKt4Truth_PileupJet_Mult->SetLineStyle(2);
     sig_h_inTimeAntiKt4Truth_PileupJet_Mult->Scale(1.0 / num_processed_events_signal);
     back_h_inTimeAntiKt4Truth_PileupJet_Mult->Scale(1.0 / sumOfBackgroundEventWeight);
@@ -12922,164 +13658,164 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         legPU->AddEntry(sig_h_outOfTimeAntiKt4Truth_PileupJet_Mult, "Signal out-of-time", "l");
         legPU->AddEntry(back_h_outOfTimeAntiKt4Truth_PileupJet_Mult, "Background out-of-time", "l");
         legPU->Draw();
-        cLogYjFEX.SaveAs(modifiedOutputFileDir + "inOutOfTimeAntiKt4Truth_PileupJet_Mult.pdf");
+        cLogYjFEX.cd(); DrawATLASLabel(); cLogYjFEX.SaveAs(modifiedOutputFileDir + "inOutOfTimeAntiKt4Truth_PileupJet_Mult.pdf");
     }
 
-    sig_h_outOfTimeAntiKt4Truth_LeadingJet_Et->SetLineColor(kRed);
-    back_h_outOfTimeAntiKt4Truth_LeadingJet_Et->SetLineColor(kBlue);
+    sig_h_outOfTimeAntiKt4Truth_LeadingJet_Et->SetLineColor(kP10Red);
+    back_h_outOfTimeAntiKt4Truth_LeadingJet_Et->SetLineColor(kP10Blue);
     sig_h_outOfTimeAntiKt4Truth_LeadingJet_Et->Scale(1.0 / num_processed_events_signal);
     back_h_outOfTimeAntiKt4Truth_LeadingJet_Et->Scale(1.0 / sumOfBackgroundEventWeight);
     sig_h_outOfTimeAntiKt4Truth_LeadingJet_Et->Draw("HIST");
     back_h_outOfTimeAntiKt4Truth_LeadingJet_Et->Draw("HIST SAME");
     leg->Draw();
-    cLogYjFEX.SaveAs(modifiedOutputFileDir + "outOfTimeAntiKt4Truth_LeadingJet_Et.pdf");
+    cLogYjFEX.cd(); DrawATLASLabel(); cLogYjFEX.SaveAs(modifiedOutputFileDir + "outOfTimeAntiKt4Truth_LeadingJet_Et.pdf");
 
     cLogYLogX.cd();
-    sig_h_JetTagger_Considered_CellsTowersEt->SetLineColor(kRed);
-    back_h_JetTagger_Considered_CellsTowersEt->SetLineColor(kBlue);
+    sig_h_JetTagger_Considered_CellsTowersEt->SetLineColor(kP10Red);
+    back_h_JetTagger_Considered_CellsTowersEt->SetLineColor(kP10Blue);
     sig_h_JetTagger_Considered_CellsTowersEt->Scale(1.0 / num_processed_events_signal);
     back_h_JetTagger_Considered_CellsTowersEt->Scale(1.0 / sumOfBackgroundEventWeight);
     sig_h_JetTagger_Considered_CellsTowersEt->Draw("HIST");
     back_h_JetTagger_Considered_CellsTowersEt->Draw("HIST SAME");
     leg->Draw();
-    cLogYLogX.SaveAs(modifiedOutputFileDir + "consideredCellsTowersEtByEvent.pdf");
+    cLogYLogX.cd(); DrawATLASLabel(); cLogYLogX.SaveAs(modifiedOutputFileDir + "consideredCellsTowersEtByEvent.pdf");
     
-    sig_h_JetTagger_Subleading_MergedIO_Et->SetLineColor(kRed);
-    back_h_JetTagger_Subleading_MergedIO_Et->SetLineColor(kBlue);
+    sig_h_JetTagger_Subleading_MergedIO_Et->SetLineColor(kP10Red);
+    back_h_JetTagger_Subleading_MergedIO_Et->SetLineColor(kP10Blue);
     back_h_JetTagger_Subleading_MergedIO_Et->Scale(1.0 / sumOfBackgroundEventWeight);
     back_h_JetTagger_Subleading_MergedIO_Et->Draw("HIST");
     sig_h_JetTagger_Subleading_MergedIO_Et->Scale(1.0 / num_processed_events_signal);
     sig_h_JetTagger_Subleading_MergedIO_Et->Draw("HIST SAME");
     leg->Draw();
-    cLogYLogX.SaveAs(modifiedOutputFileDir + "JetTagger_Subleading_MergedIO_Et.pdf");
+    cLogYLogX.cd(); DrawATLASLabel(); cLogYLogX.SaveAs(modifiedOutputFileDir + "JetTagger_Subleading_MergedIO_Et.pdf");
 
     cLogY2.cd();
 
-    sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Scale(1.0 / back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Integral());
     back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Integral());
     sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity.pdf");
 
-    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Integral());
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Integral());
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity.pdf");
 
-    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Integral());
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Integral());
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity.pdf");
 
-    sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Integral());
     back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Integral());
     sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity.pdf");
 
-    sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Scale(1.0 / back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Integral());
     back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Integral());
     sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1.pdf"); 
 
-    sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Scale(1.0 / back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Integral());
     back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Integral());
     sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2.pdf"); 
 
-    sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Scale(1.0 / back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Integral());
     back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Integral());
     sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12.pdf"); 
 
-    sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Integral());
     back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Integral());
     sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12.pdf"); 
 
-    sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->SetLineColor(kRed);
-    back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->SetLineColor(kBlue);
+    sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->SetLineColor(kP10Red);
+    back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->SetLineColor(kP10Blue);
     back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->Scale(1.0 / back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->Integral());
     back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->Draw("HIST");
     sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->Scale(1.0 / sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->Integral());
     sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_jFEX_Subjet_Tau_21_Product.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_jFEX_Subjet_Tau_21_Product.pdf"); 
     
-    sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->SetLineColor(kRed);
-    back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->SetLineColor(kBlue);
+    sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->SetLineColor(kP10Red);
+    back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->SetLineColor(kP10Blue);
     back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->Scale(1.0 / back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->Integral());
     back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->Draw("HIST");
     sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->Scale(1.0 / sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->Integral());
     sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_Cone_Subjet_Tau_21_Product.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_Cone_Subjet_Tau_21_Product.pdf"); 
     
-    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Integral());
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Integral());
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1.pdf"); 
 
-    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Integral());
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Integral());
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2.pdf"); 
 
-    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Integral());
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Integral());
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12.pdf"); 
 
-    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Integral());
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Integral());
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12.pdf");
 
     // === ConeCellsTowers (analysis-computed) vs Ntuple Tree comparisons ===
     TLegend *legNtupleVsCone = new TLegend(0.75, 0.75, 0.95, 0.95);
@@ -13090,13 +13826,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legNtupleVsCone->AddEntry(back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity,     "Back. Emulation",              "l");
 
     // Subjet Multiplicity
-    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineStyle(kSolid);
-    sig_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineStyle(kDashed);
-    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineStyle(kSolid);
-    back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineStyle(kDashed);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Integral());
     back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->Scale(1.0 / back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->Integral());
@@ -13107,16 +13843,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Draw("HIST SAME");
     sig_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->Draw("HIST SAME");
     legNtupleVsCone->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_SubjetMultiplicity_Analysis_vs_NtupleTree.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_SubjetMultiplicity_Analysis_vs_NtupleTree.pdf");
 
     // Tau_1
-    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineStyle(kSolid);
-    sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineStyle(kDashed);
-    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineStyle(kSolid);
-    back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineStyle(kDashed);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Integral());
     back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->Scale(1.0 / back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->Integral());
@@ -13127,16 +13863,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Draw("HIST SAME");
     sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1->Draw("HIST SAME");
     legNtupleVsCone->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_Tau_1_Analysis_vs_NtupleTree.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_Tau_1_Analysis_vs_NtupleTree.pdf");
 
     // Tau_2
-    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineStyle(kSolid);
-    sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineStyle(kDashed);
-    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineStyle(kSolid);
-    back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineStyle(kDashed);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Integral());
     back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->Scale(1.0 / back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->Integral());
@@ -13147,16 +13883,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Draw("HIST SAME");
     sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2->Draw("HIST SAME");
     legNtupleVsCone->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_Tau_2_Analysis_vs_NtupleTree.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_Tau_2_Analysis_vs_NtupleTree.pdf");
 
     // Tau_21
-    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineStyle(kSolid);
-    sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineStyle(kDashed);
-    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineStyle(kSolid);
-    back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineStyle(kDashed);
     back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Integral());
     back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->Scale(1.0 / back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->Integral());
@@ -13167,16 +13903,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Draw("HIST SAME");
     sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21->Draw("HIST SAME");
     legNtupleVsCone->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_Tau_21_Analysis_vs_NtupleTree.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_Tau_21_Analysis_vs_NtupleTree.pdf");
 
     // MassApprox
-    sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineColor(kRed);
+    sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineColor(kP10Red);
     sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineStyle(kSolid);
-    sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kRed);
+    sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kP10Red);
     sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineStyle(kDashed);
-    back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineColor(kBlue);
+    back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineStyle(kSolid);
-    back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kBlue);
+    back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kP10Blue);
     back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineStyle(kDashed);
     back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Scale(1.0 / back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Integral());
     back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->Scale(1.0 / back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->Integral());
@@ -13187,7 +13923,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Draw("HIST SAME");
     sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->Draw("HIST SAME");
     legNtupleVsCone->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_MassApprox_Analysis_vs_NtupleTree.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_MassApprox_Analysis_vs_NtupleTree.pdf");
 
     // === Subleading: Analysis (ConeCellsTowers) vs Emulation (Ntuple Tree) comparisons ===
     TLegend *legNtupleVsCone_Sub = new TLegend(0.75, 0.75, 0.95, 0.95);
@@ -13198,13 +13934,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legNtupleVsCone_Sub->AddEntry(back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity,     "Back. Emulation","l");
 
     // Subjet Multiplicity
-    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kRed);
+    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kP10Red);
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineStyle(kSolid);
-    sig_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineColor(kRed);
+    sig_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineColor(kP10Red);
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineStyle(kDashed);
-    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kBlue);
+    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->SetLineStyle(kSolid);
-    back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineColor(kBlue);
+    back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->SetLineStyle(kDashed);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Integral());
     back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->Integral());
@@ -13215,16 +13951,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity->Draw("HIST SAME");
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity->Draw("HIST SAME");
     legNtupleVsCone_Sub->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_SubjetMultiplicity_Analysis_vs_Emulation.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_SubjetMultiplicity_Analysis_vs_Emulation.pdf");
 
     // Tau_1
-    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kRed);
+    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kP10Red);
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineStyle(kSolid);
-    sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineColor(kRed);
+    sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineColor(kP10Red);
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineStyle(kDashed);
-    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kBlue);
+    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineStyle(kSolid);
-    back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineColor(kBlue);
+    back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->SetLineStyle(kDashed);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Integral());
     back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->Integral());
@@ -13235,16 +13971,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Draw("HIST SAME");
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1->Draw("HIST SAME");
     legNtupleVsCone_Sub->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_Tau_1_Analysis_vs_Emulation.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_Tau_1_Analysis_vs_Emulation.pdf");
 
     // Tau_2
-    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kRed);
+    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kP10Red);
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineStyle(kSolid);
-    sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineColor(kRed);
+    sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineColor(kP10Red);
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineStyle(kDashed);
-    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kBlue);
+    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineStyle(kSolid);
-    back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineColor(kBlue);
+    back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->SetLineStyle(kDashed);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Integral());
     back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->Integral());
@@ -13255,16 +13991,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Draw("HIST SAME");
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2->Draw("HIST SAME");
     legNtupleVsCone_Sub->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_Tau_2_Analysis_vs_Emulation.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_Tau_2_Analysis_vs_Emulation.pdf");
 
     // Tau_21
-    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kRed);
+    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kP10Red);
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineStyle(kSolid);
-    sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineColor(kRed);
+    sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineColor(kP10Red);
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineStyle(kDashed);
-    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kBlue);
+    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->SetLineStyle(kSolid);
-    back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineColor(kBlue);
+    back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->SetLineStyle(kDashed);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Integral());
     back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->Integral());
@@ -13275,17 +14011,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12->Draw("HIST SAME");
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21->Draw("HIST SAME");
     legNtupleVsCone_Sub->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_Tau_21_Analysis_vs_Emulation.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_Tau_21_Analysis_vs_Emulation.pdf");
 
     // MassApprox (emulation only — no analysis-computed subleading counterpart)
-    sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->Integral());
     back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->Integral());
     sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_MassApprox_Emulation.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_MassApprox_Emulation.pdf");
 
     // === Constituent-level jet mass (massless tower approximation) ===
     TLegend *legConstituentMass = new TLegend(0.3, 0.8, 0.45, 0.95);
@@ -13294,24 +14030,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legConstituentMass->AddEntry(back_h_LeadingJetTaggerLRJ_ConstituentMass, "Background", "l");
 
     // Leading: signal vs background overlaid
-    sig_h_LeadingJetTaggerLRJ_ConstituentMass->SetLineColor(kRed);
-    back_h_LeadingJetTaggerLRJ_ConstituentMass->SetLineColor(kBlue);
+    sig_h_LeadingJetTaggerLRJ_ConstituentMass->SetLineColor(kP10Red);
+    back_h_LeadingJetTaggerLRJ_ConstituentMass->SetLineColor(kP10Blue);
     if(back_h_LeadingJetTaggerLRJ_ConstituentMass->Integral() > 0.0) back_h_LeadingJetTaggerLRJ_ConstituentMass->Scale(1.0 / back_h_LeadingJetTaggerLRJ_ConstituentMass->Integral());
     if(sig_h_LeadingJetTaggerLRJ_ConstituentMass->Integral() > 0.0)  sig_h_LeadingJetTaggerLRJ_ConstituentMass->Scale(1.0 / sig_h_LeadingJetTaggerLRJ_ConstituentMass->Integral());
     back_h_LeadingJetTaggerLRJ_ConstituentMass->Draw("HIST");
     sig_h_LeadingJetTaggerLRJ_ConstituentMass->Draw("HIST SAME");
     legConstituentMass->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_ConstituentMass.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_ConstituentMass.pdf");
 
     // Subleading: signal vs background overlaid
-    sig_h_SubleadingJetTaggerLRJ_ConstituentMass->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_ConstituentMass->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_ConstituentMass->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_ConstituentMass->SetLineColor(kP10Blue);
     if(back_h_SubleadingJetTaggerLRJ_ConstituentMass->Integral() > 0.0) back_h_SubleadingJetTaggerLRJ_ConstituentMass->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConstituentMass->Integral());
     if(sig_h_SubleadingJetTaggerLRJ_ConstituentMass->Integral() > 0.0)  sig_h_SubleadingJetTaggerLRJ_ConstituentMass->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_ConstituentMass->Integral());
     back_h_SubleadingJetTaggerLRJ_ConstituentMass->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_ConstituentMass->Draw("HIST SAME");
     legConstituentMass->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_ConstituentMass.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingLRJ_ConstituentMass.pdf");
 
     // Mass approx (emulation) vs constituent mass overlay — leading jet
     {
@@ -13322,17 +14058,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         legMassOverlay->AddEntry(sig_h_LeadingJetTaggerLRJ_ConstituentMass,        "Signal, Constituent Mass",           "l");
         legMassOverlay->AddEntry(back_h_LeadingJetTaggerLRJ_ConstituentMass,       "Background, Constituent Mass",       "l");
 
-        sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox ->SetLineColor(kRed);  sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox ->SetLineStyle(kSolid);
-        back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kBlue); back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineStyle(kSolid);
-        sig_h_LeadingJetTaggerLRJ_ConstituentMass        ->SetLineColor(kRed);  sig_h_LeadingJetTaggerLRJ_ConstituentMass        ->SetLineStyle(kDashed);
-        back_h_LeadingJetTaggerLRJ_ConstituentMass       ->SetLineColor(kBlue); back_h_LeadingJetTaggerLRJ_ConstituentMass       ->SetLineStyle(kDashed);
+        sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox ->SetLineColor(kP10Red);  sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox ->SetLineStyle(kSolid);
+        back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineColor(kP10Blue); back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->SetLineStyle(kSolid);
+        sig_h_LeadingJetTaggerLRJ_ConstituentMass        ->SetLineColor(kP10Red);  sig_h_LeadingJetTaggerLRJ_ConstituentMass        ->SetLineStyle(kDashed);
+        back_h_LeadingJetTaggerLRJ_ConstituentMass       ->SetLineColor(kP10Blue); back_h_LeadingJetTaggerLRJ_ConstituentMass       ->SetLineStyle(kDashed);
 
         back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox->Draw("HIST");
         sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox ->Draw("HIST SAME");
         back_h_LeadingJetTaggerLRJ_ConstituentMass       ->Draw("HIST SAME");
         sig_h_LeadingJetTaggerLRJ_ConstituentMass        ->Draw("HIST SAME");
         legMassOverlay->Draw();
-        cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_MassApprox_vs_ConstituentMass.pdf");
+        cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "LeadingLRJ_MassApprox_vs_ConstituentMass.pdf");
     }
 
     // TH2F: signal leading vs subleading constituent mass
@@ -13340,7 +14076,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         TCanvas cMass2D_sig("cMass2D_sig", "Signal Leading vs Subleading Constituent Mass", 800, 700);
         cMass2D_sig.SetRightMargin(0.15);
         sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass->Draw("COLZ");
-        cMass2D_sig.SaveAs(modifiedOutputFileDir + "Signal_LeadingVsSubleading_ConstituentMass.pdf");
+        cMass2D_sig.cd(); DrawATLASLabel(); cMass2D_sig.SaveAs(modifiedOutputFileDir + "Signal_LeadingVsSubleading_ConstituentMass.pdf");
     }
 
     // TH2F: background leading vs subleading constituent mass
@@ -13352,7 +14088,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass->Scale(1.0 / back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass->Integral());
         back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass->SetMinimum(1e-8);
         back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass->Draw("COLZ");
-        cMass2D_back.SaveAs(modifiedOutputFileDir + "Background_LeadingVsSubleading_ConstituentMass.pdf");
+        cMass2D_back.cd(); DrawATLASLabel(); cMass2D_back.SaveAs(modifiedOutputFileDir + "Background_LeadingVsSubleading_ConstituentMass.pdf");
     }
 
     // TH2F: signal leading LRJ ET vs constituent mass
@@ -13364,7 +14100,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass->Scale(1.0 / sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass->Integral());
         sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass->SetMinimum(1e-8);
         sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass->Draw("COLZ");
-        cMass2D_Et_sig.SaveAs(modifiedOutputFileDir + "Signal_LeadingLRJEt_vs_ConstituentMass.pdf");
+        cMass2D_Et_sig.cd(); DrawATLASLabel(); cMass2D_Et_sig.SaveAs(modifiedOutputFileDir + "Signal_LeadingLRJEt_vs_ConstituentMass.pdf");
     }
 
     // TH2F: background leading LRJ ET vs constituent mass
@@ -13376,7 +14112,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass->Scale(1.0 / back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass->Integral());
         back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass->SetMinimum(1e-8);
         back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass->Draw("COLZ");
-        cMass2D_Et_back.SaveAs(modifiedOutputFileDir + "Background_LeadingLRJEt_vs_ConstituentMass.pdf");
+        cMass2D_Et_back.cd(); DrawATLASLabel(); cMass2D_Et_back.SaveAs(modifiedOutputFileDir + "Background_LeadingLRJEt_vs_ConstituentMass.pdf");
     }
 
     // Likelihood ratio: log10(signal / background) for ET vs constituent mass
@@ -13402,7 +14138,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         TCanvas cLR_Et_vs_Mass("cLR_Et_vs_Mass", "Likelihood Ratio ET vs Constituent Mass", 800, 700);
         cLR_Et_vs_Mass.SetRightMargin(0.15);
         logLR->Draw("COLZ");
-        cLR_Et_vs_Mass.SaveAs(modifiedOutputFileDir + "LikelihoodRatio_LeadingLRJEt_vs_ConstituentMass.pdf");
+        cLR_Et_vs_Mass.cd(); DrawATLASLabel(); cLR_Et_vs_Mass.SaveAs(modifiedOutputFileDir + "LikelihoodRatio_LeadingLRJEt_vs_ConstituentMass.pdf");
     }
 
     // ET vs eta for leading LRJ: signal
@@ -13414,7 +14150,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             sig_h2_JetTaggerLeadingLRJEt_vs_Eta->Scale(1.0 / sig_h2_JetTaggerLeadingLRJEt_vs_Eta->Integral());
         sig_h2_JetTaggerLeadingLRJEt_vs_Eta->SetMinimum(1e-8);
         sig_h2_JetTaggerLeadingLRJEt_vs_Eta->Draw("COLZ");
-        cEtVsEta_sig.SaveAs(modifiedOutputFileDir + "Signal_LeadingLRJEt_vs_Eta.pdf");
+        cEtVsEta_sig.cd(); DrawATLASLabel(); cEtVsEta_sig.SaveAs(modifiedOutputFileDir + "Signal_LeadingLRJEt_vs_Eta.pdf");
     }
 
     // ET vs eta for leading LRJ: background
@@ -13426,306 +14162,306 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             back_h2_JetTaggerLeadingLRJEt_vs_Eta->Scale(1.0 / back_h2_JetTaggerLeadingLRJEt_vs_Eta->Integral());
         back_h2_JetTaggerLeadingLRJEt_vs_Eta->SetMinimum(1e-8);
         back_h2_JetTaggerLeadingLRJEt_vs_Eta->Draw("COLZ");
-        cEtVsEta_back.SaveAs(modifiedOutputFileDir + "Background_LeadingLRJEt_vs_Eta.pdf");
+        cEtVsEta_back.cd(); DrawATLASLabel(); cEtVsEta_back.SaveAs(modifiedOutputFileDir + "Background_LeadingLRJEt_vs_Eta.pdf");
     }
 
     // Product m_lead * m_subl
     cLogY2.cd();
-    sig_h_JetTaggerLRJ_ConstituentMass_Product->SetLineColor(kRed);
-    back_h_JetTaggerLRJ_ConstituentMass_Product->SetLineColor(kBlue);
+    sig_h_JetTaggerLRJ_ConstituentMass_Product->SetLineColor(kP10Red);
+    back_h_JetTaggerLRJ_ConstituentMass_Product->SetLineColor(kP10Blue);
     if(back_h_JetTaggerLRJ_ConstituentMass_Product->Integral() > 0.0) back_h_JetTaggerLRJ_ConstituentMass_Product->Scale(1.0 / back_h_JetTaggerLRJ_ConstituentMass_Product->Integral());
     if(sig_h_JetTaggerLRJ_ConstituentMass_Product->Integral()  > 0.0) sig_h_JetTaggerLRJ_ConstituentMass_Product->Scale(1.0 / sig_h_JetTaggerLRJ_ConstituentMass_Product->Integral());
     back_h_JetTaggerLRJ_ConstituentMass_Product->Draw("HIST");
     sig_h_JetTaggerLRJ_ConstituentMass_Product->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_ConstituentMass_Product.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_ConstituentMass_Product.pdf");
 
     // Arithmetic mean (m_lead + m_subl) / 2
-    sig_h_JetTaggerLRJ_ConstituentMass_Average->SetLineColor(kRed);
-    back_h_JetTaggerLRJ_ConstituentMass_Average->SetLineColor(kBlue);
+    sig_h_JetTaggerLRJ_ConstituentMass_Average->SetLineColor(kP10Red);
+    back_h_JetTaggerLRJ_ConstituentMass_Average->SetLineColor(kP10Blue);
     if(back_h_JetTaggerLRJ_ConstituentMass_Average->Integral() > 0.0) back_h_JetTaggerLRJ_ConstituentMass_Average->Scale(1.0 / back_h_JetTaggerLRJ_ConstituentMass_Average->Integral());
     if(sig_h_JetTaggerLRJ_ConstituentMass_Average->Integral()  > 0.0) sig_h_JetTaggerLRJ_ConstituentMass_Average->Scale(1.0 / sig_h_JetTaggerLRJ_ConstituentMass_Average->Integral());
     back_h_JetTaggerLRJ_ConstituentMass_Average->Draw("HIST");
     sig_h_JetTaggerLRJ_ConstituentMass_Average->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_ConstituentMass_Average.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_ConstituentMass_Average.pdf");
 
     // Geometric mean sqrt(m_lead * m_subl)
-    sig_h_JetTaggerLRJ_ConstituentMass_GeomMean->SetLineColor(kRed);
-    back_h_JetTaggerLRJ_ConstituentMass_GeomMean->SetLineColor(kBlue);
+    sig_h_JetTaggerLRJ_ConstituentMass_GeomMean->SetLineColor(kP10Red);
+    back_h_JetTaggerLRJ_ConstituentMass_GeomMean->SetLineColor(kP10Blue);
     if(back_h_JetTaggerLRJ_ConstituentMass_GeomMean->Integral() > 0.0) back_h_JetTaggerLRJ_ConstituentMass_GeomMean->Scale(1.0 / back_h_JetTaggerLRJ_ConstituentMass_GeomMean->Integral());
     if(sig_h_JetTaggerLRJ_ConstituentMass_GeomMean->Integral()  > 0.0) sig_h_JetTaggerLRJ_ConstituentMass_GeomMean->Scale(1.0 / sig_h_JetTaggerLRJ_ConstituentMass_GeomMean->Integral());
     back_h_JetTaggerLRJ_ConstituentMass_GeomMean->Draw("HIST");
     sig_h_JetTaggerLRJ_ConstituentMass_GeomMean->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_ConstituentMass_GeomMean.pdf");
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "JetTaggerLRJ_ConstituentMass_GeomMean.pdf");
 
     back_h_leading_LRJ_psi_R_squared_NoConeSubjets->Draw("HIST");
-    cLogY2.SaveAs(modifiedOutputFileDir + "Back_Leading_LRJ_psi_R_squared_NoConeSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Back_Leading_LRJ_psi_R_squared_NoConeSubjets.pdf"); 
 
     sig_h_leading_LRJ_psi_R_squared_NoConeSubjets->Draw("HIST");
-    cLogY2.SaveAs(modifiedOutputFileDir + "Sig_Leading_LRJ_psi_R_squared_NoConeSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Sig_Leading_LRJ_psi_R_squared_NoConeSubjets.pdf"); 
 
     back_h_leading_LRJ_psi_R_squared_NojFEXSubjets->Draw("HIST");
-    cLogY2.SaveAs(modifiedOutputFileDir + "Back_Leading_LRJ_psi_R_squared_NojFEXSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Back_Leading_LRJ_psi_R_squared_NojFEXSubjets.pdf"); 
 
     sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets->Draw("HIST");
-    cLogY2.SaveAs(modifiedOutputFileDir + "Sig_Leading_LRJ_psi_R_squared_NojFEXSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Sig_Leading_LRJ_psi_R_squared_NojFEXSubjets.pdf"); 
 
-    sig_h_leading_LRJ_psi_R_squared_NoConeSubjets->SetLineColor(kRed);
-    back_h_leading_LRJ_psi_R_squared_NoConeSubjets->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R_squared_NoConeSubjets->SetLineColor(kP10Red);
+    back_h_leading_LRJ_psi_R_squared_NoConeSubjets->SetLineColor(kP10Blue);
     back_h_leading_LRJ_psi_R_squared_NoConeSubjets->Scale(1.0 / back_h_leading_LRJ_psi_R_squared_NoConeSubjets->Integral());
     back_h_leading_LRJ_psi_R_squared_NoConeSubjets->Draw("HIST");
     sig_h_leading_LRJ_psi_R_squared_NoConeSubjets->Scale(1.0 / sig_h_leading_LRJ_psi_R_squared_NoConeSubjets->Integral());
     sig_h_leading_LRJ_psi_R_squared_NoConeSubjets->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_NoConeSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_NoConeSubjets.pdf"); 
 
-    sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets->SetLineColor(kRed);
-    back_h_leading_LRJ_psi_R_squared_NojFEXSubjets->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets->SetLineColor(kP10Red);
+    back_h_leading_LRJ_psi_R_squared_NojFEXSubjets->SetLineColor(kP10Blue);
     back_h_leading_LRJ_psi_R_squared_NojFEXSubjets->Scale(1.0 / back_h_leading_LRJ_psi_R_squared_NojFEXSubjets->Integral());
     back_h_leading_LRJ_psi_R_squared_NojFEXSubjets->Draw("HIST");
     sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets->Scale(1.0 / sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets->Integral());
     sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_NojFEXSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_NojFEXSubjets.pdf"); 
 
-    sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_psi_R_squared_With1ConeSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_psi_R_squared_With1ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_psi_R_squared_With1ConeSubjet->Scale(1.0 / back_h_leading_LRJ_psi_R_squared_With1ConeSubjet->Integral());
     back_h_leading_LRJ_psi_R_squared_With1ConeSubjet->Draw("HIST");
     sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet->Scale(1.0 / sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet->Integral());
     sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_With1ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_With1ConeSubjet.pdf"); 
 
-    sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->Scale(1.0 / back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->Integral());
     back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->Draw("HIST");
     sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->Scale(1.0 / sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->Integral());
     sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_With1jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_With1jFEXSubjet.pdf"); 
 
-    sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->Scale(1.0 / back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->Integral());
     back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->Draw("HIST");
     sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->Scale(1.0 / sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->Integral());
     sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet.pdf"); 
     
-    sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Scale(1.0 / back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Integral());
     back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Draw("HIST");
     sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Scale(1.0 / sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Integral());
     sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet.pdf"); 
 
-    sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->Scale(1.0 / back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->Integral());
     back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->Draw("HIST");
     sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->Scale(1.0 / sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->Integral());
     sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet.pdf"); 
 
-    sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->Scale(1.0 / back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->Integral());
     back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->Draw("HIST");
     sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->Scale(1.0 / sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->Integral());
     sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet.pdf"); 
 
-    sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Scale(1.0 / back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Integral());
     back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Draw("HIST");
     sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Scale(1.0 / sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Integral());
     sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_MassApprox_WithGrEq2ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_MassApprox_WithGrEq2ConeSubjet.pdf"); 
 
-    sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->Scale(1.0 / back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->Integral());
     back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->Draw("HIST");
     sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->Scale(1.0 / sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->Integral());
     sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_MassApprox_WithGrEq2jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_MassApprox_WithGrEq2jFEXSubjet.pdf"); 
 
-    sig_h_leading_LRJ_Z->SetLineColor(kRed);
-    back_h_leading_LRJ_Z->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Z->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Z->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Z->Scale(1.0 / back_h_leading_LRJ_Z->Integral());
     back_h_leading_LRJ_Z->Draw("HIST");
     sig_h_leading_LRJ_Z->Scale(1.0 / sig_h_leading_LRJ_Z->Integral());
     sig_h_leading_LRJ_Z->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Z.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Z.pdf"); 
 
-    sig_h_subleading_LRJ_Z->SetLineColor(kRed);
-    back_h_subleading_LRJ_Z->SetLineColor(kBlue);
+    sig_h_subleading_LRJ_Z->SetLineColor(kP10Red);
+    back_h_subleading_LRJ_Z->SetLineColor(kP10Blue);
     back_h_subleading_LRJ_Z->Scale(1.0 / back_h_subleading_LRJ_Z->Integral());
     back_h_subleading_LRJ_Z->Draw("HIST");
     sig_h_subleading_LRJ_Z->Scale(1.0 / sig_h_subleading_LRJ_Z->Integral());
     sig_h_subleading_LRJ_Z->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Subleading_LRJ_Z.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Subleading_LRJ_Z.pdf"); 
 
     sig_h_leading_LRJ_Et_NojFEXSubjets->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_NojFEXSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_NojFEXSubjets.pdf"); 
 
     back_h_leading_LRJ_Et_NojFEXSubjets->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_NojFEXSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_NojFEXSubjets.pdf"); 
 
     sig_h_leading_LRJ_Et_NoConeSubjets->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_NoConeSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_NoConeSubjets.pdf"); 
 
     back_h_leading_LRJ_Et_NoConeSubjets->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_NoConeSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_NoConeSubjets.pdf"); 
 
     sig_h_leading_LRJ_Et_With1jFEXSubjet->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_With1jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_With1jFEXSubjet.pdf"); 
 
     back_h_leading_LRJ_Et_With1jFEXSubjet->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_With1jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_With1jFEXSubjet.pdf"); 
 
     sig_h_leading_LRJ_Et_With1ConeSubjet->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_With1ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_With1ConeSubjet.pdf"); 
 
     back_h_leading_LRJ_Et_With1ConeSubjet->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_With1ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_With1ConeSubjet.pdf"); 
 
     sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_WithGrEq2jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_WithGrEq2jFEXSubjet.pdf"); 
 
     back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_WithGrEq2jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_WithGrEq2jFEXSubjet.pdf"); 
 
     sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_WithGrEq2ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "sig_Leading_LRJ_Et_WithGrEq2ConeSubjet.pdf"); 
 
     back_h_leading_LRJ_Et_WithGrEq2ConeSubjet->Draw("HIST");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_WithGrEq2ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "back_Leading_LRJ_Et_WithGrEq2ConeSubjet.pdf"); 
 
-    sig_h_leading_LRJ_Et_NoConeSubjets->SetLineColor(kRed);
-    back_h_leading_LRJ_Et_NoConeSubjets->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Et_NoConeSubjets->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Et_NoConeSubjets->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Et_NoConeSubjets->Scale(1.0 / back_h_leading_LRJ_Et_NoConeSubjets->Integral());
     back_h_leading_LRJ_Et_NoConeSubjets->Draw("HIST");
     sig_h_leading_LRJ_Et_NoConeSubjets->Scale(1.0 / sig_h_leading_LRJ_Et_NoConeSubjets->Integral());
     sig_h_leading_LRJ_Et_NoConeSubjets->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_NoConeSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_NoConeSubjets.pdf"); 
 
-    sig_h_leading_LRJ_Et_NojFEXSubjets->SetLineColor(kRed);
-    back_h_leading_LRJ_Et_NojFEXSubjets->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Et_NojFEXSubjets->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Et_NojFEXSubjets->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Et_NojFEXSubjets->Scale(1.0 / back_h_leading_LRJ_Et_NojFEXSubjets->Integral());
     back_h_leading_LRJ_Et_NojFEXSubjets->Draw("HIST");
     sig_h_leading_LRJ_Et_NojFEXSubjets->Scale(1.0 / sig_h_leading_LRJ_Et_NojFEXSubjets->Integral());
     sig_h_leading_LRJ_Et_NojFEXSubjets->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_NojFEXSubjets.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_NojFEXSubjets.pdf"); 
 
-    sig_h_leading_LRJ_Et_With1ConeSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_Et_With1ConeSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Et_With1ConeSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Et_With1ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Et_With1ConeSubjet->Scale(1.0 / back_h_leading_LRJ_Et_With1ConeSubjet->Integral());
     back_h_leading_LRJ_Et_With1ConeSubjet->Draw("HIST");
     sig_h_leading_LRJ_Et_With1ConeSubjet->Scale(1.0 / sig_h_leading_LRJ_Et_With1ConeSubjet->Integral());
     sig_h_leading_LRJ_Et_With1ConeSubjet->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_With1ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_With1ConeSubjet.pdf"); 
 
-    sig_h_leading_LRJ_Et_With1jFEXSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_Et_With1jFEXSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Et_With1jFEXSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Et_With1jFEXSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Et_With1jFEXSubjet->Scale(1.0 / back_h_leading_LRJ_Et_With1jFEXSubjet->Integral());
     back_h_leading_LRJ_Et_With1jFEXSubjet->Draw("HIST");
     sig_h_leading_LRJ_Et_With1jFEXSubjet->Scale(1.0 / sig_h_leading_LRJ_Et_With1jFEXSubjet->Integral());
     sig_h_leading_LRJ_Et_With1jFEXSubjet->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_With1jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_With1jFEXSubjet.pdf"); 
 
-    sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_Et_WithGrEq2ConeSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Et_WithGrEq2ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Et_WithGrEq2ConeSubjet->Scale(1.0 / back_h_leading_LRJ_Et_WithGrEq2ConeSubjet->Integral());
     back_h_leading_LRJ_Et_WithGrEq2ConeSubjet->Draw("HIST");
     sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet->Scale(1.0 / sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet->Integral());
     sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_WithGrEq2ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_WithGrEq2ConeSubjet.pdf"); 
 
-    sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->Scale(1.0 / back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->Integral());
     back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->Draw("HIST");
     sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->Scale(1.0 / sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->Integral());
     sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet->Draw("HIST SAME"); // FIXME add n events
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet.pdf"); 
 
-    sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->SetLineColor(kRed);
-    back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->Scale(1.0 / back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->Integral());
     back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->Draw("HIST");
     sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->Scale(1.0 / sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->Integral());
     sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_WithGrEq2jFEXSubjet.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "Leading_LRJ_Et_WithGrEq2jFEXSubjet.pdf"); 
 
-    sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Integral());
     back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Integral());
     sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1.pdf"); 
     //std::cout << "test3" << "\n";
-    sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Integral());
     back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Integral());
     sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2.pdf"); 
 
-    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Integral());
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Integral());
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1.pdf"); 
 
-    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kRed);
-    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kBlue);
+    sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kP10Red);
+    back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->SetLineColor(kP10Blue);
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Scale(1.0 / back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Integral());
     back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Draw("HIST");
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Scale(1.0 / sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Integral());
     sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2->Draw("HIST SAME");
     leg->Draw();
-    cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2.pdf"); 
+    cLogY2.cd(); DrawATLASLabel(); cLogY2.SaveAs(modifiedOutputFileDir + "SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2.pdf"); 
     //std::cout << "test3.1" << "\n";    
     TCanvas cLogZ_NSubjetiness;
     cLogZ_NSubjetiness.SetLogz();
@@ -13736,308 +14472,308 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     //std::cout << "test3.2" << "\n";
     sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Draw("COLZ");
     sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Scale(1.0 / sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2.pdf");
 
     back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Draw("COLZ");
     back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Scale(1.0 / back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Integral());
     back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2.pdf");
 
     sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Draw("COLZ");
     sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Scale(1.0 / sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2.pdf");
 
     back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Draw("COLZ");
     back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Scale(1.0 / back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->Integral());
     back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2.pdf");
     //std::cout << "test3.3" << "\n";    
     sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Draw("COLZ");
     sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Scale(1.0 / sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2.pdf");
     //std::cout << "test3.31" << "\n";   
     back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Draw("COLZ");
     back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Scale(1.0 / back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Integral());
     back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2.pdf");
 
     sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Draw("COLZ");
     sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Scale(1.0 / sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2.pdf");
     //std::cout << "test3.32" << "\n";   
     back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Draw("COLZ");
     back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Scale(1.0 / back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->Integral());
     back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2.pdf");
 
     sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Draw("COLZ");
     sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Scale(1.0 / sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2.pdf");
 
     back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Draw("COLZ");
     back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Scale(1.0 / back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Integral());
     back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2.pdf");
 
     sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Draw("COLZ");
     sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Scale(1.0 / sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2.pdf");
 
     back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Draw("COLZ");
     back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Scale(1.0 / back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->Integral());
     back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2.pdf");
 
     //std::cout << "test3.321" << "\n";
     sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Draw("COLZ");
     sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Scale(1.0 / sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
     //std::cout << "test3.322" << "\n";   
     sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12->Draw("COLZ");
     sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12->Scale(1.0 / sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
     //std::cout << "test3.33" << "\n";   
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Draw("COLZ");
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Scale(1.0 / back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Integral());
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
     //std::cout << "test3.331" << "\n";   
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Draw("COLZ");
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Scale(1.0 / back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->Integral());
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
     //std::cout << "test3.34" << "\n";   
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Draw("COLZ");
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Scale(1.0 / back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Integral());
     back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt.pdf");
     //std::cout << "test3.4" << "\n";    
     back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Draw("COLZ");
     back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Scale(1.0 / back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Integral());
     back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt.pdf");
     //std::cout << "test3.41" << "\n";    
     back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt->Draw("COLZ");
     //back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt->Scale(1.0 / back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt->Integral());
     //back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt.pdf");
     //std::cout << "test3.42" << "\n";
     back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt->Draw("COLZ");
     //back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt->Scale(1.0 / back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt->Integral());
     //back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt.pdf");
     //std::cout << "test3.43" << "\n";
     sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Draw("COLZ");
     sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Scale(1.0 / sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt.pdf");
 
     sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt->Draw("COLZ");
     sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt->Scale(1.0 / sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt.pdf");
 
     sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt->Draw("COLZ");
     sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt->Scale(1.0 / sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt.pdf");
 
     //std::cout << "test3.44" << "\n";    
     /*sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct.pdf");
     std::cout << "test3.441" << "\n";    
     sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct->Draw("COLZ");
     sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct->Scale(1.0 / sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct.pdf");
     std::cout << "test3.442" << "\n";    
     backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct.pdf");
     std::cout << "test3.4421" << "\n";    
     backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct->Draw("COLZ");
     backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct->Scale(1.0 / backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct.pdf");
     std::cout << "test3.443" << "\n";    
     sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct.pdf");
     std::cout << "test3.444" << "\n";   
     sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct->Draw("COLZ");
     sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct->Scale(1.0 / sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct.pdf");
     std::cout << "test3.445" << "\n";   
     backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets.pdf");*/
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets.pdf");*/
 
     sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead.pdf");
 
     backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead.pdf");
 
     sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead->Scale(1.0 / sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead.pdf");
 
     backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead->Scale(1.0 / backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead.pdf");
 
     sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead.pdf");
     
     sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->GetYaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead.pdf");
     //std::cout << "test3.5" << "\n";    
     backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->GetYaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead.pdf");
     
 
     sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Scale(1.0 / sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead.pdf");
 
     backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Scale(1.0 / backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead.pdf");
     //std::cout << "test3.51" << "\n";   
     sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Scale(1.0 / sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead.pdf");
 
     backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Scale(1.0 / backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead.pdf");
     
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->GetYaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->Scale(1.0 / sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead.pdf");
     
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->GetYaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->Scale(1.0 / backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead.pdf");
 
     sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->GetYaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->Scale(1.0 / sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead.pdf");
 
     backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->GetYaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->Scale(1.0 / backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead.pdf");
 
     sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->GetYaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead.pdf");
 
     backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->GetYaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead.pdf");
 
     sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead->Draw("COLZ");
     //sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead->Scale(1.0 / sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead.pdf");
 
     backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead->Draw("COLZ");
     //backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead->Scale(1.0 / backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead.pdf");
 
     sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead->Draw("COLZ");
     //sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead->Scale(1.0 / sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead.pdf");
 
     backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead->Draw("COLZ");
     //backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead->Scale(1.0 / backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead.pdf");
     /*
     sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead.pdf");
     std::cout << "test3.52" << "\n";   
     backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead.pdf");
     
     sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead->GetXaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead->Scale(1.0 / sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead.pdf");
     
     backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead->GetXaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead->Draw("COLZ");
     backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead->Scale(1.0 / backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead.pdf");
     
     sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead->Draw("COLZ");
     //sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead->Scale(1.0 / sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead.pdf");
 
     backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead->Draw("COLZ");
     //backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead->Scale(1.0 / backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead.pdf");
 
     sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead->Scale(1.0 / sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead.pdf");
 
     backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead->Scale(1.0 / backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead.pdf");
 
     
     
     std::cout << "test3.6" << "\n";    
     backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead.pdf");
     */
     sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets.pdf");
 
     // Also draw the actual fraction of events within each bin
 
     backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult->Draw("COLZ");
     //backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult->Scale(1.0 / backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult->Integral());
     DrawBinValues(backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult, true);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult.pdf");
     cLogZ_NSubjetiness.Clear(); // clears primitives on the canvas
 
     backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3->Draw("COLZ");
     //backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3->Scale(1.0 / backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3->Integral());
     DrawBinValues(backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3, true);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3.pdf");
     cLogZ_NSubjetiness.Clear(); // clears primitives on the canvas
     //std::cout << "test4" << "\n";
 
@@ -14045,25 +14781,25 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult->Draw("COLZ");
     sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult->Scale(1.0 / sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult->Integral());
     DrawBinValues(sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult, false);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult.pdf");
     cLogZ_NSubjetiness.Clear(); // clears primitives on the canvas
 
     sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3->Draw("COLZ");
     sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3->Scale(1.0 / sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3->Integral());
     DrawBinValues(sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3, false);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3.pdf");
     cLogZ_NSubjetiness.Clear(); // clears primitives on the canvas
 
     // Emulation (ntuple tree) subjet multiplicity 2D
     backJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult->Draw("COLZ");
     DrawBinValues(backJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult, true);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult.pdf");
     cLogZ_NSubjetiness.Clear();
 
     sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult->Draw("COLZ");
     sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult->Scale(1.0 / sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult->Integral());
     DrawBinValues(sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult, false);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult.pdf");
     cLogZ_NSubjetiness.Clear();
 
     // FIXME this likelihood ratio doesn't seem to be computed correctly, unsure why - don't use for now! 
@@ -14107,7 +14843,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         logLR_Leading->Draw("COLZ");
         logLR_Leading->GetXaxis()->SetTitle("Cone Subjet Multiplcity [Lead. JetTagger LRJ]");
         logLR_Leading->GetYaxis()->SetTitle("Cone Subjet Multiplcity [Subl. JetTagger LRJ]");
-        cLR.SaveAs(modifiedOutputFileDir + "JetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_Likelihood.pdf");
+        cLR.cd(); DrawATLASLabel(); cLR.SaveAs(modifiedOutputFileDir + "JetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_Likelihood.pdf");
     }
 
     { // use separate scope to avoid conflicts with other areas of code - FIXME this should be turned into a function to avoid this issue. 
@@ -14150,345 +14886,347 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         logLR_Leading->Draw("COLZ");
         logLR_Leading->GetXaxis()->SetTitle("Cone Subjet Multiplcity [Lead. JetTagger LRJ]");
         logLR_Leading->GetYaxis()->SetTitle("Cone Subjet Multiplcity [Subl. JetTagger LRJ]");
-        cLR.SaveAs(modifiedOutputFileDir + "JetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_Likelihood_3.pdf");
+        cLR.cd(); DrawATLASLabel(); cLR.SaveAs(modifiedOutputFileDir + "JetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_Likelihood_3.pdf");
     }*/
     
 
     sigJetTaggerLeadingLRJEtvsZ->Draw("COLZ");
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsZ.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsZ.pdf");
 
     backJetTaggerLeadingLRJEtvsZ->Draw("COLZ");
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsZ.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsZ.pdf");
 
     sigJetTaggerSubleadingLRJEtvsZ->Draw("COLZ");
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsZ.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsZ.pdf");
 
     backJetTaggerSubleadingLRJEtvsZ->Draw("COLZ");
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsZ.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsZ.pdf");
 
     sigJetTaggerLeadingLRJEtvs1MinusZ->Draw("COLZ");
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvs1MinusZ.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvs1MinusZ.pdf");
 
     backJetTaggerLeadingLRJEtvs1MinusZ->Draw("COLZ");
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvs1MinusZ.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvs1MinusZ.pdf");
 
     sigJetTaggerLeadingLRJEtvsEtOutsideSubjets->Draw("COLZ");
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsEtOutsideSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsEtOutsideSubjets.pdf");
 
     backJetTaggerLeadingLRJEtvsEtOutsideSubjets->Draw("COLZ");
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsEtOutsideSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsEtOutsideSubjets.pdf");
     
 
     sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets.pdf");
     //std::cout << "test5" << "\n";
     sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet.pdf");
     //std::cout << "test5.1" << "\n";
     sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet.pdf");
     
     sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet.pdf");
 
     
     
 
     sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->GetYaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet.pdf");
 
     
     
 
     backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->GetYaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->GetYaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet.pdf");
     //std::cout << "test5.2" << "\n";
     sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet.pdf");
     //std::cout << "test5.21" << "\n";
     backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet.pdf");
     //std::cout << "test5.22" << "\n";
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->GetYaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet.pdf");
 
     sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->GetYaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet.pdf");
 
     backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->GetYaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet.pdf");
     //std::cout << "test5.23" << "\n";
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet->GetYaxis()->SetRangeUser(0.0, 400.0);
     sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet->Draw("COLZ");
     //sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet.pdf");
     //std::cout << "test5.230" << "\n";
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet->GetXaxis()->SetRangeUser(0.0, 700.0);
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet->GetYaxis()->SetRangeUser(0.0, 400.0);
     backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet->Draw("COLZ");
     //backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet->Scale(1.0 / backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet.pdf");
     //std::cout << "test5.231" << "\n";
     backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct->Draw("COLZ");
     backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct->Scale(1.0 / backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct.pdf");
     //std::cout << "test5.24" << "\n";
     sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Draw("COLZ");
     sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Scale(1.0 / sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt->Integral());
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt.pdf");
 
     back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12->Draw("COLZ");
     back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12->Scale(1.0 / back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12->Integral());
     back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12->SetMinimum(1e-14);
-    cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
+    cLogZ_NSubjetiness.cd(); DrawATLASLabel(); cLogZ_NSubjetiness.SaveAs(modifiedOutputFileDir + "back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12.pdf");
     //std::cout << "test5.25" << "\n";
     c.cd();
-    sig_h_LeadingOfflineLRJ_SubjetEt->SetLineColor(kRed);
-    back_h_LeadingOfflineLRJ_SubjetEt->SetLineColor(kBlue);
+    sig_h_LeadingOfflineLRJ_SubjetEt->SetLineColor(kP10Red);
+    back_h_LeadingOfflineLRJ_SubjetEt->SetLineColor(kP10Blue);
     back_h_LeadingOfflineLRJ_SubjetEt->Scale(1.0 / num_processed_events_background);
     back_h_LeadingOfflineLRJ_SubjetEt->Draw("HIST");
     sig_h_LeadingOfflineLRJ_SubjetEt->Scale(1.0 / num_processed_events_signal);
     sig_h_LeadingOfflineLRJ_SubjetEt->Draw("HIST SAME");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LeadingOfflineLRJ_SubjetEt.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LeadingOfflineLRJ_SubjetEt.pdf");
 
-    sig_h_SubleadingOfflineLRJ_SubjetEt->SetLineColor(kRed);
-    back_h_SubleadingOfflineLRJ_SubjetEt->SetLineColor(kBlue);
+    sig_h_SubleadingOfflineLRJ_SubjetEt->SetLineColor(kP10Red);
+    back_h_SubleadingOfflineLRJ_SubjetEt->SetLineColor(kP10Blue);
     back_h_SubleadingOfflineLRJ_SubjetEt->Scale(1.0 / num_processed_events_background);
     back_h_SubleadingOfflineLRJ_SubjetEt->Draw("HIST");
     sig_h_SubleadingOfflineLRJ_SubjetEt->Scale(1.0 / num_processed_events_signal);
     sig_h_SubleadingOfflineLRJ_SubjetEt->Draw("HIST SAME");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "SubleadingOfflineLRJ_SubjetEt.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "SubleadingOfflineLRJ_SubjetEt.pdf");
 
     sig_h_leading_LRJ_gFexLRJ_deltaEt->Scale(1.0 / sig_h_leading_LRJ_gFexLRJ_deltaEt->Integral());
     back_h_leading_LRJ_gFexLRJ_deltaEt->Scale(1.0 / back_h_leading_LRJ_gFexLRJ_deltaEt->Integral());
-    sig_h_leading_LRJ_gFexLRJ_deltaEt->SetLineColor(kRed);
-    back_h_leading_LRJ_gFexLRJ_deltaEt->SetLineColor(kBlue);
+    sig_h_leading_LRJ_gFexLRJ_deltaEt->SetLineColor(kP10Red);
+    back_h_leading_LRJ_gFexLRJ_deltaEt->SetLineColor(kP10Blue);
     back_h_leading_LRJ_gFexLRJ_deltaEt->Draw("HIST");
     sig_h_leading_LRJ_gFexLRJ_deltaEt->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_gFexLRJ_deltaEt.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_gFexLRJ_deltaEt.pdf");
 
-    sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->Scale(1.0 / sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->Integral());
-    back_h_leading_offlineLRJ_gFexLRJ_deltaEt->Scale(1.0 / back_h_leading_offlineLRJ_gFexLRJ_deltaEt->Integral());
-    sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineColor(kRed);
-    back_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineColor(kBlue);
-    back_h_leading_offlineLRJ_gFexLRJ_deltaEt->Draw("HIST");
-    sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->Draw("HIST SAME");
-    
+    // Standalone plot uses the resim-object twins; the AOD histograms are kept for the
+    // vs-JetTagger overlay below. NOTE: scale the AOD versions there, not here.
+    sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->Scale(1.0 / sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->Integral());
+    back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->Scale(1.0 / back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->Integral());
+    sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->SetLineColor(kP10Red);
+    back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->SetLineColor(kP10Blue);
+    back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->Draw("HIST");
+    sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim->Draw("HIST SAME");
+
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_offlineLRJ_gFexLRJ_deltaEt.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_offlineLRJ_gFexLRJ_deltaEt.pdf");
     //std::cout << "test 5.3" << "\n";
     sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->Scale(1.0 / sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->Integral());
     back_h_leading_offlineLRJ_jFexLRJ_deltaEt->Scale(1.0 / back_h_leading_offlineLRJ_jFexLRJ_deltaEt->Integral());
-    sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineColor(kRed);
-    back_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineColor(kBlue);
+    sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineColor(kP10Red);
+    back_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineColor(kP10Blue);
     back_h_leading_offlineLRJ_jFexLRJ_deltaEt->Draw("HIST");
     sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_offlineLRJ_jFexLRJ_deltaEt.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_offlineLRJ_jFexLRJ_deltaEt.pdf");
 
     sig_h_leading_LRJ_offlineLRJ_deltaEt->Scale(1.0 / sig_h_leading_LRJ_offlineLRJ_deltaEt->Integral());
     back_h_leading_LRJ_offlineLRJ_deltaEt->Scale(1.0 / back_h_leading_LRJ_offlineLRJ_deltaEt->Integral());
-    sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kRed);
-    back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kBlue);
+    sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kP10Red);
+    back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kP10Blue);
     back_h_leading_LRJ_offlineLRJ_deltaEt->Draw("HIST");
     sig_h_leading_LRJ_offlineLRJ_deltaEt->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_offlineLRJ_deltaEt.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_offlineLRJ_deltaEt.pdf");
     
     // Resolution plots
     sig_h_leading_LRJ_gFexLRJ_Et_resolution->Scale(1.0 / sig_h_leading_LRJ_gFexLRJ_Et_resolution->Integral());
     back_h_leading_LRJ_gFexLRJ_Et_resolution->Scale(1.0 / back_h_leading_LRJ_gFexLRJ_Et_resolution->Integral());
-    sig_h_leading_LRJ_gFexLRJ_Et_resolution->SetLineColor(kRed);
-    back_h_leading_LRJ_gFexLRJ_Et_resolution->SetLineColor(kBlue);
+    sig_h_leading_LRJ_gFexLRJ_Et_resolution->SetLineColor(kP10Red);
+    back_h_leading_LRJ_gFexLRJ_Et_resolution->SetLineColor(kP10Blue);
     back_h_leading_LRJ_gFexLRJ_Et_resolution->Draw("HIST");
     sig_h_leading_LRJ_gFexLRJ_Et_resolution->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_gFexLRJ_Et_resolution.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_gFexLRJ_Et_resolution.pdf");
 
     sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Scale(1.0 / sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Integral());
     back_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Scale(1.0 / back_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Integral());
-    sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution->SetLineColor(kRed);
-    back_h_leading_offlineLRJ_gFexLRJ_Et_resolution->SetLineColor(kBlue);
+    sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution->SetLineColor(kP10Red);
+    back_h_leading_offlineLRJ_gFexLRJ_Et_resolution->SetLineColor(kP10Blue);
     back_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Draw("HIST");
     sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution->Draw("HIST SAME");
     
     
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_offlineLRJ_gFexLRJ_Et_resolution.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_offlineLRJ_gFexLRJ_Et_resolution.pdf");
 
     sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution->Scale(1.0 / sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution->Integral());
     back_h_leading_offlineLRJ_jFexLRJ_Et_resolution->Scale(1.0 / back_h_leading_offlineLRJ_jFexLRJ_Et_resolution->Integral());
-    sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution->SetLineColor(kRed);
-    back_h_leading_offlineLRJ_jFexLRJ_Et_resolution->SetLineColor(kBlue);
+    sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution->SetLineColor(kP10Red);
+    back_h_leading_offlineLRJ_jFexLRJ_Et_resolution->SetLineColor(kP10Blue);
     sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution->Draw("HIST");
     back_h_leading_offlineLRJ_jFexLRJ_Et_resolution->Draw("HIST SAME");
     
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_offlineLRJ_jFexLRJ_Et_resolution.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_offlineLRJ_jFexLRJ_Et_resolution.pdf");
 
     sig_h_leading_LRJ_offlineLRJ_Et_resolution->Scale(1.0 / sig_h_leading_LRJ_offlineLRJ_Et_resolution->Integral());
     back_h_leading_LRJ_offlineLRJ_Et_resolution->Scale(1.0 / back_h_leading_LRJ_offlineLRJ_Et_resolution->Integral());
-    sig_h_leading_LRJ_offlineLRJ_Et_resolution->SetLineColor(kRed);
-    back_h_leading_LRJ_offlineLRJ_Et_resolution->SetLineColor(kBlue);
+    sig_h_leading_LRJ_offlineLRJ_Et_resolution->SetLineColor(kP10Red);
+    back_h_leading_LRJ_offlineLRJ_Et_resolution->SetLineColor(kP10Blue);
     sig_h_leading_LRJ_offlineLRJ_Et_resolution->Draw("HIST");
     back_h_leading_LRJ_offlineLRJ_Et_resolution->Draw("HIST SAME");
     
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_offlineLRJ_Et_resolution.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_offlineLRJ_Et_resolution.pdf");
 
 
     //std::cout << "test 5.4" << "\n";
@@ -14517,20 +15255,20 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     // 2) Styling: colors fixed, styles differ by source
     // gFEX = dashed
-    sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineColor(kRed);
+    sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineColor(kP10Red);
     sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineStyle(kDashed);
     sig_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineWidth(2);
 
-    back_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineColor(kBlue);
+    back_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineColor(kP10Blue);
     back_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineStyle(kDashed);
     back_h_leading_offlineLRJ_gFexLRJ_deltaEt->SetLineWidth(2);
 
     // JetTagger = solid
-    sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kRed);
+    sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kP10Red);
     sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineStyle(kSolid);
     sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineWidth(2);
 
-    back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kBlue);
+    back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kP10Blue);
     back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineStyle(kSolid);
     back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineWidth(2);
 
@@ -14574,7 +15312,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_overlay->Draw();
 
     c_overlay.Modified(); c_overlay.Update();
-    c_overlay.SaveAs(modifiedOutputFileDir + "leading_deltaEt_overlay_gFEX_vs_JetTagger.pdf");
+    c_overlay.cd(); DrawATLASLabel(); c_overlay.SaveAs(modifiedOutputFileDir + "leading_deltaEt_overlay_gFEX_vs_JetTagger.pdf");
 
 
     // === Overlay: jFEX (dashed) vs JetTagger (solid), same colors ===
@@ -14597,20 +15335,20 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     // 2) Styling: colors fixed, styles differ by source
     // jFEX = dashed
-    sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineColor(kRed);
+    sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineColor(kP10Red);
     sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineStyle(kDashed);
     sig_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineWidth(2);
 
-    back_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineColor(kBlue);
+    back_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineColor(kP10Blue);
     back_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineStyle(kDashed);
     back_h_leading_offlineLRJ_jFexLRJ_deltaEt->SetLineWidth(2);
 
     // JetTagger = solid
-    sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kRed);
+    sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kP10Red);
     sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineStyle(kSolid);
     sig_h_leading_LRJ_offlineLRJ_deltaEt->SetLineWidth(2);
 
-    back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kBlue);
+    back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineColor(kP10Blue);
     back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineStyle(kSolid);
     back_h_leading_LRJ_offlineLRJ_deltaEt->SetLineWidth(2);
 
@@ -14654,7 +15392,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_overlay_jFEX->Draw();
 
     c_overlay_jFEX.Modified(); c_overlay_jFEX.Update();
-    c_overlay_jFEX.SaveAs(modifiedOutputFileDir + "leading_deltaEt_overlay_jFEX_vs_JetTagger.pdf");
+    c_overlay_jFEX.cd(); DrawATLASLabel(); c_overlay_jFEX.SaveAs(modifiedOutputFileDir + "leading_deltaEt_overlay_jFEX_vs_JetTagger.pdf");
 
 
 
@@ -14663,69 +15401,69 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_h_leading_LRJ_gFexLRJ_deltaR->Scale(1.0 / sig_h_leading_LRJ_gFexLRJ_deltaR->Integral());
     back_h_leading_LRJ_gFexLRJ_deltaR->Scale(1.0 / back_h_leading_LRJ_gFexLRJ_deltaR->Integral());
-    sig_h_leading_LRJ_gFexLRJ_deltaR->SetLineColor(kRed);
-    back_h_leading_LRJ_gFexLRJ_deltaR->SetLineColor(kBlue);
+    sig_h_leading_LRJ_gFexLRJ_deltaR->SetLineColor(kP10Red);
+    back_h_leading_LRJ_gFexLRJ_deltaR->SetLineColor(kP10Blue);
     sig_h_leading_LRJ_gFexLRJ_deltaR->Draw("HIST");
     back_h_leading_LRJ_gFexLRJ_deltaR->Draw("HIST SAME");
     
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_gFexLRJ_deltaR.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_gFexLRJ_deltaR.pdf");
 
     sig_h_leading_LRJ_offlineLRJ_deltaR->Scale(1.0 / sig_h_leading_LRJ_offlineLRJ_deltaR->Integral());
     back_h_leading_LRJ_offlineLRJ_deltaR->Scale(1.0 / back_h_leading_LRJ_offlineLRJ_deltaR->Integral());
-    sig_h_leading_LRJ_offlineLRJ_deltaR->SetLineColor(kRed);
-    back_h_leading_LRJ_offlineLRJ_deltaR->SetLineColor(kBlue);
+    sig_h_leading_LRJ_offlineLRJ_deltaR->SetLineColor(kP10Red);
+    back_h_leading_LRJ_offlineLRJ_deltaR->SetLineColor(kP10Blue);
     sig_h_leading_LRJ_offlineLRJ_deltaR->Draw("HIST");
     back_h_leading_LRJ_offlineLRJ_deltaR->Draw("HIST SAME");
     
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "leading_LRJ_offlineLRJ_deltaR.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leading_LRJ_offlineLRJ_deltaR.pdf");
 
     sig_h_first_LRJ_jFexSRJ_deltaR->Scale(1.0 / sig_h_first_LRJ_jFexSRJ_deltaR->Integral());
     back_h_first_LRJ_jFexSRJ_deltaR->Scale(1.0 / back_h_first_LRJ_jFexSRJ_deltaR->Integral());
-    sig_h_first_LRJ_jFexSRJ_deltaR->SetLineColor(kRed);
-    back_h_first_LRJ_jFexSRJ_deltaR->SetLineColor(kBlue);
+    sig_h_first_LRJ_jFexSRJ_deltaR->SetLineColor(kP10Red);
+    back_h_first_LRJ_jFexSRJ_deltaR->SetLineColor(kP10Blue);
     sig_h_first_LRJ_jFexSRJ_deltaR->Draw("HIST");
     back_h_first_LRJ_jFexSRJ_deltaR->Draw("HIST SAME");
     
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "first_LRJ_jFexSRJ_deltaR.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "first_LRJ_jFexSRJ_deltaR.pdf");
 
     sig_h_second_LRJ_jFexSRJ_deltaR->Scale(1.0 / sig_h_second_LRJ_jFexSRJ_deltaR->Integral());
     back_h_second_LRJ_jFexSRJ_deltaR->Scale(1.0 / back_h_second_LRJ_jFexSRJ_deltaR->Integral());
-    sig_h_second_LRJ_jFexSRJ_deltaR->SetLineColor(kRed);
-    back_h_second_LRJ_jFexSRJ_deltaR->SetLineColor(kBlue);
+    sig_h_second_LRJ_jFexSRJ_deltaR->SetLineColor(kP10Red);
+    back_h_second_LRJ_jFexSRJ_deltaR->SetLineColor(kP10Blue);
     sig_h_second_LRJ_jFexSRJ_deltaR->Draw("HIST");
     back_h_second_LRJ_jFexSRJ_deltaR->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "second_LRJ_jFexSRJ_deltaR.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "second_LRJ_jFexSRJ_deltaR.pdf");
 
     sig_h_lead_sublead_LRJ_deltaR->Scale(1.0 / sig_h_lead_sublead_LRJ_deltaR->Integral());
     back_h_lead_sublead_LRJ_deltaR->Scale(1.0 / back_h_lead_sublead_LRJ_deltaR->Integral());
-    sig_h_lead_sublead_LRJ_deltaR->SetLineColor(kRed);
-    back_h_lead_sublead_LRJ_deltaR->SetLineColor(kBlue);
+    sig_h_lead_sublead_LRJ_deltaR->SetLineColor(kP10Red);
+    back_h_lead_sublead_LRJ_deltaR->SetLineColor(kP10Blue);
     back_h_lead_sublead_LRJ_deltaR->Draw("HIST");
     sig_h_lead_sublead_LRJ_deltaR->Draw("HIST SAME");
     
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "lead_sublead_LRJ_deltaR.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "lead_sublead_LRJ_deltaR.pdf");
 
     TString overlayedJZSliceDir = "overlayJZSliceHistograms/" + algorithmConfigurations[fileIt] + "/";
 
     gSystem->mkdir(overlayedJZSliceDir); 
 
     back_h_leading_LRJ_Et_arr[0]->Draw("HIST");
-    c.SaveAs(overlayedJZSliceDir + "JZ0_jettagger_leading_LRJ_Et.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(overlayedJZSliceDir + "JZ0_jettagger_leading_LRJ_Et.pdf");
 
     back_h_leading_LRJ_Et_arr[4]->Draw("HIST");
-    c.SaveAs(overlayedJZSliceDir + "JZ4_jettagger_leading_LRJ_Et.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(overlayedJZSliceDir + "JZ4_jettagger_leading_LRJ_Et.pdf");
 
     back_h_leading_LRJ_Et_arr[9]->Draw("HIST");
-    c.SaveAs(overlayedJZSliceDir + "JZ9_jettagger_leading_LRJ_Et.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(overlayedJZSliceDir + "JZ9_jettagger_leading_LRJ_Et.pdf");
 
     OverlayAndSave(back_h_leading_LRJ_Et_arr,  nJZSlices_, "c_leadLRJ", overlayedJZSliceDir + "overlay_leading_LRJ_Et_filled.pdf", 1001);
     OverlayAndSave(back_h_subleading_LRJ_Et_arr, nJZSlices_, "c_subleadLRJ", overlayedJZSliceDir + "overlay_subleading_LRJ_Et_filled.pdf", 1001);
@@ -14873,44 +15611,44 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     cLog.SetLogy();
     cLog.cd();
     back_h_leading_LRJ_Et->Draw("HIST");
-    cLog.SaveAs(modifiedOutputFileDir + "back_leading_LRJ_Et_events.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "back_leading_LRJ_Et_events.pdf");
 
-    back_h_gFEX_leading_LRJ_Et->Draw("HIST");
-    cLog.SaveAs(modifiedOutputFileDir + "back_h_gFEX_leading_LRJ_Et_events.pdf");
+    back_h_gFEX_Sim_leading_LRJ_Et->Draw("HIST");   // headline gFEX events dist: resimulated objects
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "back_h_gFEX_leading_LRJ_Et_events.pdf");
 
     back_h_jFEX_leading_LRJ_Et->Draw("HIST");
-    cLog.SaveAs(modifiedOutputFileDir + "back_h_jFEX_leading_LRJ_Et_events.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "back_h_jFEX_leading_LRJ_Et_events.pdf");
 
     back_h_leading_offlineLRJ_Et->Draw("HIST");
-    cLog.SaveAs(modifiedOutputFileDir + "back_leading_offline_LRJ_Et_events.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "back_leading_offline_LRJ_Et_events.pdf");
 
     sig_h_leading_LRJ_Et->Scale(1.0 / sig_h_leading_LRJ_Et->Integral());
     back_h_leading_LRJ_Et->Scale(1.0 / back_h_leading_LRJ_Et->Integral());
-    sig_h_leading_LRJ_Et->SetLineColor(kRed);
-    back_h_leading_LRJ_Et->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Et->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Et->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Et->Draw("HIST");
     sig_h_leading_LRJ_Et->Draw("HIST SAME");
     
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "leading_LRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "leading_LRJ_Et.pdf");
 
     sig_h_leading_LRJ_Eta->Scale(1.0 / sig_h_leading_LRJ_Eta->Integral());
     back_h_leading_LRJ_Eta->Scale(1.0 / back_h_leading_LRJ_Eta->Integral());
-    sig_h_leading_LRJ_Eta->SetLineColor(kRed);
-    back_h_leading_LRJ_Eta->SetLineColor(kBlue);
+    sig_h_leading_LRJ_Eta->SetLineColor(kP10Red);
+    back_h_leading_LRJ_Eta->SetLineColor(kP10Blue);
     back_h_leading_LRJ_Eta->Draw("HIST");
     sig_h_leading_LRJ_Eta->Draw("HIST SAME");
 
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "leading_LRJ_Eta.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "leading_LRJ_Eta.pdf");
 
     // --- Subjet min deltaR to truth jet (signal + background overlay) ---
     {
         auto normAndDraw = [](TH1F* hs, TH1F* hb, TCanvas& cv, const char* savePath){
             if(hs->Integral() > 0) hs->Scale(1.0 / hs->Integral());
             if(hb->Integral() > 0) hb->Scale(1.0 / hb->Integral());
-            hs->SetLineColor(kRed);
-            hb->SetLineColor(kBlue);
+            hs->SetLineColor(kP10Red);
+            hb->SetLineColor(kP10Blue);
             hb->Draw("HIST");
             hs->Draw("HIST SAME");
             TLegend* leg = new TLegend(0.55, 0.7, 0.88, 0.88);
@@ -14918,7 +15656,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg->AddEntry(hs, "Signal", "l");
             leg->AddEntry(hb, "Background", "l");
             leg->Draw();
-            cv.SaveAs(savePath);
+            cv.cd(); DrawATLASLabel(); cv.SaveAs(savePath);
         };
 
         normAndDraw(sig_h_leadSubjet_minDeltaR_truthJet,  back_h_leadSubjet_minDeltaR_truthJet,  cLog, (modifiedOutputFileDir + "leadSubjet_minDeltaR_truthJet.pdf"));
@@ -14934,13 +15672,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             cv.cd();
             if(h->Integral() > 0) h->Scale(1.0 / h->Integral());
             for(int b = 1; b <= h->GetNbinsX(); b++) h->SetBinError(b, 0);
-            h->SetFillColor(kAzure + 1);
+            h->SetFillColor(kP10Blue + 1);
             h->SetBarWidth(0.6);
             h->SetBarOffset(0.2);
             h->GetYaxis()->SetTitle("Fraction of Subjets");
             h->GetYaxis()->SetRangeUser(0, 1.1);
             h->Draw("BAR");
-            cv.SaveAs(savePath);
+            cv.cd(); DrawATLASLabel(); cv.SaveAs(savePath);
         };
 
         drawBarChart(sig_h_leadSubjet_matchFrac,  cBar, (modifiedOutputFileDir + "sig_leadSubjet_matchFrac.pdf"));
@@ -14950,74 +15688,78 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         cLog.cd();
     }
 
-    sig_h_gFEX_leading_LRJ_Et->Scale(1.0 / sig_h_gFEX_leading_LRJ_Et->Integral());
-    back_h_gFEX_leading_LRJ_Et->Scale(1.0 / back_h_gFEX_leading_LRJ_Et->Integral());
-    sig_h_gFEX_leading_LRJ_Et->SetLineColor(kRed);
-    back_h_gFEX_leading_LRJ_Et->SetLineColor(kBlue);
-    back_h_gFEX_leading_LRJ_Et->Draw("HIST");
-    sig_h_gFEX_leading_LRJ_Et->Draw("HIST SAME");
-    
+    // Headline gFEX leading-LRJ E_T distribution: use resimulated (Sim) objects.
+    // Comparison curves (out_gFEX_leading / out_gFEX_Sim_leading) use the raw AOD/Sim
+    // histograms and are unaffected by this draw-site swap.
+    sig_h_gFEX_Sim_leading_LRJ_Et->Scale(1.0 / sig_h_gFEX_Sim_leading_LRJ_Et->Integral());
+    back_h_gFEX_Sim_leading_LRJ_Et->Scale(1.0 / back_h_gFEX_Sim_leading_LRJ_Et->Integral());
+    sig_h_gFEX_Sim_leading_LRJ_Et->SetLineColor(kP10Red);
+    back_h_gFEX_Sim_leading_LRJ_Et->SetLineColor(kP10Blue);
+    back_h_gFEX_Sim_leading_LRJ_Et->Draw("HIST");
+    sig_h_gFEX_Sim_leading_LRJ_Et->Draw("HIST SAME");
+
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "leading_gFEX_LRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "leading_gFEX_LRJ_Et.pdf");
 
     sig_h_jFEX_leading_LRJ_Et->Scale(1.0 / sig_h_jFEX_leading_LRJ_Et->Integral());
     back_h_jFEX_leading_LRJ_Et->Scale(1.0 / back_h_jFEX_leading_LRJ_Et->Integral());
-    sig_h_jFEX_leading_LRJ_Et->SetLineColor(kRed);
-    back_h_jFEX_leading_LRJ_Et->SetLineColor(kBlue);
+    sig_h_jFEX_leading_LRJ_Et->SetLineColor(kP10Red);
+    back_h_jFEX_leading_LRJ_Et->SetLineColor(kP10Blue);
     back_h_jFEX_leading_LRJ_Et->Draw("HIST");
     sig_h_jFEX_leading_LRJ_Et->Draw("HIST SAME");
     
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "leading_jFEX_LRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "leading_jFEX_LRJ_Et.pdf");
 
     //std::cout << "Subleading signal mean: " << sig_h_subleading_LRJ_Et->GetMean() << " and subleading background mean: " << back_h_subleading_LRJ_Et->GetMean() << "\n";
     sig_h_subleading_LRJ_Et->Scale(1.0 / sig_h_subleading_LRJ_Et->Integral());
     back_h_subleading_LRJ_Et->Scale(1.0 / back_h_subleading_LRJ_Et->Integral());
-    sig_h_subleading_LRJ_Et->SetLineColor(kRed);
-    back_h_subleading_LRJ_Et->SetLineColor(kBlue);
+    sig_h_subleading_LRJ_Et->SetLineColor(kP10Red);
+    back_h_subleading_LRJ_Et->SetLineColor(kP10Blue);
     back_h_subleading_LRJ_Et->Draw("HIST");
     sig_h_subleading_LRJ_Et->Draw("HIST SAME");
     
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "subleading_LRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "subleading_LRJ_Et.pdf");
 
-    sig_h_gFEX_subleading_LRJ_Et->Scale(1.0 / sig_h_gFEX_subleading_LRJ_Et->Integral());
-    back_h_gFEX_subleading_LRJ_Et->Scale(1.0 / back_h_gFEX_subleading_LRJ_Et->Integral());
-    sig_h_gFEX_subleading_LRJ_Et->SetLineColor(kRed);
-    back_h_gFEX_subleading_LRJ_Et->SetLineColor(kBlue);
-    back_h_gFEX_subleading_LRJ_Et->Draw("HIST");
-    sig_h_gFEX_subleading_LRJ_Et->Draw("HIST SAME");
-    
+    // Headline gFEX subleading-LRJ E_T distribution: use resimulated (Sim) objects.
+    sig_h_gFEX_Sim_subleading_LRJ_Et->Scale(1.0 / sig_h_gFEX_Sim_subleading_LRJ_Et->Integral());
+    back_h_gFEX_Sim_subleading_LRJ_Et->Scale(1.0 / back_h_gFEX_Sim_subleading_LRJ_Et->Integral());
+    sig_h_gFEX_Sim_subleading_LRJ_Et->SetLineColor(kP10Red);
+    back_h_gFEX_Sim_subleading_LRJ_Et->SetLineColor(kP10Blue);
+    back_h_gFEX_Sim_subleading_LRJ_Et->Draw("HIST");
+    sig_h_gFEX_Sim_subleading_LRJ_Et->Draw("HIST SAME");
+
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "subleading_gFEX_LRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "subleading_gFEX_LRJ_Et.pdf");
 
     sig_h_jFEX_subleading_LRJ_Et->Scale(1.0 / sig_h_jFEX_subleading_LRJ_Et->Integral());
     back_h_jFEX_subleading_LRJ_Et->Scale(1.0 / back_h_jFEX_subleading_LRJ_Et->Integral());
-    sig_h_jFEX_subleading_LRJ_Et->SetLineColor(kRed);
-    back_h_jFEX_subleading_LRJ_Et->SetLineColor(kBlue);
+    sig_h_jFEX_subleading_LRJ_Et->SetLineColor(kP10Red);
+    back_h_jFEX_subleading_LRJ_Et->SetLineColor(kP10Blue);
     back_h_jFEX_subleading_LRJ_Et->Draw("HIST");
     sig_h_jFEX_subleading_LRJ_Et->Draw("HIST SAME");
     
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "subleading_jFEX_LRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "subleading_jFEX_LRJ_Et.pdf");
 
     sig_h_jFEX_leading_SRJ_Et->Scale(1.0 / sig_h_jFEX_leading_SRJ_Et->Integral());
     back_h_jFEX_leading_SRJ_Et->Scale(1.0 / back_h_jFEX_leading_SRJ_Et->Integral());
-    sig_h_jFEX_leading_SRJ_Et->SetLineColor(kRed);
-    back_h_jFEX_leading_SRJ_Et->SetLineColor(kBlue);
+    sig_h_jFEX_leading_SRJ_Et->SetLineColor(kP10Red);
+    back_h_jFEX_leading_SRJ_Et->SetLineColor(kP10Blue);
     back_h_jFEX_leading_SRJ_Et->Draw("HIST");
     sig_h_jFEX_leading_SRJ_Et->Draw("HIST SAME");
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "leading_jFEX_SRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "leading_jFEX_SRJ_Et.pdf");
 
     sig_h_jFEX_Sim_leading_SRJ_Et->Scale(1.0 / sig_h_jFEX_Sim_leading_SRJ_Et->Integral());
     back_h_jFEX_Sim_leading_SRJ_Et->Scale(1.0 / back_h_jFEX_Sim_leading_SRJ_Et->Integral());
-    sig_h_jFEX_Sim_leading_SRJ_Et->SetLineColor(kRed);
-    back_h_jFEX_Sim_leading_SRJ_Et->SetLineColor(kBlue);
+    sig_h_jFEX_Sim_leading_SRJ_Et->SetLineColor(kP10Red);
+    back_h_jFEX_Sim_leading_SRJ_Et->SetLineColor(kP10Blue);
     back_h_jFEX_Sim_leading_SRJ_Et->Draw("HIST");
     sig_h_jFEX_Sim_leading_SRJ_Et->Draw("HIST SAME");
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "leading_jFEX_Sim_SRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "leading_jFEX_Sim_SRJ_Et.pdf");
 
     // jFEX SRJ vs jFEX SRJ Sim overlay (signal only; histograms already normalized above)
     {
@@ -15025,8 +15767,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         cjFEXSRJCmp.SetLogy(); cjFEXSRJCmp.cd();
         TH1F* hjSig    = (TH1F*)sig_h_jFEX_leading_SRJ_Et->Clone("hjSig_cmp");
         TH1F* hjSimSig = (TH1F*)sig_h_jFEX_Sim_leading_SRJ_Et->Clone("hjSimSig_cmp");
-        hjSig->SetLineColor(kBlue+1); hjSig->SetLineWidth(2);
-        hjSimSig->SetLineColor(kViolet+1); hjSimSig->SetLineWidth(2);
+        hjSig->SetLineColor(kP10Blue); hjSig->SetLineWidth(2);
+        hjSimSig->SetLineColor(kP10Violet); hjSimSig->SetLineWidth(2);
         hjSig->GetXaxis()->SetTitle("Leading E_{T} [GeV]");
         hjSig->GetYaxis()->SetTitle("Normalized");
         hjSig->Draw("HIST"); hjSimSig->Draw("HIST SAME");
@@ -15035,79 +15777,79 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         jcmpleg.AddEntry(hjSig,    "jFEX SRJ (Signal)", "l");
         jcmpleg.AddEntry(hjSimSig, "jFEX SRJ Resim (Signal)", "l");
         jcmpleg.Draw();
-        cjFEXSRJCmp.SaveAs(modifiedOutputFileDir + "leading_jFEX_SRJ_vs_Sim_signal.pdf");
+        cjFEXSRJCmp.cd(); DrawATLASLabel(); cjFEXSRJCmp.SaveAs(modifiedOutputFileDir + "leading_jFEX_SRJ_vs_Sim_signal.pdf");
     }
 
 
     sig_h_LRJ_E->Scale(1.0 / sig_h_LRJ_E->Integral());
     back_h_LRJ_E->Scale(1.0 / back_h_LRJ_E->Integral());
-    sig_h_LRJ_E->SetLineColor(kRed);
-    back_h_LRJ_E->SetLineColor(kBlue);
+    sig_h_LRJ_E->SetLineColor(kP10Red);
+    back_h_LRJ_E->SetLineColor(kP10Blue);
     sig_h_LRJ_E->Draw("HIST");
     back_h_LRJ_E->Draw("HIST SAME");
     
     leg->Draw();
-    cLog.SaveAs(modifiedOutputFileDir + "LRJ_Energy.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "LRJ_Energy.pdf");
 
     sig_h_leading_offlineLRJ_Et->Scale(1.0 / sig_h_leading_offlineLRJ_Et->Integral());
     back_h_leading_offlineLRJ_Et->Scale(1.0 / back_h_leading_offlineLRJ_Et->Integral());
-    sig_h_leading_offlineLRJ_Et->SetLineColor(kRed);
-    back_h_leading_offlineLRJ_Et->SetLineColor(kBlue);
+    sig_h_leading_offlineLRJ_Et->SetLineColor(kP10Red);
+    back_h_leading_offlineLRJ_Et->SetLineColor(kP10Blue);
     
     back_h_leading_offlineLRJ_Et->Draw("HIST");
     sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
     
     leg->Draw();
 
-    cLog.SaveAs(modifiedOutputFileDir + "leading_offline_LRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "leading_offline_LRJ_Et.pdf");
 
     sig_h_subleading_offlineLRJ_Et->Scale(1.0 / sig_h_subleading_offlineLRJ_Et->Integral());
     back_h_subleading_offlineLRJ_Et->Scale(1.0 / back_h_subleading_offlineLRJ_Et->Integral());
-    sig_h_subleading_offlineLRJ_Et->SetLineColor(kRed);
-    back_h_subleading_offlineLRJ_Et->SetLineColor(kBlue);
+    sig_h_subleading_offlineLRJ_Et->SetLineColor(kP10Red);
+    back_h_subleading_offlineLRJ_Et->SetLineColor(kP10Blue);
     
     back_h_subleading_offlineLRJ_Et->Draw("HIST");
     sig_h_subleading_offlineLRJ_Et->Draw("HIST SAME");
     
     leg->Draw();
 
-    cLog.SaveAs(modifiedOutputFileDir + "subleading_offline_LRJ_Et.pdf");
+    cLog.cd(); DrawATLASLabel(); cLog.SaveAs(modifiedOutputFileDir + "subleading_offline_LRJ_Et.pdf");
 
     c.cd();
 
     sigDiamvsEt->Draw("COLZ");
-    c.SaveAs(modifiedOutputFileDir + "EtvsDiamSignal.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "EtvsDiamSignal.pdf");
 
     leadingHiggsVsSubleadingHiggspT->Draw("COLZ");
     leadingHiggsVsSubleadingHiggspT->Scale(1.0 / leadingHiggsVsSubleadingHiggspT->Integral());
-    c.SaveAs(modifiedOutputFileDir + "leadingHiggsVsSubleadingHiggspT.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leadingHiggsVsSubleadingHiggspT.pdf");
 
     leadingbVsSubleadingbpT_LeadingHiggs->Draw("COLZ");
     leadingbVsSubleadingbpT_LeadingHiggs->Scale(1.0 / leadingbVsSubleadingbpT_LeadingHiggs->Integral());
-    c.SaveAs(modifiedOutputFileDir + "leadingbVsSubleadingbpT_LeadingHiggs.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leadingbVsSubleadingbpT_LeadingHiggs.pdf");
 
     leadingbVsSubleadingbpT_SubleadingHiggs->Draw("COLZ");
     leadingbVsSubleadingbpT_SubleadingHiggs->Scale(1.0 / leadingbVsSubleadingbpT_SubleadingHiggs->Integral());
-    c.SaveAs(modifiedOutputFileDir + "leadingbVsSubleadingbpT_SubleadingHiggs.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "leadingbVsSubleadingbpT_SubleadingHiggs.pdf");
 
     backDiamvsEt->Draw("COLZ");
-    c.SaveAs(modifiedOutputFileDir + "EtvsDiamBack.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "EtvsDiamBack.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsPsi_R->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R->Integral());
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R.pdf");
 
     sigJetTaggerSubleadingLRJEtvsPsi_R->Draw("COLZ");
     sigJetTaggerSubleadingLRJEtvsPsi_R->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsPsi_R->Integral());
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R_squared->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsPsi_R_squared->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R_squared->Integral());
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R_squared.pdf");
 
     sigJetTaggerSubleadingLRJEtvsPsi_R_squared->Draw("COLZ");
     sigJetTaggerSubleadingLRJEtvsPsi_R_squared->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsPsi_R_squared->Integral());
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R_squared.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R_squared.pdf");
 
     TCanvas cLogZ;
     cLogZ.SetLogz();
@@ -15117,12 +15859,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     backJetTaggerLeadingLRJEtvsPsi_R_squared->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsPsi_R_squared->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R_squared->Integral());
     backJetTaggerLeadingLRJEtvsPsi_R_squared->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R_squared.pdf");
     
     backJetTaggerSubleadingLRJEtvsPsi_R_squared->Draw("COLZ");
     backJetTaggerSubleadingLRJEtvsPsi_R_squared->Scale(1.0 / backJetTaggerSubleadingLRJEtvsPsi_R_squared->Integral());
     backJetTaggerSubleadingLRJEtvsPsi_R_squared->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R_squared.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R_squared.pdf");
 
     c.cd();
     
@@ -15133,7 +15875,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R->Draw("COLZ");
     sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R->Scale(1.0 / sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R->Integral());
     mySmallText(0.15, 0.05, kBlack, rhoText_Sig_Psi_R);
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R.pdf");
 
     cLogZ.cd();
 
@@ -15141,24 +15883,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     backJetTaggerLeadingLRJEtvsPsi_12->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsPsi_12->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_12->Integral());
     backJetTaggerLeadingLRJEtvsPsi_12->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJEtvsPsi_R_12.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJEtvsPsi_R_12.pdf");
 
     
     backJetTaggerSubleadingLRJEtvsPsi_R2_12->Draw("COLZ");
     backJetTaggerSubleadingLRJEtvsPsi_R2_12->Scale(1.0 / backJetTaggerSubleadingLRJEtvsPsi_R2_12->Integral());
     backJetTaggerSubleadingLRJEtvsPsi_R2_12->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R2_12.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R2_12.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R2_12->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsPsi_R2_12->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R2_12->Integral());
     backJetTaggerLeadingLRJEtvsPsi_R2_12->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R2_12.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R2_12.pdf");
 
     
     backJetTaggerSubleadingLRJEtvsPsi_12->Draw("COLZ");
     backJetTaggerSubleadingLRJEtvsPsi_12->Scale(1.0 / backJetTaggerSubleadingLRJEtvsPsi_12->Integral());
     backJetTaggerSubleadingLRJEtvsPsi_12->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineSubleadingLRJEtvsPsi_R_12.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineSubleadingLRJEtvsPsi_R_12.pdf");
 
     char rhoText_Back_Psi_R[128];
     sprintf(rhoText_Back_Psi_R, "Pearson #rho = %.3f", backJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R->GetCorrelationFactor());
@@ -15170,29 +15912,29 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     mySmallText(0.15, 0.05, kBlack, rhoText_Back_Psi_R);
     
     
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R.pdf");
 
     
     backJetTaggerLeadingLRJEtvsPsi_R->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsPsi_R->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R->Integral());
     backJetTaggerLeadingLRJEtvsPsi_R->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R.pdf");
 
     sigOfflineLeadingLRJMassvsPsi_R->Draw("COLZ");
     sigOfflineLeadingLRJMassvsPsi_R->Scale(1.0 / sigOfflineLeadingLRJMassvsPsi_R->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJMassvsPsi_R.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJMassvsPsi_R.pdf");
 
     
     backOfflineLeadingLRJMassvsPsi_R->Draw("COLZ");
     backOfflineLeadingLRJMassvsPsi_R->Scale(1.0 / backOfflineLeadingLRJMassvsPsi_R->Integral());
     backOfflineLeadingLRJMassvsPsi_R->SetMinimum(1e-10);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJMassvsPsi_R.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJMassvsPsi_R.pdf");
 
     
     backJetTaggerSubleadingLRJEtvsPsi_R->Draw("COLZ");
     backJetTaggerSubleadingLRJEtvsPsi_R->Scale(1.0 / backJetTaggerSubleadingLRJEtvsPsi_R->Integral());
     backJetTaggerSubleadingLRJEtvsPsi_R->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R.pdf");
 
     // TOB E_T vs. offline LRJ E_T: resolution / calibration view
     {
@@ -15216,14 +15958,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             prof->Fit(fitFn, "QN");   // Q=quiet, N=don't draw
             double slope     = fitFn->GetParameter(1);
             double intercept = fitFn->GetParameter(0);
-            fitFn->SetLineColor(kBlue); fitFn->SetLineWidth(2);
+            fitFn->SetLineColor(kP10Blue); fitFn->SetLineWidth(2);
             fitFn->Draw("SAME");
             prof->Draw("SAME");
 
             // y = x diagonal reference line
             double rng = std::min(xmax, ymax);
             TLine* diag = new TLine(0, 0, rng, rng);
-            diag->SetLineColor(kRed); diag->SetLineStyle(2); diag->SetLineWidth(2);
+            diag->SetLineColor(kP10Red); diag->SetLineStyle(2); diag->SetLineWidth(2);
             diag->Draw("SAME");
 
             // Legend — top left (3 entries: diagonal label, fit, r value)
@@ -15235,7 +15977,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg.AddEntry((TObject*)nullptr, Form("r = %.4f", r), "");
             leg.Draw();
 
-            cLogZ.SaveAs(path);
+            cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(path);
             delete prof; delete fitFn;
         };
         drawTOBvsOffline(sig_h2_JetTagger_lead_TOBEt_vs_offlineEt,
@@ -15306,72 +16048,74 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // Computed with deltaR^2 metric
     sigJetTaggerLeadingLRJEtvsPsi_R2->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsPsi_R2->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R2->Integral());
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R2.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R2.pdf");
 
     sigJetTaggerSubleadingLRJEtvsPsi_R2->Draw("COLZ");
     sigJetTaggerSubleadingLRJEtvsPsi_R2->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsPsi_R2->Integral());
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R2.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R2.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R2_squared->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsPsi_R2_squared->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R2_squared->Integral());
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R2_squared.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R2_squared.pdf");
     
     cLogZ.cd();
     sigJetTaggerLeadingLRJEtvsPsi_12->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsPsi_12->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_12->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJEtvsPsi_R_12.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJEtvsPsi_R_12.pdf");
     
     sigJetTaggerSubleadingLRJEtvsPsi_12->Draw("COLZ");
     sigJetTaggerSubleadingLRJEtvsPsi_12->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsPsi_12->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineSubleadingLRJEtvsPsi_R_12.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineSubleadingLRJEtvsPsi_R_12.pdf");
 
     sigJetTaggerLeadingLRJEtvsPsi_R2_12->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsPsi_R2_12->Scale(1.0 / sigJetTaggerLeadingLRJEtvsPsi_R2_12->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R2_12.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsPsi_R2_12.pdf");
     
     sigJetTaggerSubleadingLRJEtvsPsi_R2_12->Draw("COLZ");
     sigJetTaggerSubleadingLRJEtvsPsi_R2_12->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsPsi_12->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R2_12.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R2_12.pdf");
 
     sigJetTaggerSubleadingLRJEtvsPsi_R2_squared->Draw("COLZ");
     sigJetTaggerSubleadingLRJEtvsPsi_R2_squared->Scale(1.0 / sigJetTaggerSubleadingLRJEtvsPsi_R2_squared->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R2_squared.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigJetTaggerSubleadingLRJEtvsPsi_R2_squared.pdf");
 
     backJetTaggerLeadingLRJEtvsPsi_R2_squared->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsPsi_R2_squared->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R2_squared->Integral());
     backOfflineLeadingLRJMassvsEt->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R2_squared.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R2_squared.pdf");
 
     c.cd();
     
     backJetTaggerSubleadingLRJEtvsPsi_R2_squared->Draw("COLZ");
     backJetTaggerSubleadingLRJEtvsPsi_R2_squared->Scale(1.0 / backJetTaggerSubleadingLRJEtvsPsi_R2_squared->Integral());
-    c.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R2_squared.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R2_squared.pdf");
 
     sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2->Scale(1.0 / sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2->Integral());
     sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2->Draw("COLZ");
-    c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2.pdf");
 
     backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2->Draw("COLZ");
     backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2->Scale(1.0 / backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2->Integral());
-    c.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2.pdf");
     cLogZ.cd();
 
     backJetTaggerLeadingLRJEtvsPsi_R2->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsPsi_R2->Scale(1.0 / backJetTaggerLeadingLRJEtvsPsi_R2->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R2.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsPsi_R2.pdf");
 
     backJetTaggerSubleadingLRJEtvsPsi_R2->Draw("COLZ");
     backJetTaggerSubleadingLRJEtvsPsi_R2->Scale(1.0 / backJetTaggerSubleadingLRJEtvsPsi_R2->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R2.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerSubleadingLRJEtvsPsi_R2.pdf");
 
     sigOfflineLeadingLRJMassvsEt->Scale(1.0 / sigOfflineLeadingLRJMassvsEt->Integral());
+    sigOfflineLeadingLRJMassvsEt->GetXaxis()->SetRangeUser(sigOfflineLeadingLRJMassvsEt->GetXaxis()->GetXmin(), 800);
+    sigOfflineLeadingLRJMassvsEt->GetYaxis()->SetRangeUser(sigOfflineLeadingLRJMassvsEt->GetYaxis()->GetXmin(), 300);
     sigOfflineLeadingLRJMassvsEt->Draw("COLZ");
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJMassvsEt.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJMassvsEt.pdf");
 
     sigOfflineSubleadingLRJMassvsEt->Scale(1.0 / sigOfflineSubleadingLRJMassvsEt->Integral());
     sigOfflineSubleadingLRJMassvsEt->Draw("COLZ");
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineSubleadingLRJMassvsEt.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineSubleadingLRJMassvsEt.pdf");
 
     char rhoText_Sig_Mass[128];
     sprintf(rhoText_Sig_Mass, "Pearson #rho = %.3f", sigOfflineSubleadingLRJMassvsLeadingLRJMass->GetCorrelationFactor());
@@ -15380,14 +16124,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sigOfflineSubleadingLRJMassvsLeadingLRJMass->Scale(1.0 / sigOfflineSubleadingLRJMassvsLeadingLRJMass->Integral());
     sigOfflineSubleadingLRJMassvsLeadingLRJMass->Draw("COLZ");
     mySmallText(0.15, 0.05, kBlack, rhoText_Sig_Mass);
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineSubleadingLRJMassvsLeadingLRJMass.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineSubleadingLRJMassvsLeadingLRJMass.pdf");
 
     
     backOfflineLeadingLRJMassvsEt->Draw("COLZ");
     
     backOfflineLeadingLRJMassvsEt->Scale(1.0 / backOfflineLeadingLRJMassvsEt->Integral());
     backOfflineLeadingLRJMassvsEt->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJMassvsEt.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJMassvsEt.pdf");
 
     char rhoText_Back_Mass[128];
     sprintf(rhoText_Back_Mass, "Pearson #rho = %.3f", backOfflineSubleadingLRJMassvsLeadingLRJMass->GetCorrelationFactor());
@@ -15396,13 +16140,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     backOfflineSubleadingLRJMassvsLeadingLRJMass->Draw("COLZ");
     mySmallText(0.15, 0.05, kBlack, rhoText_Back_Mass);
     //backOfflineSubleadingLRJMassvsLeadingLRJMass->Scale(1.0 / backOfflineSubleadingLRJMassvsLeadingLRJMass->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineSubleadingLRJMassvsLeadingLRJMass.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineSubleadingLRJMassvsLeadingLRJMass.pdf");
 
     
     backOfflineSubleadingLRJMassvsEt->Draw("COLZ");
     backOfflineSubleadingLRJMassvsEt->Scale(1.0 / backOfflineSubleadingLRJMassvsEt->Integral());
     backOfflineSubleadingLRJMassvsEt->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineSubleadingLRJMassvsEt.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineSubleadingLRJMassvsEt.pdf");
 
     // === Jet-type comparison plots ===
     {
@@ -15423,7 +16167,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
             // y = x diagonal reference line (dashed red)
             TLine* diag = new TLine(0, 0, rng, rng);
-            diag->SetLineColor(kRed); diag->SetLineStyle(2); diag->SetLineWidth(2);
+            diag->SetLineColor(kP10Red); diag->SetLineStyle(2); diag->SetLineWidth(2);
             diag->Draw("SAME");
 
             // Pearson correlation coefficient
@@ -15438,7 +16182,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             prof->Fit(fitFn, "QN");
             double slope     = fitFn->GetParameter(1);
             double intercept = fitFn->GetParameter(0);
-            fitFn->SetLineColor(kBlue); fitFn->SetLineWidth(2);
+            fitFn->SetLineColor(kP10Blue); fitFn->SetLineWidth(2);
             fitFn->Draw("SAME");
             prof->Draw("SAME");
 
@@ -15451,7 +16195,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg.AddEntry((TObject*)nullptr, Form("r = %.4f", r), "");
             leg.Draw();
 
-            cLogZ.SaveAs(modifiedOutputFileDir + fname);
+            cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + fname);
             delete diag; delete prof; delete fitFn;
         };
 
@@ -15499,7 +16243,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if (h->Integral() > 0) h->Scale(1.0 / h->Integral());
             if (fname.Contains("back_")) h->SetMinimum(1e-8);
             h->Draw("COLZ");
-            cLogZ.SaveAs(modifiedOutputFileDir + fname);
+            cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + fname);
         };
         // Signal
         drawEtVsMass(sig_h2_reco_leading_EtVsMass,       "sig_h2_reco_leading_EtVsMass.pdf");
@@ -15525,7 +16269,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     {
         auto drawOverlay = [&](std::array<TH1F*,4> hists, const TString& fname, const TString& title) {
             c.cd();
-            const Color_t cols[4] = {kBlack, kBlue, kRed, kGreen+2};
+            const int cols[4] = {kBlack, kP10Blue, kP10Red, kP10Green};
             const char*    labs[4] = {"Offline Large-R Jet", "Offline SoftDrop Large-R Jet", "Truth Large-R Jet", "Truth SoftDrop Large-R Jet"};
             TLegend leg(0.62, 0.62, 0.88, 0.88);
             leg.SetBorderSize(0);
@@ -15543,7 +16287,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 leg.AddEntry(hists[k], labs[k], "l");
             }
             leg.Draw();
-            c.SaveAs(modifiedOutputFileDir + fname);
+            c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + fname);
         };
         // Signal leading
         drawOverlay({sig_h1_reco_leading_Et,   sig_h1_recoSD_leading_Et,   sig_h1_truth_leading_Et,   sig_h1_truthSD_leading_Et},
@@ -15569,24 +16313,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     c.cd();
     sigOfflineLeadingLRJMassvsSubjetMult->Draw("COLZ");
-    c.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJMassvsSubjetMult.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJMassvsSubjetMult.pdf");
 
     backOfflineLeadingLRJMassvsSubjetMult->Draw("COLZ");
-    c.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJMassvsSubjetMult.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJMassvsSubjetMult.pdf");
 
     cLogZ.cd();
     sigOfflineLeadingLRJEtvsSubjetMult->Draw("COLZ");
     sigOfflineLeadingLRJEtvsSubjetMult->Scale(1.0 / sigOfflineLeadingLRJEtvsSubjetMult->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJEtvsSubjetMult.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigOfflineLeadingLRJEtvsSubjetMult.pdf");
 
     backJetTaggerLeadingLRJEtvsSubleadingLRJEt->Draw("COLZ");
     backJetTaggerLeadingLRJEtvsSubleadingLRJEt->Scale(1.0 / backJetTaggerLeadingLRJEtvsSubleadingLRJEt->Integral());
     backOfflineLeadingLRJEtvsSubjetMult->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsSubleadingLRJEt.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backJetTaggerLeadingLRJEtvsSubleadingLRJEt.pdf");
 
     sigJetTaggerLeadingLRJEtvsSubleadingLRJEt->Draw("COLZ");
     sigJetTaggerLeadingLRJEtvsSubleadingLRJEt->Scale(1.0 / sigJetTaggerLeadingLRJEtvsSubleadingLRJEt->Integral());
-    cLogZ.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsSubleadingLRJEt.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "sigJetTaggerLeadingLRJEtvsSubleadingLRJEt.pdf");
     
 
     
@@ -15594,7 +16338,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     backOfflineLeadingLRJEtvsSubjetMult->Draw("COLZ");
     backOfflineLeadingLRJEtvsSubjetMult->Scale(1.0 / backOfflineLeadingLRJEtvsSubjetMult->Integral());
     backOfflineLeadingLRJEtvsSubjetMult->SetMinimum(1e-14);
-    cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJEtvsSubjetMult.pdf");
+    cLogZ.cd(); DrawATLASLabel(); cLogZ.SaveAs(modifiedOutputFileDir + "backOfflineLeadingLRJEtvsSubjetMult.pdf");
 
     TCanvas cLogYConeJets;
     cLogYConeJets.SetLogy();
@@ -15623,7 +16367,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         cEtaSKRings.cd();
 
         const char* ringLabels[5] = { "Ring 0", "Ring 1", "Ring 2", "Ring 3", "Ring 4" };
-        const Int_t ringCols[5]   = { kBlack, kRed+1, kBlue+1, kGreen+2, kViolet+1 };
+        const Int_t ringCols[5]   = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet };
         TH1F* ringHists[5] = { sig_h_leading_WTA_coneEtaSK_Ring0Et, sig_h_leading_WTA_coneEtaSK_Ring1Et,
                                 sig_h_leading_WTA_coneEtaSK_Ring2Et, sig_h_leading_WTA_coneEtaSK_Ring3Et,
                                 sig_h_leading_WTA_coneEtaSK_Ring4Et };
@@ -15643,7 +16387,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             ringleg.AddEntry(ringHists[k], ringLabels[k], "l");
         }
         ringleg.Draw();
-        cEtaSKRings.SaveAs(modifiedOutputFileDir + "leading_WTA_coneEtaSK_rings_Et.pdf");
+        cEtaSKRings.cd(); DrawATLASLabel(); cEtaSKRings.SaveAs(modifiedOutputFileDir + "leading_WTA_coneEtaSK_rings_Et.pdf");
 
         // TotalTobN
         if (sig_h_leading_WTA_coneEtaSK_TotalTobN->Integral() > 0)
@@ -15651,7 +16395,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_h_leading_WTA_coneEtaSK_TotalTobN->SetLineColor(kBlack);
         sig_h_leading_WTA_coneEtaSK_TotalTobN->SetLineWidth(2);
         sig_h_leading_WTA_coneEtaSK_TotalTobN->Draw("HIST");
-        cEtaSKRings.SaveAs(modifiedOutputFileDir + "leading_WTA_coneEtaSK_TotalTobN.pdf");
+        cEtaSKRings.cd(); DrawATLASLabel(); cEtaSKRings.SaveAs(modifiedOutputFileDir + "leading_WTA_coneEtaSK_TotalTobN.pdf");
     }
 
     // 4-type WTA cone jet pT overlay — leading (signal solid, background dashed)
@@ -15665,7 +16409,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         TH1F* covHL_bkg[4] = { back_h_leading_WTA_conecellstowers_pT, back_h_leading_WTA_coneSK_cellstowers_pT,
                                back_h_leading_WTA_coneEtaSK_cellstowers_pT, back_h_leading_WTA_conebasicclusters_pT };
         const char* covNL[4] = { "CellsTowers", "SK CellsTowers", "EtaSK CellsTowers", "BasicClusters" };
-        const Int_t covCL[4] = { kBlack, kRed+1, kBlue+1, kGreen+2 };
+        const Int_t covCL[4] = { kBlack, kP10Red, kP10Blue, kP10Green };
         bool firstDraw = true;
         for (int k = 0; k < 4; ++k) {
             TH1F* hs = (TH1F*)covHL_sig[k]->Clone(Form("covLSigClone_%d", k));
@@ -15683,7 +16427,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             covlegL.AddEntry(hb, Form("%s (Background)", covNL[k]), "l");
         }
         covlegL.Draw();
-        covL.SaveAs(modifiedOutputFileDir + "overlay_WTA_cone_types_leading_pT.pdf");
+        covL.cd(); DrawATLASLabel(); covL.SaveAs(modifiedOutputFileDir + "overlay_WTA_cone_types_leading_pT.pdf");
     }
     // 4-type WTA cone jet pT overlay — subleading (signal solid, background dashed)
     {
@@ -15696,7 +16440,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         TH1F* covHS_bkg[4] = { back_h_subleading_WTA_conecellstowers_pT, back_h_subleading_WTA_coneSK_cellstowers_pT,
                                back_h_subleading_WTA_coneEtaSK_cellstowers_pT, back_h_subleading_WTA_conebasicclusters_pT };
         const char* covNS[4] = { "CellsTowers", "SK CellsTowers", "EtaSK CellsTowers", "BasicClusters" };
-        const Int_t covCS[4] = { kBlack, kRed+1, kBlue+1, kGreen+2 };
+        const Int_t covCS[4] = { kBlack, kP10Red, kP10Blue, kP10Green };
         bool firstDraw = true;
         for (int k = 0; k < 4; ++k) {
             TH1F* hs = (TH1F*)covHS_sig[k]->Clone(Form("covSSigClone_%d", k));
@@ -15714,7 +16458,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             covlegS.AddEntry(hb, Form("%s (Background)", covNS[k]), "l");
         }
         covlegS.Draw();
-        covS.SaveAs(modifiedOutputFileDir + "overlay_WTA_cone_types_subleading_pT.pdf");
+        covS.cd(); DrawATLASLabel(); covS.SaveAs(modifiedOutputFileDir + "overlay_WTA_cone_types_subleading_pT.pdf");
     }
 
     // JZ0 no-HSTP basic distributions
@@ -15724,19 +16468,19 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         cJZ0.cd();
         back_h_leading_truthSRJ_Et_JZ0->SetLineColor(kBlack);
         back_h_leading_truthSRJ_Et_JZ0->Draw("HIST");
-        cJZ0.SaveAs(modifiedOutputFileDir + "back_leading_truthSRJ_Et_JZ0.pdf");
+        cJZ0.cd(); DrawATLASLabel(); cJZ0.SaveAs(modifiedOutputFileDir + "back_leading_truthSRJ_Et_JZ0.pdf");
 
         back_h_subleading_truthSRJ_Et_JZ0->SetLineColor(kBlack);
         back_h_subleading_truthSRJ_Et_JZ0->Draw("HIST");
-        cJZ0.SaveAs(modifiedOutputFileDir + "back_subleading_truthSRJ_Et_JZ0.pdf");
+        cJZ0.cd(); DrawATLASLabel(); cJZ0.SaveAs(modifiedOutputFileDir + "back_subleading_truthSRJ_Et_JZ0.pdf");
 
         back_h_leading_jetTagger_Et_JZ0->SetLineColor(kBlack);
         back_h_leading_jetTagger_Et_JZ0->Draw("HIST");
-        cJZ0.SaveAs(modifiedOutputFileDir + "back_leading_jetTagger_Et_JZ0.pdf");
+        cJZ0.cd(); DrawATLASLabel(); cJZ0.SaveAs(modifiedOutputFileDir + "back_leading_jetTagger_Et_JZ0.pdf");
 
         back_h_subleading_jetTagger_Et_JZ0->SetLineColor(kBlack);
         back_h_subleading_jetTagger_Et_JZ0->Draw("HIST");
-        cJZ0.SaveAs(modifiedOutputFileDir + "back_subleading_jetTagger_Et_JZ0.pdf");
+        cJZ0.cd(); DrawATLASLabel(); cJZ0.SaveAs(modifiedOutputFileDir + "back_subleading_jetTagger_Et_JZ0.pdf");
     }
 
     // JZ0 vs all-JZ+HSTP rate comparison — gFEX leading
@@ -15748,14 +16492,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if (hfna->Integral() > 0) hfna->Scale(1.0 / hfna->Integral());
         if (hjna->Integral() > 0) hjna->Scale(1.0 / hjna->Integral());
         hfna->SetLineColor(kBlack); hfna->SetLineWidth(2);
-        hjna->SetLineColor(kRed+1); hjna->SetLineWidth(2);
+        hjna->SetLineColor(kP10Red); hjna->SetLineWidth(2);
         hfna->Draw("HIST"); hjna->Draw("HIST SAME");
         TLegend jz0lega(0.50, 0.75, 0.88, 0.88);
         jz0lega.SetBorderSize(0); jz0lega.SetFillStyle(0);
         jz0lega.AddEntry(hfna, "All JZ + HSTP", "l");
         jz0lega.AddEntry(hjna, "JZ0 only", "l");
         jz0lega.Draw();
-        cJZ0a.SaveAs(modifiedOutputFileDir + "jz0_vs_allJZ_gFEX_leading_LRJ_Et.pdf");
+        cJZ0a.cd(); DrawATLASLabel(); cJZ0a.SaveAs(modifiedOutputFileDir + "jz0_vs_allJZ_gFEX_leading_LRJ_Et.pdf");
     }
     // JZ0 vs all-JZ+HSTP rate comparison — gFEX resim leading
     {
@@ -15766,14 +16510,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if (hfnb->Integral() > 0) hfnb->Scale(1.0 / hfnb->Integral());
         if (hjnb->Integral() > 0) hjnb->Scale(1.0 / hjnb->Integral());
         hfnb->SetLineColor(kBlack); hfnb->SetLineWidth(2);
-        hjnb->SetLineColor(kRed+1); hjnb->SetLineWidth(2);
+        hjnb->SetLineColor(kP10Red); hjnb->SetLineWidth(2);
         hfnb->Draw("HIST"); hjnb->Draw("HIST SAME");
         TLegend jz0legb(0.50, 0.75, 0.88, 0.88);
         jz0legb.SetBorderSize(0); jz0legb.SetFillStyle(0);
         jz0legb.AddEntry(hfnb, "All JZ + HSTP", "l");
         jz0legb.AddEntry(hjnb, "JZ0 only", "l");
         jz0legb.Draw();
-        cJZ0b.SaveAs(modifiedOutputFileDir + "jz0_vs_allJZ_gFEX_Sim_leading_LRJ_Et.pdf");
+        cJZ0b.cd(); DrawATLASLabel(); cJZ0b.SaveAs(modifiedOutputFileDir + "jz0_vs_allJZ_gFEX_Sim_leading_LRJ_Et.pdf");
     }
 
     c.cd();
@@ -15785,28 +16529,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_h_LRJ_substruct->Scale(1.0 / sig_h_LRJ_substruct->Integral());
     back_h_LRJ_substruct->Scale(1.0 / back_h_LRJ_substruct->Integral());
-    sig_h_LRJ_substruct->SetLineColor(kRed);
-    back_h_LRJ_substruct->SetLineColor(kBlue);
+    sig_h_LRJ_substruct->SetLineColor(kP10Red);
+    back_h_LRJ_substruct->SetLineColor(kP10Blue);
     
     
     sig_h_LRJ_substruct->Draw("HIST");
     back_h_LRJ_substruct->Draw("HIST SAME");
     leg_Psi_R->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LRJ_Psi_R.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LRJ_Psi_R.pdf");
 
-    sig_h_LRJ_eta->SetLineColor(kRed);
-    back_h_LRJ_eta->SetLineColor(kBlue);
+    sig_h_LRJ_eta->SetLineColor(kP10Red);
+    back_h_LRJ_eta->SetLineColor(kP10Blue);
     sig_h_LRJ_eta->Draw();
     back_h_LRJ_eta->Draw("SAME");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LRJ_eta.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LRJ_eta.pdf");
 
-    sig_h_LRJ_phi->SetLineColor(kRed);
-    back_h_LRJ_phi->SetLineColor(kBlue);
+    sig_h_LRJ_phi->SetLineColor(kP10Red);
+    back_h_LRJ_phi->SetLineColor(kP10Blue);
     sig_h_LRJ_phi->Draw();
     back_h_LRJ_phi->Draw("SAME");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "LRJ_phi.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "LRJ_phi.pdf");
 
     // Build overlaid efficiency histograms (background first)
     auto be100 = (TH1F*)h_back_num100->Clone(Form("back_eff_offlineLRJ_Et_100_%d", fileIt));
@@ -15864,7 +16608,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ10kHz->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz.pdf");
 
     sig_eff_offlineLRJ10kHz_vec.push_back(sig_eff_offlineLRJ10kHz);
 
@@ -15877,7 +16621,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ10kHz_HiggsMassWindow->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_HiggsMassWindow.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_HiggsMassWindow.pdf");
 
     sig_eff_offlineLRJ10kHz_HiggsMassWindow_vec.push_back(sig_eff_offlineLRJ10kHz_HiggsMassWindow);
 
@@ -15890,7 +16634,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ10kHz_1Subjet->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_1Subjet.pdf");
 
     sig_eff_offlineLRJ10kHz_1Subjet_vec.push_back(sig_eff_offlineLRJ10kHz_1Subjet);
 
@@ -15904,7 +16648,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ10kHz_GrEq2Subjets->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_GrEq2Subjets.pdf");
 
     sig_eff_offlineLRJ10kHz_GrEq2Subjets_vec.push_back(sig_eff_offlineLRJ10kHz_GrEq2Subjets);
 
@@ -15920,12 +16664,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ35kHz_SubjetBased_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ_SubjetBased_35kHz->Clone(Form("eff_LRJ35kHz_SubjetBased_%d", fileIt))));
     sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel->Clone(Form("eff_LRJ35kHz_SubjetBased_MassSel_%d", fileIt))));
     sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec.push_back(static_cast<TH1F*>(sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel->Clone(Form("eff_LRJ35kHz_SubjetBased_NoMassSel_%d", fileIt))));
-    sig_eff_ETonly_35kHz_vec.push_back(static_cast<TH1F*>(eff_ET_only_35kHz->Clone(Form("eff_ETonly_35kHz_%d", fileIt))));
-    sig_eff_ETonly_35kHz_MassSel_vec.push_back(static_cast<TH1F*>(eff_ET_only_35kHz_MassSel->Clone(Form("eff_ETonly_35kHz_MassSel_%d", fileIt))));
-    sig_eff_ETonly_35kHz_NoMassSel_vec.push_back(static_cast<TH1F*>(eff_ET_only_35kHz_NoMassSel->Clone(Form("eff_ETonly_35kHz_NoMassSel_%d", fileIt))));
-    sig_eff_ETmass_35kHz_vec.push_back(static_cast<TH1F*>(eff_ET_mass_35kHz->Clone(Form("eff_ETmass_35kHz_%d", fileIt))));
-    sig_eff_ETmass_35kHz_MassSel_vec.push_back(static_cast<TH1F*>(eff_ET_mass_35kHz_MassSel->Clone(Form("eff_ETmass_35kHz_MassSel_%d", fileIt))));
-    sig_eff_ETmass_35kHz_NoMassSel_vec.push_back(static_cast<TH1F*>(eff_ET_mass_35kHz_NoMassSel->Clone(Form("eff_ETmass_35kHz_NoMassSel_%d", fileIt))));
+    sig_eff_ETonly_40kHz_vec.push_back(static_cast<TH1F*>(eff_ET_only_40kHz->Clone(Form("eff_ETonly_40kHz_%d", fileIt))));
+    sig_eff_ETonly_40kHz_MassSel_vec.push_back(static_cast<TH1F*>(eff_ET_only_40kHz_MassSel->Clone(Form("eff_ETonly_40kHz_MassSel_%d", fileIt))));
+    sig_eff_ETonly_40kHz_NoMassSel_vec.push_back(static_cast<TH1F*>(eff_ET_only_40kHz_NoMassSel->Clone(Form("eff_ETonly_40kHz_NoMassSel_%d", fileIt))));
+    sig_eff_ETmass_40kHz_vec.push_back(static_cast<TH1F*>(eff_ET_mass_40kHz->Clone(Form("eff_ETmass_40kHz_%d", fileIt))));
+    sig_eff_ETmass_40kHz_MassSel_vec.push_back(static_cast<TH1F*>(eff_ET_mass_40kHz_MassSel->Clone(Form("eff_ETmass_40kHz_MassSel_%d", fileIt))));
+    sig_eff_ETmass_40kHz_NoMassSel_vec.push_back(static_cast<TH1F*>(eff_ET_mass_40kHz_NoMassSel->Clone(Form("eff_ETmass_40kHz_NoMassSel_%d", fileIt))));
     intEff_SubjetBased_10kHz_all_vec.push_back(intEff_SubjetBased_10kHz_all);
     //intEff_SubjetBased_10kHz_massSel_vec.push_back(intEff_SubjetBased_10kHz_massSel);
    // intEff_SubjetBased_10kHz_noMassSel_vec.push_back(intEff_SubjetBased_10kHz_noMassSel);
@@ -15938,12 +16682,27 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     intEff_SubjetBased_35kHz_all_vec.push_back(intEff_SubjetBased_35kHz_all);
     intEff_SubjetBased_35kHz_massSel_vec.push_back(intEff_SubjetBased_35kHz_massSel);
     intEff_SubjetBased_35kHz_noMassSel_vec.push_back(intEff_SubjetBased_35kHz_noMassSel);
-    intEff_ETonly_35kHz_all_vec.push_back(intEff_ETonly_35kHz_all);
-    intEff_ETonly_35kHz_massSel_vec.push_back(intEff_ETonly_35kHz_massSel);
-    intEff_ETonly_35kHz_noMassSel_vec.push_back(intEff_ETonly_35kHz_noMassSel);
-    intEff_ETmass_35kHz_all_vec.push_back(intEff_ETmass_35kHz_all);
-    intEff_ETmass_35kHz_massSel_vec.push_back(intEff_ETmass_35kHz_massSel);
-    intEff_ETmass_35kHz_noMassSel_vec.push_back(intEff_ETmass_35kHz_noMassSel);
+    intEff_ETonly_40kHz_all_vec.push_back(intEff_ETonly_40kHz_all);
+    intEff_ETonly_40kHz_massSel_vec.push_back(intEff_ETonly_40kHz_massSel);
+    intEff_ETonly_40kHz_noMassSel_vec.push_back(intEff_ETonly_40kHz_noMassSel);
+    intEff_ETmass_40kHz_all_vec.push_back(intEff_ETmass_40kHz_all);
+    intEff_ETmass_40kHz_massSel_vec.push_back(intEff_ETmass_40kHz_massSel);
+    intEff_ETmass_40kHz_noMassSel_vec.push_back(intEff_ETmass_40kHz_noMassSel);
+    intEff_gFEX_ETonly_40kHz_all_vec.push_back(intEff_gFEX_ETonly_40kHz_all);
+    intEff_gFEX_ETonly_40kHz_massSel_vec.push_back(intEff_gFEX_ETonly_40kHz_massSel);
+    intEff_gFEX_ETonly_40kHz_noMassSel_vec.push_back(intEff_gFEX_ETonly_40kHz_noMassSel);
+
+    // Lead. LRJ E_T-only threshold @ 40 kHz + gFEX (Resim) LRJ E_T-only turn-on @ 40 kHz,
+    // stored per file for the SubjetVsET 40 kHz comparison overlay.
+    thr_ET_only_40kHz_vec.push_back(thr_ET_only_40kHz_p);
+    {
+        TH1F* eff_gFEX_Sim_40kHz_clone =
+            (TH1F*)sig_h_offlineLRJ_Et_num_gFEX_Sim_40kHz->Clone(Form("eff_gFEX_Sim_40kHz_%d", fileIt));
+        eff_gFEX_Sim_40kHz_clone->Divide(sig_h_offlineLRJ_Et_num_gFEX_Sim_40kHz,
+                                         sig_h_offlineLRJ_Et_denom_turnon, 1.0, 1.0, "B");
+        sig_eff_gFEX_Sim_40kHz_vec.push_back(eff_gFEX_Sim_40kHz_clone);
+    }
+    thr_gFEX_Sim_40kHz_vec.push_back(gFEX_Sim_40kHz_Threshold_Leading);
 
     TH1F* sig_eff_offline_gFEX_LRJ10kHz = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ->Clone();
     sig_eff_offline_gFEX_LRJ10kHz->SetName("eff_gFEX_LRJ_10kHz");
@@ -15954,7 +16713,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_gFEX_LRJ10kHz->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz.pdf");
 
     // 3-way turn-on: JetTagger vs gFEX AOD vs gFEX resim @ 10 kHz threshold
     {
@@ -15973,7 +16732,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         const double toThrs[3]    = { jetTagger_10kHz_Threshold_Leading,
                                       gFEX_10kHz_Threshold_Leading,
                                       gFEX_Sim_10kHz_Threshold_Leading };
-        const Int_t  toCols[3]    = { kBlack, kRed+1, kViolet+1 };
+        const Int_t  toCols[3]    = { kBlack, kP10Red, kP10Violet };
         TH1F* toHists[3]          = { eff_turnon_jetTagger, eff_turnon_gFEX, eff_turnon_gFEX_Sim };
 
         TLegend toleg(0.55, 0.18, 0.92, 0.48);
@@ -15999,7 +16758,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             toleg.AddEntry(toHists[k], toLabels[k].Data(), "lp");
         }
         toleg.Draw();
-        cTurnOn.SaveAs(rateVsEffFileDir + "turn_on_overlay_jetTagger_gFEX_gFEXSim.pdf");
+        cTurnOn.cd(); DrawATLASLabel(); cTurnOn.SaveAs(rateVsEffFileDir + "turn_on_overlay_jetTagger_gFEX_gFEXSim.pdf");
     }
 
     // 3-way turn-on: JetTagger vs gFEX AOD vs gFEX resim @ 40 kHz threshold
@@ -16019,7 +16778,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         const double toThrs40[3]  = { jetTagger_40kHz_Threshold_Leading,
                                       gFEX_40kHz_Threshold_Leading,
                                       gFEX_Sim_40kHz_Threshold_Leading };
-        const Int_t  toCols40[3]  = { kBlack, kRed+1, kViolet+1 };
+        const Int_t  toCols40[3]  = { kBlack, kP10Red, kP10Violet };
         TH1F* toHists40[3]        = { eff_turnon_jetTagger_40, eff_turnon_gFEX_40, eff_turnon_gFEX_Sim_40 };
 
         TLegend toleg40(0.55, 0.18, 0.92, 0.48);
@@ -16044,8 +16803,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             else        toHists40[k]->Draw("E1 SAME");
             toleg40.AddEntry(toHists40[k], toLabels40[k].Data(), "lp");
         }
+        // Signal offline leading LRJ E_T distribution in the background (gray), as on the other turn-on curves
+        sig_h_leading_offlineLRJ_Et->SetFillColorAlpha(kGray+1, 0.35);
+        sig_h_leading_offlineLRJ_Et->SetLineColor(kGray+2);
+        sig_h_leading_offlineLRJ_Et->SetLineWidth(1);
+        sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
         toleg40.Draw();
-        cTurnOn40.SaveAs(rateVsEffFileDir + "turn_on_overlay_jetTagger_gFEX_gFEXSim_40kHz.pdf");
+        cTurnOn40.cd(); DrawATLASLabel(); cTurnOn40.SaveAs(rateVsEffFileDir + "turn_on_overlay_jetTagger_gFEX_gFEXSim_40kHz.pdf");
 
         // 4-way: same plot + subjet-based 40 kHz turn-on
         if (sig_eff_offlineLRJ_SubjetBased_40kHz) {
@@ -16055,8 +16819,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 if (k == 0) toHists40[k]->Draw("E1");
                 else        toHists40[k]->Draw("E1 SAME");
             }
-            sig_eff_offlineLRJ_SubjetBased_40kHz->SetLineColor(kBlue+1);
-            sig_eff_offlineLRJ_SubjetBased_40kHz->SetMarkerColor(kBlue+1);
+            sig_eff_offlineLRJ_SubjetBased_40kHz->SetLineColor(kP10Blue);
+            sig_eff_offlineLRJ_SubjetBased_40kHz->SetMarkerColor(kP10Blue);
             sig_eff_offlineLRJ_SubjetBased_40kHz->SetMarkerStyle(23);
             sig_eff_offlineLRJ_SubjetBased_40kHz->SetLineWidth(2);
             sig_eff_offlineLRJ_SubjetBased_40kHz->GetYaxis()->SetRangeUser(0, 1.15);
@@ -16069,8 +16833,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 toleg40sub.AddEntry(toHists40[k], toLabels40[k].Data(), "lp");
             toleg40sub.AddEntry(sig_eff_offlineLRJ_SubjetBased_40kHz,
                 Form("5-cat Subjet-based (@ 40 kHz)"), "lp");
+            // Signal offline leading LRJ E_T distribution in the background (gray), as on the other turn-on curves
+            sig_h_leading_offlineLRJ_Et->SetFillColorAlpha(kGray+1, 0.35);
+            sig_h_leading_offlineLRJ_Et->SetLineColor(kGray+2);
+            sig_h_leading_offlineLRJ_Et->SetLineWidth(1);
+            sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
             toleg40sub.Draw();
-            cTurnOn40sub.SaveAs(rateVsEffFileDir + "turn_on_overlay_jetTagger_gFEX_gFEXSim_subjetBased_40kHz.pdf");
+            cTurnOn40sub.cd(); DrawATLASLabel(); cTurnOn40sub.SaveAs(rateVsEffFileDir + "turn_on_overlay_jetTagger_gFEX_gFEXSim_subjetBased_40kHz.pdf");
         }
     }
 
@@ -16091,7 +16860,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         const double toJThrs[3]  = { jFEX_SRJ_25kHz_Threshold_Leading,
                                      jFEX_Sim_25kHz_Threshold_Leading,
                                      cone_singleJet_25kHz_threshold };
-        const Int_t  toJCols[3]  = { kBlue+1, kViolet+1, kGreen+2 };
+        const Int_t  toJCols[3]  = { kP10Blue, kP10Violet, kP10Green };
         TH1F* toJHists[3]        = { eff_turnon_jFEX_SRJ, eff_turnon_jFEX_Sim, eff_turnon_WTA_cone_jFEXcmp };
 
         TLegend tojleg(0.65, 0.18, 0.88, 0.48);
@@ -16115,7 +16884,110 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             tojleg.AddEntry(toJHists[k], toJLabels[k].Data(), "lp");
         }
         tojleg.Draw();
-        cTurnOnJFEX.SaveAs(rateVsEffFileDir + "turn_on_overlay_jFEX_jFEXSim_cone.pdf");
+        cTurnOnJFEX.cd(); DrawATLASLabel(); cTurnOnJFEX.SaveAs(rateVsEffFileDir + "turn_on_overlay_jFEX_jFEXSim_cone.pdf");
+    }
+
+    // 5-way turn-on overlay (leading @ 25 kHz) vs truth leading AntiKt4 dressedWZ jet E_T:
+    // jFEX SRJ vs jFEX SRJ (Resim) vs gFEX SRJ vs gFEX SRJ (Resim) vs GEP Cone Jet.
+    // Matches the 5-way rate-vs-eff overlay (same colours, markers, labels and ordering).
+    {
+        auto makeEff5 = [](TH1F* num, TH1F* denom, const char* name) {
+            TH1F* e = (TH1F*)num->Clone(name);
+            e->Divide(num, denom, 1.0, 1.0, "B");
+            return e;
+        };
+        TH1F* to5Hists[5] = {
+            makeEff5(sig_h_truthSRJ_Et_num_jFEX_SRJ,         sig_h_truthSRJ_Et_denom_jFEX_turnon, "eff5_lead_jFEX_SRJ"),
+            makeEff5(sig_h_truthSRJ_Et_num_jFEX_Sim,         sig_h_truthSRJ_Et_denom_jFEX_turnon, "eff5_lead_jFEX_Sim"),
+            makeEff5(sig_h_truthSRJ_Et_num_gFEX_SRJ,         sig_h_truthSRJ_Et_denom_jFEX_turnon, "eff5_lead_gFEX_SRJ"),
+            makeEff5(sig_h_truthSRJ_Et_num_gFEX_Sim,         sig_h_truthSRJ_Et_denom_jFEX_turnon, "eff5_lead_gFEX_Sim"),
+            makeEff5(sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp, sig_h_truthSRJ_Et_denom_jFEX_turnon, "eff5_lead_WTA_cone")
+        };
+        const double to5Thrs[5]  = { jFEX_SRJ_25kHz_Threshold_Leading,
+                                     jFEX_Sim_25kHz_Threshold_Leading,
+                                     gFEX_25kHz_Threshold_Leading,
+                                     gFEX_Sim_25kHz_Threshold_Leading,
+                                     cone_singleJet_25kHz_threshold };
+        const Int_t  to5Cols[5]  = { kP6Violet, kP6Gray, kP6Grape, kP6Red, kP6Yellow };
+        const Int_t  to5Styles[5]= { 20, 21, 22, 23, 24 };
+        const char*  to5Names[5] = { "jFEX SRJ", "jFEX SRJ (Resim)", "gFEX SRJ", "gFEX SRJ (Resim)", "GEP Cone Jet" };
+
+        TCanvas cTurnOn5("cTurnOn5", "Turn-on @ 25 kHz: jFEX/gFEX SRJ (+Resim) vs GEP Cone Jet", 900, 700);
+        cTurnOn5.cd();
+        TLegend to5leg(0.50, 0.18, 0.88, 0.48);
+        to5leg.SetBorderSize(0); to5leg.SetFillStyle(0); to5leg.SetTextSize(0.0275);
+        for (int k = 0; k < 5; ++k) {
+            to5Hists[k]->SetLineColor(to5Cols[k]);
+            to5Hists[k]->SetMarkerColor(to5Cols[k]);
+            to5Hists[k]->SetMarkerStyle(to5Styles[k]);
+            to5Hists[k]->SetLineWidth(2);
+            to5Hists[k]->GetYaxis()->SetRangeUser(0, 1.15);
+            to5Hists[k]->GetXaxis()->SetRangeUser(50, 400);
+            to5Hists[k]->GetXaxis()->SetTitle("Leading Truth Jet E_{T} [GeV]");
+            to5Hists[k]->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
+            to5Hists[k]->Draw(k == 0 ? "E1" : "E1 SAME");
+            to5leg.AddEntry(to5Hists[k], Form("%s (%.0f GeV @ 25 kHz)", to5Names[k], to5Thrs[k]), "lp");
+        }
+        // Truth leading jet E_T spectrum as a gray shaded underlay (normalized to unit area)
+        TH1F* to5Truth = (TH1F*)sig_h_truthSRJ_Et_denom_jFEX_turnon->Clone("to5_truthDist_lead");
+        to5Truth->SetDirectory(0);
+        if (to5Truth->Integral() > 0) to5Truth->Scale(1.0 / to5Truth->Integral());
+        to5Truth->SetFillColorAlpha(kGray+1, 0.35);
+        to5Truth->SetLineColor(kGray+2);
+        to5Truth->SetLineWidth(1);
+        to5Truth->Draw("HIST SAME");
+        to5leg.Draw();
+        cTurnOn5.cd(); DrawATLASLabel(); cTurnOn5.SaveAs(rateVsEffFileDir + "turn_on_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone.pdf");
+    }
+
+    // 5-way turn-on overlay (4th-leading @ 100 kHz) vs truth 4th-leading AntiKt4 dressedWZ jet E_T.
+    {
+        auto makeEff5 = [](TH1F* num, TH1F* denom, const char* name) {
+            TH1F* e = (TH1F*)num->Clone(name);
+            e->Divide(num, denom, 1.0, 1.0, "B");
+            return e;
+        };
+        TH1F* to5Hists4[5] = {
+            makeEff5(sig_h_truth4thSRJ_Et_num_jFEX_SRJ, sig_h_truth4thSRJ_Et_denom_turnon, "eff5_4th_jFEX_SRJ"),
+            makeEff5(sig_h_truth4thSRJ_Et_num_jFEX_Sim, sig_h_truth4thSRJ_Et_denom_turnon, "eff5_4th_jFEX_Sim"),
+            makeEff5(sig_h_truth4thSRJ_Et_num_gFEX_SRJ, sig_h_truth4thSRJ_Et_denom_turnon, "eff5_4th_gFEX_SRJ"),
+            makeEff5(sig_h_truth4thSRJ_Et_num_gFEX_Sim, sig_h_truth4thSRJ_Et_denom_turnon, "eff5_4th_gFEX_Sim"),
+            makeEff5(sig_h_truth4thSRJ_Et_num_WTA_cone, sig_h_truth4thSRJ_Et_denom_turnon, "eff5_4th_WTA_cone")
+        };
+        const double to5Thrs4[5]  = { jFEX_100kHz_Threshold_4thLeading,
+                                      jFEX_Sim_100kHz_Threshold_4thLeading,
+                                      gFEX_100kHz_Threshold_4thLeading,
+                                      gFEX_Sim_100kHz_Threshold_4thLeading,
+                                      cone_multiJet_100kHz_threshold };
+        const Int_t  to5Cols4[5]  = { kP6Violet, kP6Gray, kP6Grape, kP6Red, kP6Yellow };
+        const Int_t  to5Styles4[5]= { 20, 21, 22, 23, 24 };
+        const char*  to5Names4[5] = { "jFEX SRJ", "jFEX SRJ (Resim)", "gFEX SRJ", "gFEX SRJ (Resim)", "GEP Cone Jet" };
+
+        TCanvas cTurnOn5_4th("cTurnOn5_4th", "Turn-on @ 100 kHz (4th leading): jFEX/gFEX SRJ (+Resim) vs GEP Cone Jet", 900, 700);
+        cTurnOn5_4th.cd();
+        TLegend to5leg4(0.50, 0.18, 0.88, 0.48);
+        to5leg4.SetBorderSize(0); to5leg4.SetFillStyle(0); to5leg4.SetTextSize(0.0275);
+        for (int k = 0; k < 5; ++k) {
+            to5Hists4[k]->SetLineColor(to5Cols4[k]);
+            to5Hists4[k]->SetMarkerColor(to5Cols4[k]);
+            to5Hists4[k]->SetMarkerStyle(to5Styles4[k]);
+            to5Hists4[k]->SetLineWidth(2);
+            to5Hists4[k]->GetYaxis()->SetRangeUser(0, 1.15);
+            to5Hists4[k]->GetXaxis()->SetTitle("4th Leading Truth Jet E_{T} [GeV]");
+            to5Hists4[k]->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
+            to5Hists4[k]->Draw(k == 0 ? "E1" : "E1 SAME");
+            to5leg4.AddEntry(to5Hists4[k], Form("%s (%.0f GeV @ 100 kHz)", to5Names4[k], to5Thrs4[k]), "lp");
+        }
+        // Truth 4th-leading jet E_T spectrum as a gray shaded underlay (normalized to unit area)
+        TH1F* to5Truth4 = (TH1F*)sig_h_truth4thSRJ_Et_denom_turnon->Clone("to5_truthDist_4th");
+        to5Truth4->SetDirectory(0);
+        if (to5Truth4->Integral() > 0) to5Truth4->Scale(1.0 / to5Truth4->Integral());
+        to5Truth4->SetFillColorAlpha(kGray+1, 0.35);
+        to5Truth4->SetLineColor(kGray+2);
+        to5Truth4->SetLineWidth(1);
+        to5Truth4->Draw("HIST SAME");
+        to5leg4.Draw();
+        cTurnOn5_4th.cd(); DrawATLASLabel(); cTurnOn5_4th.SaveAs(rateVsEffFileDir + "turn_on_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone_4thLead.pdf");
     }
 
     TH1F* sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow->Clone();
@@ -16127,7 +16999,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow.pdf");
 
     TH1F* sig_eff_offline_gFEX_LRJ10kHz_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet->Clone();
     sig_eff_offline_gFEX_LRJ10kHz_1Subjet->SetName("eff_gFEX_LRJ_10kHz");
@@ -16138,7 +17010,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_gFEX_LRJ10kHz_1Subjet->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_1Subjet.pdf");
 
     TH1F* sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets->Clone();
     sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets->SetName("eff_gFEX_LRJ_10kHz");
@@ -16149,7 +17021,32 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets.pdf");
+
+    // 40 kHz subjet-split efficiencies (JetTagger + gFEX resim), mirror of the 10 kHz versions
+    TH1F* sig_eff_offlineLRJ40kHz_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num40kHz_1Subjet->Clone();
+    sig_eff_offlineLRJ40kHz_1Subjet->SetName("eff_LRJ40kHz_1Subjet");
+    sig_eff_offlineLRJ40kHz_1Subjet->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
+    sig_eff_offlineLRJ40kHz_1Subjet->Divide(sig_h_offlineLRJ_Et_num40kHz_1Subjet, sig_h_offlineLRJ_Et_denom40kHz_1Subjet, 1.0, 1.0, "B");
+    sig_eff_offlineLRJ40kHz_1Subjet->SetAxisRange(0, 1.1, "Y");
+
+    TH1F* sig_eff_offlineLRJ40kHz_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets->Clone();
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->SetName("eff_LRJ40kHz_GrEq2Subjets");
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->Divide(sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets, sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets, 1.0, 1.0, "B");
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->SetAxisRange(0, 1.1, "Y");
+
+    TH1F* sig_eff_offline_gFEX_LRJ40kHz_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet->Clone();
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->SetName("eff_gFEX_LRJ_40kHz_1Subjet");
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->Divide(sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet, sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet, 1.0, 1.0, "B");
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->SetAxisRange(0, 1.1, "Y");
+
+    TH1F* sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets->Clone();
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->SetName("eff_gFEX_LRJ_40kHz_GrEq2Subjets");
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->Divide(sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets, sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets, 1.0, 1.0, "B");
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->SetAxisRange(0, 1.1, "Y");
 
     TH1F* sig_eff_offlineLRJ10kHz_Subleading = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_Subleading->Clone();
     sig_eff_offlineLRJ10kHz_Subleading->SetName("eff_LRJ10kHz");
@@ -16160,7 +17057,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ10kHz_Subleading->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_Subleading.pdf");
 
     sig_eff_offlineLRJ10kHz_Subleading_vec.push_back(sig_eff_offlineLRJ10kHz_Subleading);
 
@@ -16173,7 +17070,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ10kHz_HiggsMassWindow_Subleading->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_HiggsMassWindow_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_HiggsMassWindow_Subleading.pdf");
 
     sig_eff_offlineLRJ10kHz_HiggsMassWindow_Subleading_vec.push_back(sig_eff_offlineLRJ10kHz_HiggsMassWindow_Subleading);
 
@@ -16186,7 +17083,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ10kHz_1Subjet_Subleading->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_1Subjet_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_1Subjet_Subleading.pdf");
 
     sig_eff_offlineLRJ10kHz_1Subjet_Subleading_vec.push_back(sig_eff_offlineLRJ10kHz_1Subjet_Subleading);
 
@@ -16200,7 +17097,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ10kHz_GrEq2Subjets_Subleading->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_GrEq2Subjets_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ10kHz_GrEq2Subjets_Subleading.pdf");
 
     sig_eff_offlineLRJ10kHz_GrEq2Subjets_Subleading_vec.push_back(sig_eff_offlineLRJ10kHz_GrEq2Subjets_Subleading);
 
@@ -16213,7 +17110,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_gFEX_LRJ10kHz_Subleading->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_Subleading.pdf");
 
     TH1F* sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow_Subleading->Clone();
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading->SetName("eff_gFEX_LRJ_10kHz");
@@ -16224,7 +17121,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow.pdf");
 
     TH1F* sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet_Subleading->Clone();
     sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading->SetName("eff_gFEX_LRJ_10kHz");
@@ -16235,7 +17132,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading.pdf");
 
     TH1F* sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets_Subleading->Clone();
     sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading->SetName("eff_gFEX_LRJ_10kHz");
@@ -16246,7 +17143,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading.pdf");
 
     TH1F* sig_eff_offline_jFEX_LRJ10kHz = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_jFexLRJ->Clone();
     sig_eff_offline_jFEX_LRJ10kHz->SetName("eff_jFEX_LRJ_10kHz");
@@ -16257,7 +17154,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offline_jFEX_LRJ10kHz->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_jFEX_LRJ10kHz.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offline_jFEX_LRJ10kHz.pdf");
 
     TH1F* sig_eff_offlineLRJ50 = (TH1F*)sig_h_offlineLRJ_Et_num50->Clone();
     sig_eff_offlineLRJ50->SetName("eff_LRJ50");
@@ -16268,7 +17165,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ50->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50.pdf");
 
     TH1F* sig_eff_offlineLRJ50_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num50_mass100to150->Clone();
     sig_eff_offlineLRJ50_mass100to150->SetName("eff_LRJ50_mass100to150");
@@ -16279,7 +17176,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ50_mass100to150->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et50 = (TH1F*)sig_h_Avg_b_Et_num50->Clone();
     sig_eff_b_Et50->SetName("eff_b50");
@@ -16290,7 +17187,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et50->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et50.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et50.pdf");
 
     TH1F* sig_eff_offlineLRJ100 = (TH1F*)sig_h_offlineLRJ_Et_num100->Clone();
     sig_eff_offlineLRJ100->SetName("eff_LRJ100");
@@ -16301,7 +17198,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ100->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100.pdf");
 
     TH1F* sig_eff_offlineLRJ100_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num100_mass100to150->Clone();
     sig_eff_offlineLRJ100_mass100to150->SetName("eff_LRJ100_mass100to150");
@@ -16312,7 +17209,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ100_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et100 = (TH1F*)sig_h_Avg_b_Et_num100->Clone();
     sig_eff_b_Et100->SetName("eff_b100");
@@ -16323,7 +17220,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et100->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et100.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et100.pdf");
 
     TH1F* sig_eff_offlineLRJ150 = (TH1F*)sig_h_offlineLRJ_Et_num150->Clone();
     sig_eff_offlineLRJ150->SetName("eff_LRJ150");
@@ -16334,7 +17231,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150.pdf");
 
     TH1F* sig_eff_offlineLRJ150_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num150_mass100to150->Clone();
     sig_eff_offlineLRJ150_mass100to150->SetName("eff_LRJ150_mass100to150");
@@ -16345,7 +17242,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ150_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et150 = (TH1F*)sig_h_Avg_b_Et_num150->Clone();
     sig_eff_b_Et150->SetName("eff_b150");
@@ -16356,7 +17253,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et150.pdf");
 
     TH1F* sig_eff_offlineLRJ200 = (TH1F*)sig_h_offlineLRJ_Et_num200->Clone();
     sig_eff_offlineLRJ200->SetName("eff_LRJ200");
@@ -16367,7 +17264,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ200->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200.pdf");
 
     TH1F* sig_eff_offlineLRJ200_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num200_mass100to150->Clone();
     sig_eff_offlineLRJ200_mass100to150->SetName("eff_LRJ200_mass100to150");
@@ -16378,7 +17275,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ200_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et200 = (TH1F*)sig_h_Avg_b_Et_num200->Clone();
     sig_eff_b_Et200->SetName("eff_b200");
@@ -16389,7 +17286,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et200->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et200.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et200.pdf");
 
     TH1F* sig_eff_offlineLRJ250 = (TH1F*)sig_h_offlineLRJ_Et_num250->Clone();
     sig_eff_offlineLRJ250->SetName("eff_LRJ250");
@@ -16400,7 +17297,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ250->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250.pdf");
 
     TH1F* sig_eff_offlineLRJ250_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num250_mass100to150->Clone();
     sig_eff_offlineLRJ250_mass100to150->SetName("eff_LRJ250_mass100to150");
@@ -16411,7 +17308,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ250_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et250 = (TH1F*)sig_h_Avg_b_Et_num250->Clone();
     sig_eff_b_Et250->SetName("eff_b250");
@@ -16422,7 +17319,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et250->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et250.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et250.pdf");
 
     TH1F* sig_eff_offlineLRJ300 = (TH1F*)sig_h_offlineLRJ_Et_num300->Clone();
     sig_eff_offlineLRJ300->SetName("eff_LRJ300");
@@ -16433,7 +17330,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ300->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300.pdf");
 
     TH1F* sig_eff_offlineLRJ300_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num300_mass100to150->Clone();
     sig_eff_offlineLRJ300_mass100to150->SetName("eff_LRJ300_mass100to150");
@@ -16444,7 +17341,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ300_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et300 = (TH1F*)sig_h_Avg_b_Et_num300->Clone();
     sig_eff_b_Et300->SetName("eff_b300");
@@ -16455,7 +17352,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et300->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et300.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et300.pdf");
 
     TH1F* sig_eff_offlineLRJ350 = (TH1F*)sig_h_offlineLRJ_Et_num350->Clone();
     sig_eff_offlineLRJ350->SetName("eff_LRJ350");
@@ -16466,7 +17363,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ350->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350.pdf");
 
     TH1F* sig_eff_offlineLRJ350_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num350_mass100to150->Clone();
     sig_eff_offlineLRJ350_mass100to150->SetName("eff_LRJ350_mass100to150");
@@ -16477,7 +17374,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ350_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et350 = (TH1F*)sig_h_Avg_b_Et_num350->Clone();
     sig_eff_b_Et350->SetName("eff_b350");
@@ -16488,7 +17385,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et350->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et350.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et350.pdf");
 
     TH1F* sig_eff_offlineLRJ400 = (TH1F*)sig_h_offlineLRJ_Et_num400->Clone();
     sig_eff_offlineLRJ400->SetName("eff_LRJ400");
@@ -16499,7 +17396,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ400->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400.pdf");
 
     TH1F* sig_eff_offlineLRJ400_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num400_mass100to150->Clone();
     sig_eff_offlineLRJ400_mass100to150->SetName("eff_LRJ400_mass100to150");
@@ -16510,7 +17407,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ400_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et400 = (TH1F*)sig_h_Avg_b_Et_num400->Clone();
     sig_eff_b_Et400->SetName("eff_b400");
@@ -16521,7 +17418,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et400->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et400.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et400.pdf");
 
     TH1F* sig_eff_offlineLRJ450 = (TH1F*)sig_h_offlineLRJ_Et_num450->Clone();
     sig_eff_offlineLRJ450->SetName("eff_LRJ450");
@@ -16532,7 +17429,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ450->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450.pdf");
 
     TH1F* sig_eff_offlineLRJ450_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num450_mass100to150->Clone();
     sig_eff_offlineLRJ450_mass100to150->SetName("eff_LRJ450_mass100to150");
@@ -16543,7 +17440,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ450_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et450 = (TH1F*)sig_h_Avg_b_Et_num450->Clone();
     sig_eff_b_Et450->SetName("eff_b450");
@@ -16554,7 +17451,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et450->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et450.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et450.pdf");
 
     TH1F* sig_eff_offlineLRJ500 = (TH1F*)sig_h_offlineLRJ_Et_num500->Clone();
     sig_eff_offlineLRJ500->SetName("eff_LRJ500");
@@ -16565,7 +17462,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ500->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500.pdf");
 
     TH1F* sig_eff_offlineLRJ500_mass100to150 = (TH1F*)sig_h_offlineLRJ_Et_num500_mass100to150->Clone();
     sig_eff_offlineLRJ500_mass100to150->SetName("eff_LRJ500_mass100to150");
@@ -16576,7 +17473,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ500_mass100to150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_mass100to150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_mass100to150.pdf");
 
     TH1F* sig_eff_b_Et500 = (TH1F*)sig_h_Avg_b_Et_num500->Clone();
     sig_eff_b_Et500->SetName("eff_b500");
@@ -16587,7 +17484,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_b_Et500->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et500.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_b_Et500.pdf");
 
     // Draw signal gFEX efficiency curves - first 1 jet
 
@@ -16600,7 +17497,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ50_gFexLRJ->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_gFexLRJ.pdf");
 
     TH1F* sig_eff_offlineLRJ100_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num100_gFexLRJ->Clone();
     sig_eff_offlineLRJ100_gFexLRJ->SetName("eff_LRJ100");
@@ -16611,7 +17508,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ100_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_gFexLRJ.pdf");
 
     TH1F* sig_eff_offlineLRJ150_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num150_gFexLRJ->Clone();
     sig_eff_offlineLRJ150_gFexLRJ->SetName("eff_LRJ150");
@@ -16622,7 +17519,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ150_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_gFexLRJ.pdf");
 
     TH1F* sig_eff_offlineLRJ200_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num200_gFexLRJ->Clone();
     sig_eff_offlineLRJ200_gFexLRJ->SetName("eff_LRJ200_gFexLRJ");
@@ -16633,7 +17530,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ200_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_gFexLRJ.pdf");
 
     TH1F* sig_eff_offlineLRJ250_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num250_gFexLRJ->Clone();
     sig_eff_offlineLRJ250_gFexLRJ->SetName("eff_LRJ250_gFexLRJ");
@@ -16644,7 +17541,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ250_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_gFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ300_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num300_gFexLRJ->Clone();
@@ -16656,7 +17553,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ300_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_gFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ350_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num350_gFexLRJ->Clone();
@@ -16668,7 +17565,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ350_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_gFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ400_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num400_gFexLRJ->Clone();
@@ -16680,7 +17577,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ400_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_gFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ450_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num450_gFexLRJ->Clone();
@@ -16692,7 +17589,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ450_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_gFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ500_gFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num500_gFexLRJ->Clone();
@@ -16704,7 +17601,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ500_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_gFexLRJ.pdf");
 
     // Next jFEX (1 jet) signal
 
@@ -16717,7 +17614,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ50_jFexLRJ->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_jFexLRJ.pdf");
 
     TH1F* sig_eff_offlineLRJ100_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num100_jFexLRJ->Clone();
     sig_eff_offlineLRJ100_jFexLRJ->SetName("eff_LRJ100");
@@ -16728,7 +17625,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ100_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_jFexLRJ.pdf");
 
     TH1F* sig_eff_offlineLRJ150_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num150_jFexLRJ->Clone();
     sig_eff_offlineLRJ150_jFexLRJ->SetName("eff_LRJ150");
@@ -16739,7 +17636,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ150_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_jFexLRJ.pdf");
 
     TH1F* sig_eff_offlineLRJ200_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num200_jFexLRJ->Clone();
     sig_eff_offlineLRJ200_jFexLRJ->SetName("eff_LRJ200_jFexLRJ");
@@ -16750,7 +17647,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ200_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_jFexLRJ.pdf");
 
     TH1F* sig_eff_offlineLRJ250_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num250_jFexLRJ->Clone();
     sig_eff_offlineLRJ250_jFexLRJ->SetName("eff_LRJ250_jFexLRJ");
@@ -16761,7 +17658,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ250_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_jFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ300_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num300_jFexLRJ->Clone();
@@ -16773,7 +17670,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ300_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_jFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ350_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num350_jFexLRJ->Clone();
@@ -16785,7 +17682,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ350_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_jFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ400_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num400_jFexLRJ->Clone();
@@ -16797,7 +17694,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ400_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_jFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ450_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num450_jFexLRJ->Clone();
@@ -16809,7 +17706,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ450_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_jFexLRJ.pdf");
 
 
     TH1F* sig_eff_offlineLRJ500_jFexLRJ = (TH1F*)sig_h_offlineLRJ_Et_num500_jFexLRJ->Clone();
@@ -16821,7 +17718,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ500_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_jFexLRJ.pdf");
 
     // Next dijet
 
@@ -16834,7 +17731,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ50_gFexLRJ_Dijet->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_gFexLRJ_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ100_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num100_gFexLRJ_Dijet->Clone();
     sig_eff_offlineLRJ100_gFexLRJ_Dijet->SetName("eff_LRJ100");
@@ -16845,7 +17742,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ100_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_gFexLRJ_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ150_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num150_gFexLRJ_Dijet->Clone();
     sig_eff_offlineLRJ150_gFexLRJ_Dijet->SetName("eff_LRJ150");
@@ -16856,7 +17753,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ150_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_gFexLRJ_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ200_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num200_gFexLRJ_Dijet->Clone();
     sig_eff_offlineLRJ200_gFexLRJ_Dijet->SetName("eff_LRJ200_gFexLRJ_Dijet");
@@ -16867,7 +17764,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ200_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_gFexLRJ_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ250_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num250_gFexLRJ_Dijet->Clone();
     sig_eff_offlineLRJ250_gFexLRJ_Dijet->SetName("eff_LRJ250_gFexLRJ_Dijet");
@@ -16878,7 +17775,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ250_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_gFexLRJ_Dijet.pdf");
 
 
     TH1F* sig_eff_offlineLRJ300_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num300_gFexLRJ_Dijet->Clone();
@@ -16890,7 +17787,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ300_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_gFexLRJ_Dijet.pdf");
 
 
     TH1F* sig_eff_offlineLRJ350_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num350_gFexLRJ_Dijet->Clone();
@@ -16902,7 +17799,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ350_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_gFexLRJ_Dijet.pdf");
 
 
     TH1F* sig_eff_offlineLRJ400_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num400_gFexLRJ_Dijet->Clone();
@@ -16914,7 +17811,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ400_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_gFexLRJ_Dijet.pdf");
 
 
     TH1F* sig_eff_offlineLRJ450_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num450_gFexLRJ_Dijet->Clone();
@@ -16926,7 +17823,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ450_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_gFexLRJ_Dijet.pdf");
 
 
     TH1F* sig_eff_offlineLRJ500_gFexLRJ_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num500_gFexLRJ_Dijet->Clone();
@@ -16938,7 +17835,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ500_gFexLRJ_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_gFexLRJ_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_gFexLRJ_Dijet.pdf");
 
 
 
@@ -16952,7 +17849,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ50_gFexLRJ->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ50_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ50_gFexLRJ.pdf");
 
     TH1F* back_eff_offlineLRJ100_gFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num100_gFexLRJ->Clone();
     back_eff_offlineLRJ100_gFexLRJ->SetName("eff_LRJ100");
@@ -16963,7 +17860,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ100_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100_gFexLRJ.pdf");
 
     TH1F* back_eff_offlineLRJ150_gFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num150_gFexLRJ->Clone();
     back_eff_offlineLRJ150_gFexLRJ->SetName("eff_LRJ150");
@@ -16974,7 +17871,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ150_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ150_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ150_gFexLRJ.pdf");
 
     TH1F* back_eff_offlineLRJ200_gFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num200_gFexLRJ->Clone();
     back_eff_offlineLRJ200_gFexLRJ->SetName("eff_LRJ200_gFexLRJ");
@@ -16985,7 +17882,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ200_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200_gFexLRJ.pdf");
 
     TH1F* back_eff_offlineLRJ250_gFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num250_gFexLRJ->Clone();
     back_eff_offlineLRJ250_gFexLRJ->SetName("eff_LRJ250_gFexLRJ");
@@ -16996,7 +17893,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ250_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ250_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ250_gFexLRJ.pdf");
 
 
     TH1F* back_eff_offlineLRJ300_gFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num300_gFexLRJ->Clone();
@@ -17008,7 +17905,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ300_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300_gFexLRJ.pdf");
 
 
     TH1F* back_eff_offlineLRJ350_gFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num350_gFexLRJ->Clone();
@@ -17020,7 +17917,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ350_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ350_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ350_gFexLRJ.pdf");
 
 
     TH1F* back_eff_offlineLRJ400_gFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num400_gFexLRJ->Clone();
@@ -17032,7 +17929,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ400_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ400_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ400_gFexLRJ.pdf");
 
 
     TH1F* back_eff_offlineLRJ450_gFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num450_gFexLRJ->Clone();
@@ -17044,7 +17941,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ450_gFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ450_gFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ450_gFexLRJ.pdf");
 
 
     // Draw background jFex trigger efficiencies (and create histograms with actual efficiency curves from numerators, denominators)
@@ -17057,7 +17954,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ50_jFexLRJ->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ50_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ50_jFexLRJ.pdf");
 
     TH1F* back_eff_offlineLRJ100_jFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num100_jFexLRJ->Clone();
     back_eff_offlineLRJ100_jFexLRJ->SetName("eff_LRJ100");
@@ -17068,7 +17965,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ100_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100_jFexLRJ.pdf");
 
     TH1F* back_eff_offlineLRJ150_jFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num150_jFexLRJ->Clone();
     back_eff_offlineLRJ150_jFexLRJ->SetName("eff_LRJ150");
@@ -17079,7 +17976,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ150_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ150_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ150_jFexLRJ.pdf");
 
     TH1F* back_eff_offlineLRJ200_jFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num200_jFexLRJ->Clone();
     back_eff_offlineLRJ200_jFexLRJ->SetName("eff_LRJ200_jFexLRJ");
@@ -17090,7 +17987,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ200_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200_jFexLRJ.pdf");
 
     TH1F* back_eff_offlineLRJ250_jFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num250_jFexLRJ->Clone();
     back_eff_offlineLRJ250_jFexLRJ->SetName("eff_LRJ250_jFexLRJ");
@@ -17101,7 +17998,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ250_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ250_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ250_jFexLRJ.pdf");
 
 
     TH1F* back_eff_offlineLRJ300_jFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num300_jFexLRJ->Clone();
@@ -17113,7 +18010,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ300_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300_jFexLRJ.pdf");
 
 
     TH1F* back_eff_offlineLRJ350_jFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num350_jFexLRJ->Clone();
@@ -17125,7 +18022,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ350_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ350_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ350_jFexLRJ.pdf");
 
 
     TH1F* back_eff_offlineLRJ400_jFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num400_jFexLRJ->Clone();
@@ -17137,7 +18034,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ400_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ400_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ400_jFexLRJ.pdf");
 
 
     TH1F* back_eff_offlineLRJ450_jFexLRJ = (TH1F*)back_h_offlineLRJ_Et_num450_jFexLRJ->Clone();
@@ -17149,7 +18046,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ450_jFexLRJ->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ450_jFexLRJ.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ450_jFexLRJ.pdf");
 
     // Draw background jet tagger efficiency curves
 
@@ -17162,7 +18059,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ50->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ50.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ50.pdf");
 
     TH1F* back_eff_offlineLRJ100 = (TH1F*)back_h_offlineLRJ_Et_num100->Clone();
     back_eff_offlineLRJ100->SetName("eff_LRJ100");
@@ -17173,7 +18070,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ100->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100.pdf");
 
     TH1F* back_eff_offlineLRJ150 = (TH1F*)back_h_offlineLRJ_Et_num150->Clone();
     back_eff_offlineLRJ150->SetName("eff_LRJ150");
@@ -17184,7 +18081,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ150->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ150.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ150.pdf");
 
     TH1F* back_eff_offlineLRJ200 = (TH1F*)back_h_offlineLRJ_Et_num200->Clone();
     back_eff_offlineLRJ200->SetName("eff_LRJ200");
@@ -17195,7 +18092,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ200->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200.pdf");
 
     TH1F* back_eff_offlineLRJ250 = (TH1F*)back_h_offlineLRJ_Et_num250->Clone();
     back_eff_offlineLRJ250->SetName("eff_LRJ250");
@@ -17206,7 +18103,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ250->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ250.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ250.pdf");
 
     TH1F* back_eff_offlineLRJ300 = (TH1F*)back_h_offlineLRJ_Et_num300->Clone();
     back_eff_offlineLRJ300->SetName("eff_LRJ300");
@@ -17217,7 +18114,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ300->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300.pdf");
 
     TH1F* back_eff_offlineLRJ350 = (TH1F*)back_h_offlineLRJ_Et_num350->Clone();
     back_eff_offlineLRJ350->SetName("eff_LRJ350");
@@ -17228,7 +18125,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ350->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ350.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ350.pdf");
 
     TH1F* back_eff_offlineLRJ400 = (TH1F*)back_h_offlineLRJ_Et_num400->Clone();
     back_eff_offlineLRJ400->SetName("eff_LRJ400");
@@ -17239,7 +18136,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ400->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ400.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ400.pdf");
 
     TH1F* back_eff_offlineLRJ450 = (TH1F*)back_h_offlineLRJ_Et_num450->Clone();
     back_eff_offlineLRJ450->SetName("eff_LRJ450");
@@ -17250,7 +18147,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ450->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ450.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ450.pdf");
 
     // Dijet trigger efficiencies (no further event selections)
 
@@ -17263,7 +18160,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ50_Dijet->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ100_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num100_Dijet->Clone();
     sig_eff_offlineLRJ100_Dijet->SetName("eff_LRJ100_Dijet");
@@ -17274,7 +18171,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ100_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ150_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num150_Dijet->Clone();
     sig_eff_offlineLRJ150_Dijet->SetName("eff_LRJ150_Dijet");
@@ -17285,7 +18182,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ150_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ200_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num200_Dijet->Clone();
     sig_eff_offlineLRJ200_Dijet->SetName("eff_LRJ200_Dijet");
@@ -17296,7 +18193,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ200_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ250_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num250_Dijet->Clone();
     sig_eff_offlineLRJ250_Dijet->SetName("eff_LRJ250_Dijet");
@@ -17307,7 +18204,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ250_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ300_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num300_Dijet->Clone();
     sig_eff_offlineLRJ300_Dijet->SetName("eff_LRJ300_Dijet");
@@ -17318,7 +18215,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ300_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ350_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num350_Dijet->Clone();
     sig_eff_offlineLRJ350_Dijet->SetName("eff_LRJ350_Dijet");
@@ -17329,7 +18226,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ350_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ400_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num400_Dijet->Clone();
     sig_eff_offlineLRJ400_Dijet->SetName("eff_LRJ400_Dijet");
@@ -17340,7 +18237,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ400_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ450_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num450_Dijet->Clone();
     sig_eff_offlineLRJ450_Dijet->SetName("eff_LRJ450_Dijet");
@@ -17351,7 +18248,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ450_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_Dijet.pdf");
 
     TH1F* sig_eff_offlineLRJ500_Dijet = (TH1F*)sig_h_offlineLRJ_Et_num500_Dijet->Clone();
     sig_eff_offlineLRJ500_Dijet->SetName("eff_LRJ500_Dijet");
@@ -17362,7 +18259,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ500_Dijet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_Dijet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_Dijet.pdf");
 
     // Subjet requirement efficiencies (1 subjet)
 
@@ -17375,7 +18272,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ50_1Subjet->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ100_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num100_1Subjet->Clone();
     sig_eff_offlineLRJ100_1Subjet->SetName("eff_LRJ100_1Subjet");
@@ -17386,7 +18283,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ100_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ150_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num150_1Subjet->Clone();
     sig_eff_offlineLRJ150_1Subjet->SetName("eff_LRJ150_1Subjet");
@@ -17397,7 +18294,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ150_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ200_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num200_1Subjet->Clone();
     sig_eff_offlineLRJ200_1Subjet->SetName("eff_LRJ200_1Subjet");
@@ -17408,7 +18305,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ200_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ250_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num250_1Subjet->Clone();
     sig_eff_offlineLRJ250_1Subjet->SetName("eff_LRJ250_1Subjet");
@@ -17419,7 +18316,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ250_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ300_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num300_1Subjet->Clone();
     sig_eff_offlineLRJ300_1Subjet->SetName("eff_LRJ300_1Subjet");
@@ -17430,7 +18327,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ300_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ350_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num350_1Subjet->Clone();
     sig_eff_offlineLRJ350_1Subjet->SetName("eff_LRJ350_1Subjet");
@@ -17441,7 +18338,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ350_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ400_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num400_1Subjet->Clone();
     sig_eff_offlineLRJ400_1Subjet->SetName("eff_LRJ400_1Subjet");
@@ -17452,7 +18349,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ400_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ450_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num450_1Subjet->Clone();
     sig_eff_offlineLRJ450_1Subjet->SetName("eff_LRJ450_1Subjet");
@@ -17463,7 +18360,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ450_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_1Subjet.pdf");
 
     TH1F* sig_eff_offlineLRJ500_1Subjet = (TH1F*)sig_h_offlineLRJ_Et_num500_1Subjet->Clone();
     sig_eff_offlineLRJ500_1Subjet->SetName("eff_LRJ500_1Subjet");
@@ -17474,7 +18371,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ500_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_1Subjet.pdf");
 
     // Background subjet = 1 efficiencies
     TH1F* back_eff_offlineLRJ100_1Subjet = (TH1F*)back_h_offlineLRJ_Et_num100_1Subjet->Clone();
@@ -17486,7 +18383,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ100_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100_1Subjet.pdf");
 
     TH1F* back_eff_offlineLRJ200_1Subjet = (TH1F*)back_h_offlineLRJ_Et_num200_1Subjet->Clone();
     back_eff_offlineLRJ200_1Subjet->SetName("eff_LRJ200_1Subjet");
@@ -17497,7 +18394,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ200_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200_1Subjet.pdf");
 
     TH1F* back_eff_offlineLRJ300_1Subjet = (TH1F*)back_h_offlineLRJ_Et_num300_1Subjet->Clone();
     back_eff_offlineLRJ300_1Subjet->SetName("eff_LRJ300_1Subjet");
@@ -17508,7 +18405,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ300_1Subjet->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300_1Subjet.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300_1Subjet.pdf");
 
     // Subjet requirement efficiencies (greater than or equal to 2 subjets)
 
@@ -17521,7 +18418,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ50_GrEq2Subjets->Draw();
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ50_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ100_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num100_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ100_GrEq2Subjets->SetName("eff_LRJ100_GrEq2Subjets");
@@ -17532,7 +18429,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ100_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ100_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ150_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num150_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ150_GrEq2Subjets->SetName("eff_LRJ150_GrEq2Subjets");
@@ -17543,7 +18440,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ150_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ150_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ200_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num200_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ200_GrEq2Subjets->SetName("eff_LRJ200_GrEq2Subjets");
@@ -17554,7 +18451,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ200_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ200_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ250_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num250_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ250_GrEq2Subjets->SetName("eff_LRJ250_GrEq2Subjets");
@@ -17565,7 +18462,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ250_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ250_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ300_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num300_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ300_GrEq2Subjets->SetName("eff_LRJ300_GrEq2Subjets");
@@ -17576,7 +18473,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ300_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ300_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ350_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num350_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ350_GrEq2Subjets->SetName("eff_LRJ350_GrEq2Subjets");
@@ -17587,7 +18484,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ350_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ350_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ400_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num400_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ400_GrEq2Subjets->SetName("eff_LRJ400_GrEq2Subjets");
@@ -17598,7 +18495,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ400_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ400_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ450_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num450_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ450_GrEq2Subjets->SetName("eff_LRJ450_GrEq2Subjets");
@@ -17609,7 +18506,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ450_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ450_GrEq2Subjets.pdf");
 
     TH1F* sig_eff_offlineLRJ500_GrEq2Subjets = (TH1F*)sig_h_offlineLRJ_Et_num500_GrEq2Subjets->Clone();
     sig_eff_offlineLRJ500_GrEq2Subjets->SetName("eff_LRJ500_GrEq2Subjets");
@@ -17620,7 +18517,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     sig_eff_offlineLRJ500_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sig_eff_offlineLRJ500_GrEq2Subjets.pdf");
 
     // background greater than or equal to 2 Subjet Efficiencies
     TH1F* back_eff_offlineLRJ100_GrEq2Subjets = (TH1F*)back_h_offlineLRJ_Et_num100_GrEq2Subjets->Clone();
@@ -17632,7 +18529,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ100_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ100_GrEq2Subjets.pdf");
 
 
     TH1F* back_eff_offlineLRJ200_GrEq2Subjets = (TH1F*)back_h_offlineLRJ_Et_num200_GrEq2Subjets->Clone();
@@ -17644,7 +18541,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ200_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ200_GrEq2Subjets.pdf");
 
 
     TH1F* back_eff_offlineLRJ300_GrEq2Subjets = (TH1F*)back_h_offlineLRJ_Et_num300_GrEq2Subjets->Clone();
@@ -17656,7 +18553,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     back_eff_offlineLRJ300_GrEq2Subjets->Draw("P");
     leg->Draw();
-    c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300_GrEq2Subjets.pdf");
+    c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "back_eff_offlineLRJ300_GrEq2Subjets.pdf");
 
     // ===========================================================
     // Compute Likelihood Ratio (Signal / Background) TH2F plots
@@ -17718,12 +18615,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     logLR_Leading->Draw("COLZ");
     logLR_Leading->GetXaxis()->SetTitle("JetTagger Leading LRJ E_{T} [GeV]");
     logLR_Leading->GetYaxis()->SetTitle("#psi_{R,Leading}/#psi_{R,Subleading}");
-    cLR.SaveAs(modifiedOutputFileDir + "Psi_12_LikelihoodRatio_Leading.pdf");
+    cLR.cd(); DrawATLASLabel(); cLR.SaveAs(modifiedOutputFileDir + "Psi_12_LikelihoodRatio_Leading.pdf");
 
     logLR_Subleading->Draw("COLZ");
     logLR_Subleading->GetXaxis()->SetTitle("JetTagger Subleading LRJ E_{T} [GeV]");
     logLR_Subleading->GetYaxis()->SetTitle("#psi_{R,Leading}/#psi_{R,Subleading}");
-    cLR.SaveAs(modifiedOutputFileDir + "Psi_12_LikelihoodRatio_Subleading.pdf");
+    cLR.cd(); DrawATLASLabel(); cLR.SaveAs(modifiedOutputFileDir + "Psi_12_LikelihoodRatio_Subleading.pdf");
 
     //Psi_1 * Psi_2
     // --- Leading jets ---
@@ -17779,12 +18676,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     logLRSquared_Leading->Draw("COLZ");
     logLRSquared_Leading->GetXaxis()->SetTitle("JetTagger Leading LRJ E_{T} [GeV]");
     logLRSquared_Leading->GetYaxis()->SetTitle("#psi_{R,Leading} #times #psi_{R,Subleading}");
-    cLRSquared.SaveAs(modifiedOutputFileDir + "Psi_R_Squared_LikelihoodRatio_Leading.pdf");
+    cLRSquared.cd(); DrawATLASLabel(); cLRSquared.SaveAs(modifiedOutputFileDir + "Psi_R_Squared_LikelihoodRatio_Leading.pdf");
 
     logLRSquared_Subleading->Draw("COLZ");
     logLRSquared_Subleading->GetXaxis()->SetTitle("JetTagger Subleading LRJ E_{T} [GeV]");
     logLRSquared_Subleading->GetYaxis()->SetTitle("#psi_{R,Leading} #times #psi_{R,Subleading}");
-    cLRSquared.SaveAs(modifiedOutputFileDir + "Psi_R_Squared_LikelihoodRatio_Subleading.pdf");
+    cLRSquared.cd(); DrawATLASLabel(); cLRSquared.SaveAs(modifiedOutputFileDir + "Psi_R_Squared_LikelihoodRatio_Subleading.pdf");
 
     //  Psi ratio computed with R^2 metric 
     // --- Leading jets ---
@@ -17841,12 +18738,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     logLR2_Leading->Draw("COLZ");
     logLR2_Leading->GetXaxis()->SetTitle("JetTagger Leading LRJ E_{T} [GeV]");
     logLR2_Leading->GetYaxis()->SetTitle("#psi_{R^{2},Leading}/#psi_{R^{2},Subleading}");
-    cLR2.SaveAs(modifiedOutputFileDir + "Psi_R2_12_LikelihoodRatio_Leading.pdf");
+    cLR2.cd(); DrawATLASLabel(); cLR2.SaveAs(modifiedOutputFileDir + "Psi_R2_12_LikelihoodRatio_Leading.pdf");
 
     logLR_Subleading->Draw("COLZ");
     logLR2_Subleading->GetXaxis()->SetTitle("JetTagger Subleading LRJ E_{T} [GeV]");
     logLR2_Subleading->GetYaxis()->SetTitle("#psi_{R^{2},Leading}/#psi_{R^{2},Subleading}");
-    cLR2.SaveAs(modifiedOutputFileDir + "Psi_R2_12_LikelihoodRatio_Subleading.pdf");
+    cLR2.cd(); DrawATLASLabel(); cLR2.SaveAs(modifiedOutputFileDir + "Psi_R2_12_LikelihoodRatio_Subleading.pdf");
 
     // N Subjets of Leading Offline LRJ vs. Leading Offline LRJ E_T likelihood ratio
     // --- Leading jets ---
@@ -17902,12 +18799,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     logLR_Leading_Subjets->Draw("COLZ");
     logLR_Leading_Subjets->GetXaxis()->SetTitle("Leading Offline LRJ E_{T} [GeV]");
     logLR_Leading_Subjets->GetYaxis()->SetTitle("N_{Subjets} (Offline Leading LRJ)");
-    cLR_Subjets.SaveAs(modifiedOutputFileDir + "NSubjets_Likelihood_Ratio.pdf");
+    cLR_Subjets.cd(); DrawATLASLabel(); cLR_Subjets.SaveAs(modifiedOutputFileDir + "NSubjets_Likelihood_Ratio.pdf");
 
     /*logLR_Subleading->Draw("COLZ");
     logLR_Subleading->GetXaxis()->SetTitle("JetTagger Subleading LRJ E_{T} [GeV]");
     logLR_Subleading->GetYaxis()->SetTitle("#psi_{R,Leading}/#psi_{R,Subleading}");
-    cLR.SaveAs(modifiedOutputFileDir + "Psi_12_LikelihoodRatio_Subleading.pdf");*/
+    cLR.cd(); DrawATLASLabel(); cLR.SaveAs(modifiedOutputFileDir + "Psi_12_LikelihoodRatio_Subleading.pdf");*/
 
     c.cd();
     /*if(displayEv0Sig_){
@@ -17915,56 +18812,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sigTopo422Highest128SeedPositionsEv0->Draw("COLZ");
 
         TEllipse *sigCircle0_Ev0 = new TEllipse(jFexSeedPositionsSigEv0[0].first, jFexSeedPositionsSigEv0[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle0_Ev0->SetLineColor(kRed);
+        sigCircle0_Ev0->SetLineColor(kP10Red);
         sigCircle0_Ev0->SetLineWidth(2);
         sigCircle0_Ev0->SetFillStyle(0); // no fill
         sigCircle0_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle0_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle1_Ev0 = new TEllipse(jFexSeedPositionsSigEv0[1].first, jFexSeedPositionsSigEv0[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle1_Ev0->SetLineColor(kRed);
+        sigCircle1_Ev0->SetLineColor(kP10Red);
         sigCircle1_Ev0->SetLineWidth(2);
         sigCircle1_Ev0->SetFillStyle(0); // no fill
         sigCircle1_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle1_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle2_Ev0 = new TEllipse(jFexAdditionalSRJPositionsSigEv0[0].first, jFexAdditionalSRJPositionsSigEv0[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle2_Ev0->SetLineColor(kAzure+2);
+        sigCircle2_Ev0->SetLineColor(kP10Blue);
         sigCircle2_Ev0->SetLineWidth(2);
         sigCircle2_Ev0->SetFillStyle(0); // no fill
         sigCircle2_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle2_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle3_Ev0 = new TEllipse(jFexAdditionalSRJPositionsSigEv0[1].first, jFexAdditionalSRJPositionsSigEv0[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle3_Ev0->SetLineColor(kAzure+2);
+        sigCircle3_Ev0->SetLineColor(kP10Blue);
         sigCircle3_Ev0->SetLineWidth(2);
         sigCircle3_Ev0->SetFillStyle(0); // no fill
         sigCircle3_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle3_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle4_Ev0 = new TEllipse(jFexAdditionalSRJPositionsSigEv0[2].first, jFexAdditionalSRJPositionsSigEv0[2].second, 1.0, 1.0); // R in both x and y
-        sigCircle4_Ev0->SetLineColor(kAzure+2);
+        sigCircle4_Ev0->SetLineColor(kP10Blue);
         sigCircle4_Ev0->SetLineWidth(2);
         sigCircle4_Ev0->SetFillStyle(0); // no fill
         sigCircle4_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle4_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle5_Ev0 = new TEllipse(jFexAdditionalSRJPositionsSigEv0[3].first, jFexAdditionalSRJPositionsSigEv0[3].second, 1.0, 1.0); // R in both x and y
-        sigCircle5_Ev0->SetLineColor(kAzure+2);
+        sigCircle5_Ev0->SetLineColor(kP10Blue);
         sigCircle5_Ev0->SetLineWidth(2);
         sigCircle5_Ev0->SetFillStyle(0); // no fill
         sigCircle5_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle5_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle6_Ev0 = new TEllipse(newSeedPositionsSigEv0[0].first, newSeedPositionsSigEv0[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle6_Ev0->SetLineColor(kGreen+2);
+        sigCircle6_Ev0->SetLineColor(kP10Green);
         sigCircle6_Ev0->SetLineWidth(2);
         sigCircle6_Ev0->SetFillStyle(0); // no fill
         sigCircle6_Ev0->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle6_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle7_Ev0 = new TEllipse(newSeedPositionsSigEv0[1].first, newSeedPositionsSigEv0[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle7_Ev0->SetLineColor(kGreen+2);
+        sigCircle7_Ev0->SetLineColor(kP10Green);
         sigCircle7_Ev0->SetLineWidth(2);
         sigCircle7_Ev0->SetFillStyle(0); // no fill
         sigCircle7_Ev0->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -17988,7 +18885,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sigLat2Ev0.SetTextColor(kBlack); // Match sigCircle color
         sigLat2Ev0.DrawLatex(newSeedPositionsSigEv0[1].first, newSeedPositionsSigEv0[1].second + 0.6, sigLabel2Ev0); // Slightly above the sigCircle\
 
-        c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev0.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev0.pdf");   
     }
     
     
@@ -17999,56 +18896,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sigTopo422Highest128SeedPositionsEv1->Draw("COLZ");
 
         TEllipse *sigCircle0_Ev1 = new TEllipse(jFexSeedPositionsSigEv1[0].first, jFexSeedPositionsSigEv1[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle0_Ev1->SetLineColor(kRed);
+        sigCircle0_Ev1->SetLineColor(kP10Red);
         sigCircle0_Ev1->SetLineWidth(2);
         sigCircle0_Ev1->SetFillStyle(0); // no fill
         sigCircle0_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle0_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle1_Ev1 = new TEllipse(jFexSeedPositionsSigEv1[1].first, jFexSeedPositionsSigEv1[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle1_Ev1->SetLineColor(kRed);
+        sigCircle1_Ev1->SetLineColor(kP10Red);
         sigCircle1_Ev1->SetLineWidth(2);
         sigCircle1_Ev1->SetFillStyle(0); // no fill
         sigCircle1_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle1_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle2_Ev1 = new TEllipse(jFexAdditionalSRJPositionsSigEv1[0].first, jFexAdditionalSRJPositionsSigEv1[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle2_Ev1->SetLineColor(kAzure+2);
+        sigCircle2_Ev1->SetLineColor(kP10Blue);
         sigCircle2_Ev1->SetLineWidth(2);
         sigCircle2_Ev1->SetFillStyle(0); // no fill
         sigCircle2_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle2_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle3_Ev1 = new TEllipse(jFexAdditionalSRJPositionsSigEv1[1].first, jFexAdditionalSRJPositionsSigEv1[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle3_Ev1->SetLineColor(kAzure+2);
+        sigCircle3_Ev1->SetLineColor(kP10Blue);
         sigCircle3_Ev1->SetLineWidth(2);
         sigCircle3_Ev1->SetFillStyle(0); // no fill
         sigCircle3_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle3_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle4_Ev1 = new TEllipse(jFexAdditionalSRJPositionsSigEv1[2].first, jFexAdditionalSRJPositionsSigEv1[2].second, 1.0, 1.0); // R in both x and y
-        sigCircle4_Ev1->SetLineColor(kAzure+2);
+        sigCircle4_Ev1->SetLineColor(kP10Blue);
         sigCircle4_Ev1->SetLineWidth(2);
         sigCircle4_Ev1->SetFillStyle(0); // no fill
         sigCircle4_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle4_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle5_Ev1 = new TEllipse(jFexAdditionalSRJPositionsSigEv1[3].first, jFexAdditionalSRJPositionsSigEv1[3].second, 1.0, 1.0); // R in both x and y
-        sigCircle5_Ev1->SetLineColor(kAzure+2);
+        sigCircle5_Ev1->SetLineColor(kP10Blue);
         sigCircle5_Ev1->SetLineWidth(2);
         sigCircle5_Ev1->SetFillStyle(0); // no fill
         sigCircle5_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle5_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle6_Ev1 = new TEllipse(newSeedPositionsSigEv1[0].first, newSeedPositionsSigEv1[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle6_Ev1->SetLineColor(kGreen+2);
+        sigCircle6_Ev1->SetLineColor(kP10Green);
         sigCircle6_Ev1->SetLineWidth(2);
         sigCircle6_Ev1->SetFillStyle(0); // no fill
         sigCircle6_Ev1->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle6_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle7_Ev1 = new TEllipse(newSeedPositionsSigEv1[1].first, newSeedPositionsSigEv1[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle7_Ev1->SetLineColor(kGreen+2);
+        sigCircle7_Ev1->SetLineColor(kP10Green);
         sigCircle7_Ev1->SetLineWidth(2);
         sigCircle7_Ev1->SetFillStyle(0); // no fill
         sigCircle7_Ev1->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -18072,7 +18969,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sigLat2Ev1.SetTextColor(kBlack); // Match sigCircle color
         sigLat2Ev1.DrawLatex(newSeedPositionsSigEv1[1].first, newSeedPositionsSigEv1[1].second + 0.6, sigLabel2Ev1); // Slightly above the sigCircle\
 
-        c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev1.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev1.pdf");   
     }
     
     
@@ -18082,56 +18979,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         TEllipse *sigCircle0_Ev2 = new TEllipse(jFexSeedPositionsSigEv2[0].first, jFexSeedPositionsSigEv2[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle0_Ev2->SetLineColor(kRed);
+        sigCircle0_Ev2->SetLineColor(kP10Red);
         sigCircle0_Ev2->SetLineWidth(2);
         sigCircle0_Ev2->SetFillStyle(0); // no fill
         sigCircle0_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle0_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle1_Ev2 = new TEllipse(jFexSeedPositionsSigEv2[1].first, jFexSeedPositionsSigEv2[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle1_Ev2->SetLineColor(kRed);
+        sigCircle1_Ev2->SetLineColor(kP10Red);
         sigCircle1_Ev2->SetLineWidth(2);
         sigCircle1_Ev2->SetFillStyle(0); // no fill
         sigCircle1_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle1_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle2_Ev2 = new TEllipse(jFexAdditionalSRJPositionsSigEv2[0].first, jFexAdditionalSRJPositionsSigEv2[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle2_Ev2->SetLineColor(kAzure+2);
+        sigCircle2_Ev2->SetLineColor(kP10Blue);
         sigCircle2_Ev2->SetLineWidth(2);
         sigCircle2_Ev2->SetFillStyle(0); // no fill
         sigCircle2_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle2_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle3_Ev2 = new TEllipse(jFexAdditionalSRJPositionsSigEv2[1].first, jFexAdditionalSRJPositionsSigEv2[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle3_Ev2->SetLineColor(kAzure+2);
+        sigCircle3_Ev2->SetLineColor(kP10Blue);
         sigCircle3_Ev2->SetLineWidth(2);
         sigCircle3_Ev2->SetFillStyle(0); // no fill
         sigCircle3_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle3_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle4_Ev2 = new TEllipse(jFexAdditionalSRJPositionsSigEv2[2].first, jFexAdditionalSRJPositionsSigEv2[2].second, 1.0, 1.0); // R in both x and y
-        sigCircle4_Ev2->SetLineColor(kAzure+2);
+        sigCircle4_Ev2->SetLineColor(kP10Blue);
         sigCircle4_Ev2->SetLineWidth(2);
         sigCircle4_Ev2->SetFillStyle(0); // no fill
         sigCircle4_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle4_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle5_Ev2 = new TEllipse(jFexAdditionalSRJPositionsSigEv2[3].first, jFexAdditionalSRJPositionsSigEv2[3].second, 1.0, 1.0); // R in both x and y
-        sigCircle5_Ev2->SetLineColor(kAzure+2);
+        sigCircle5_Ev2->SetLineColor(kP10Blue);
         sigCircle5_Ev2->SetLineWidth(2);
         sigCircle5_Ev2->SetFillStyle(0); // no fill
         sigCircle5_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle5_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle6_Ev2 = new TEllipse(newSeedPositionsSigEv2[0].first, newSeedPositionsSigEv2[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle6_Ev2->SetLineColor(kGreen+2);
+        sigCircle6_Ev2->SetLineColor(kP10Green);
         sigCircle6_Ev2->SetLineWidth(2);
         sigCircle6_Ev2->SetFillStyle(0); // no fill
         sigCircle6_Ev2->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle6_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle7_Ev2 = new TEllipse(newSeedPositionsSigEv2[1].first, newSeedPositionsSigEv2[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle7_Ev2->SetLineColor(kGreen+2);
+        sigCircle7_Ev2->SetLineColor(kP10Green);
         sigCircle7_Ev2->SetLineWidth(2);
         sigCircle7_Ev2->SetFillStyle(0); // no fill
         sigCircle7_Ev2->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -18155,7 +19052,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sigLat2Ev2.SetTextColor(kBlack); // Match sigCircle color
         sigLat2Ev2.DrawLatex(newSeedPositionsSigEv2[1].first, newSeedPositionsSigEv2[1].second + 0.6, sigLabel2Ev2); // Slightly above the sigCircle\
 
-        c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev2.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev2.pdf");   
     }
     if(displayEv3Sig_){
         sigTopo422Highest128SeedPositionsEv3->GetZaxis()->SetTitle("E_{T} [GeV]");
@@ -18163,56 +19060,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         TEllipse *sigCircle0_Ev3 = new TEllipse(jFexSeedPositionsSigEv3[0].first, jFexSeedPositionsSigEv3[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle0_Ev3->SetLineColor(kRed);
+        sigCircle0_Ev3->SetLineColor(kP10Red);
         sigCircle0_Ev3->SetLineWidth(2);
         sigCircle0_Ev3->SetFillStyle(0); // no fill
         sigCircle0_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle0_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle1_Ev3 = new TEllipse(jFexSeedPositionsSigEv3[1].first, jFexSeedPositionsSigEv3[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle1_Ev3->SetLineColor(kRed);
+        sigCircle1_Ev3->SetLineColor(kP10Red);
         sigCircle1_Ev3->SetLineWidth(2);
         sigCircle1_Ev3->SetFillStyle(0); // no fill
         sigCircle1_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle1_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle2_Ev3 = new TEllipse(jFexAdditionalSRJPositionsSigEv3[0].first, jFexAdditionalSRJPositionsSigEv3[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle2_Ev3->SetLineColor(kAzure+2);
+        sigCircle2_Ev3->SetLineColor(kP10Blue);
         sigCircle2_Ev3->SetLineWidth(2);
         sigCircle2_Ev3->SetFillStyle(0); // no fill
         sigCircle2_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle2_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle3_Ev3 = new TEllipse(jFexAdditionalSRJPositionsSigEv3[1].first, jFexAdditionalSRJPositionsSigEv3[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle3_Ev3->SetLineColor(kAzure+2);
+        sigCircle3_Ev3->SetLineColor(kP10Blue);
         sigCircle3_Ev3->SetLineWidth(2);
         sigCircle3_Ev3->SetFillStyle(0); // no fill
         sigCircle3_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle3_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle4_Ev3 = new TEllipse(jFexAdditionalSRJPositionsSigEv3[2].first, jFexAdditionalSRJPositionsSigEv3[2].second, 1.0, 1.0); // R in both x and y
-        sigCircle4_Ev3->SetLineColor(kAzure+2);
+        sigCircle4_Ev3->SetLineColor(kP10Blue);
         sigCircle4_Ev3->SetLineWidth(2);
         sigCircle4_Ev3->SetFillStyle(0); // no fill
         sigCircle4_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle4_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle5_Ev3 = new TEllipse(jFexAdditionalSRJPositionsSigEv3[3].first, jFexAdditionalSRJPositionsSigEv3[3].second, 1.0, 1.0); // R in both x and y
-        sigCircle5_Ev3->SetLineColor(kAzure+2);
+        sigCircle5_Ev3->SetLineColor(kP10Blue);
         sigCircle5_Ev3->SetLineWidth(2);
         sigCircle5_Ev3->SetFillStyle(0); // no fill
         sigCircle5_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle5_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle6_Ev3 = new TEllipse(newSeedPositionsSigEv3[0].first, newSeedPositionsSigEv3[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle6_Ev3->SetLineColor(kGreen+2);
+        sigCircle6_Ev3->SetLineColor(kP10Green);
         sigCircle6_Ev3->SetLineWidth(2);
         sigCircle6_Ev3->SetFillStyle(0); // no fill
         sigCircle6_Ev3->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle6_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle7_Ev3 = new TEllipse(newSeedPositionsSigEv3[1].first, newSeedPositionsSigEv3[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle7_Ev3->SetLineColor(kGreen+2);
+        sigCircle7_Ev3->SetLineColor(kP10Green);
         sigCircle7_Ev3->SetLineWidth(2);
         sigCircle7_Ev3->SetFillStyle(0); // no fill
         sigCircle7_Ev3->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -18236,7 +19133,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sigLat2Ev3.SetTextColor(kBlack); // Match sigCircle color
         sigLat2Ev3.DrawLatex(newSeedPositionsSigEv3[1].first, newSeedPositionsSigEv3[1].second + 0.6, sigLabel2Ev3); // Slightly above the sigCircle
 
-        c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev3.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev3.pdf");   
     }
     
     
@@ -18246,56 +19143,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         TEllipse *sigCircle0_Ev4 = new TEllipse(jFexSeedPositionsSigEv4[0].first, jFexSeedPositionsSigEv4[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle0_Ev4->SetLineColor(kRed);
+        sigCircle0_Ev4->SetLineColor(kP10Red);
         sigCircle0_Ev4->SetLineWidth(2);
         sigCircle0_Ev4->SetFillStyle(0); // no fill
         sigCircle0_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle0_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle1_Ev4 = new TEllipse(jFexSeedPositionsSigEv4[1].first, jFexSeedPositionsSigEv4[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle1_Ev4->SetLineColor(kRed);
+        sigCircle1_Ev4->SetLineColor(kP10Red);
         sigCircle1_Ev4->SetLineWidth(2);
         sigCircle1_Ev4->SetFillStyle(0); // no fill
         sigCircle1_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle1_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle2_Ev4 = new TEllipse(jFexAdditionalSRJPositionsSigEv4[0].first, jFexAdditionalSRJPositionsSigEv4[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle2_Ev4->SetLineColor(kAzure+2);
+        sigCircle2_Ev4->SetLineColor(kP10Blue);
         sigCircle2_Ev4->SetLineWidth(2);
         sigCircle2_Ev4->SetFillStyle(0); // no fill
         sigCircle2_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle2_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle3_Ev4 = new TEllipse(jFexAdditionalSRJPositionsSigEv4[1].first, jFexAdditionalSRJPositionsSigEv4[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle3_Ev4->SetLineColor(kAzure+2);
+        sigCircle3_Ev4->SetLineColor(kP10Blue);
         sigCircle3_Ev4->SetLineWidth(2);
         sigCircle3_Ev4->SetFillStyle(0); // no fill
         sigCircle3_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle3_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle4_Ev4 = new TEllipse(jFexAdditionalSRJPositionsSigEv4[2].first, jFexAdditionalSRJPositionsSigEv4[2].second, 1.0, 1.0); // R in both x and y
-        sigCircle4_Ev4->SetLineColor(kAzure+2);
+        sigCircle4_Ev4->SetLineColor(kP10Blue);
         sigCircle4_Ev4->SetLineWidth(2);
         sigCircle4_Ev4->SetFillStyle(0); // no fill
         sigCircle4_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle4_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle5_Ev4 = new TEllipse(jFexAdditionalSRJPositionsSigEv4[3].first, jFexAdditionalSRJPositionsSigEv4[3].second, 1.0, 1.0); // R in both x and y
-        sigCircle5_Ev4->SetLineColor(kAzure+2);
+        sigCircle5_Ev4->SetLineColor(kP10Blue);
         sigCircle5_Ev4->SetLineWidth(2);
         sigCircle5_Ev4->SetFillStyle(0); // no fill
         sigCircle5_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle5_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle6_Ev4 = new TEllipse(newSeedPositionsSigEv4[0].first, newSeedPositionsSigEv4[0].second, 1.0, 1.0); // R in both x and y
-        sigCircle6_Ev4->SetLineColor(kGreen+2);
+        sigCircle6_Ev4->SetLineColor(kP10Green);
         sigCircle6_Ev4->SetLineWidth(2);
         sigCircle6_Ev4->SetFillStyle(0); // no fill
         sigCircle6_Ev4->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         sigCircle6_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *sigCircle7_Ev4 = new TEllipse(newSeedPositionsSigEv4[1].first, newSeedPositionsSigEv4[1].second, 1.0, 1.0); // R in both x and y
-        sigCircle7_Ev4->SetLineColor(kGreen+2);
+        sigCircle7_Ev4->SetLineColor(kP10Green);
         sigCircle7_Ev4->SetLineWidth(2);
         sigCircle7_Ev4->SetFillStyle(0); // no fill
         sigCircle7_Ev4->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -18319,7 +19216,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sigLat2Ev4.SetTextColor(kBlack); // Match sigCircle color
         sigLat2Ev4.DrawLatex(newSeedPositionsSigEv4[1].first, newSeedPositionsSigEv4[1].second + 0.6, sigLabel2Ev4); // Slightly above the sigCircle
 
-        c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev4.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev4.pdf");   
     }*/
     
     
@@ -18391,7 +19288,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         // Save the event display (no legend)
         
-        cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev0_gFEX_Offline_JetTagger.pdf");
+        cEventDisplays.cd(); DrawATLASLabel(); cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev0_gFEX_Offline_JetTagger.pdf");
 
         // ---------------- LEGEND-ONLY PDF ON A SEPARATE CANVAS ----------------
         const double gfexET_lead_Ev0 = getET(siggFexLRJEtEv0,    0);
@@ -18439,7 +19336,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg_only_Ev0->Draw();
 
         cLeg_Ev0.Modified(); cLeg_Ev0.Update();
-        cLeg_Ev0.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev0_gFEX_Offline_JetTagger_LEGEND.pdf");
+        cLeg_Ev0.cd(); DrawATLASLabel(); cLeg_Ev0.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev0_gFEX_Offline_JetTagger_LEGEND.pdf");
     }
 
     if (displayEv1Sig_) {
@@ -18503,7 +19400,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         // Save the event display (no legend)
         
-        cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev1_gFEX_Offline_JetTagger.pdf");
+        cEventDisplays.cd(); DrawATLASLabel(); cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev1_gFEX_Offline_JetTagger.pdf");
 
         // ---------------- LEGEND-ONLY PDF ON A SEPARATE CANVAS ----------------
         const double gfexET_lead_Ev1 = getET(siggFexLRJEtEv1,    0);
@@ -18551,7 +19448,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg_only_Ev1->Draw();
 
         cLeg_Ev1.Modified(); cLeg_Ev1.Update();
-        cLeg_Ev1.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev1_gFEX_Offline_JetTagger_LEGEND.pdf");
+        cLeg_Ev1.cd(); DrawATLASLabel(); cLeg_Ev1.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev1_gFEX_Offline_JetTagger_LEGEND.pdf");
     }
 
     if (displayEv2Sig_) {
@@ -18615,7 +19512,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         // Save the event display (no legend)
         
-        cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev2_gFEX_Offline_JetTagger.pdf");
+        cEventDisplays.cd(); DrawATLASLabel(); cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev2_gFEX_Offline_JetTagger.pdf");
 
         // ---------------- LEGEND-ONLY PDF ON A SEPARATE CANVAS ----------------
         const double gfexET_lead_Ev2 = getET(siggFexLRJEtEv2,    0);
@@ -18663,7 +19560,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg_only_Ev2->Draw();
 
         cLeg_Ev2.Modified(); cLeg_Ev2.Update();
-        cLeg_Ev2.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev2_gFEX_Offline_JetTagger_LEGEND.pdf");
+        cLeg_Ev2.cd(); DrawATLASLabel(); cLeg_Ev2.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev2_gFEX_Offline_JetTagger_LEGEND.pdf");
     }
 
     if (displayEv3Sig_) {
@@ -18727,7 +19624,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         // Save the event display (no legend)
         
-        cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev3_gFEX_Offline_JetTagger.pdf");
+        cEventDisplays.cd(); DrawATLASLabel(); cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev3_gFEX_Offline_JetTagger.pdf");
 
         // ---------------- LEGEND-ONLY PDF ON A SEPARATE CANVAS ----------------
         const double gfexET_lead_Ev3 = getET(siggFexLRJEtEv3,    0);
@@ -18775,7 +19672,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg_only_Ev3->Draw();
 
         cLeg_Ev3.Modified(); cLeg_Ev3.Update();
-        cLeg_Ev3.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev3_gFEX_Offline_JetTagger_LEGEND.pdf");
+        cLeg_Ev3.cd(); DrawATLASLabel(); cLeg_Ev3.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev3_gFEX_Offline_JetTagger_LEGEND.pdf");
     }
 
     if (displayEv4Sig_) {
@@ -18839,7 +19736,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         // Save the event display (no legend)
         
-        cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev4_gFEX_Offline_JetTagger.pdf");
+        cEventDisplays.cd(); DrawATLASLabel(); cEventDisplays.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev4_gFEX_Offline_JetTagger.pdf");
 
         // ---------------- LEGEND-ONLY PDF ON A SEPARATE CANVAS ----------------
         const double gfexET_lead_Ev4 = getET(siggFexLRJEtEv4,    0);
@@ -18887,7 +19784,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         leg_only_Ev4->Draw();
 
         cLeg_Ev4.Modified(); cLeg_Ev4.Update();
-        cLeg_Ev4.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev4_gFEX_Offline_JetTagger_LEGEND.pdf");
+        cLeg_Ev4.cd(); DrawATLASLabel(); cLeg_Ev4.SaveAs(modifiedOutputFileDir + "sigTopo422_highest128Et_EtaPhi_Ev4_gFEX_Offline_JetTagger_LEGEND.pdf");
     }*/
 
     jFexSeedPositionsSigEv0.clear();
@@ -18945,56 +19842,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         TEllipse *backCircle0_Ev0 = new TEllipse(jFexSeedPositionsBackEv0[0].first, jFexSeedPositionsBackEv0[0].second, 1.0, 1.0); // R in both x and y
-        backCircle0_Ev0->SetLineColor(kRed);
+        backCircle0_Ev0->SetLineColor(kP10Red);
         backCircle0_Ev0->SetLineWidth(2);
         backCircle0_Ev0->SetFillStyle(0); // no fill
         backCircle0_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle0_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle1_Ev0 = new TEllipse(jFexSeedPositionsBackEv0[1].first, jFexSeedPositionsBackEv0[1].second, 1.0, 1.0); // R in both x and y
-        backCircle1_Ev0->SetLineColor(kRed);
+        backCircle1_Ev0->SetLineColor(kP10Red);
         backCircle1_Ev0->SetLineWidth(2);
         backCircle1_Ev0->SetFillStyle(0); // no fill
         backCircle1_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle1_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle2_Ev0 = new TEllipse(jFexAdditionalSRJPositionsBackEv0[0].first, jFexAdditionalSRJPositionsBackEv0[0].second, 1.0, 1.0); // R in both x and y
-        backCircle2_Ev0->SetLineColor(kAzure+2);
+        backCircle2_Ev0->SetLineColor(kP10Blue);
         backCircle2_Ev0->SetLineWidth(2);
         backCircle2_Ev0->SetFillStyle(0); // no fill
         backCircle2_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle2_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle3_Ev0 = new TEllipse(jFexAdditionalSRJPositionsBackEv0[1].first, jFexAdditionalSRJPositionsBackEv0[1].second, 1.0, 1.0); // R in both x and y
-        backCircle3_Ev0->SetLineColor(kAzure+2);
+        backCircle3_Ev0->SetLineColor(kP10Blue);
         backCircle3_Ev0->SetLineWidth(2);
         backCircle3_Ev0->SetFillStyle(0); // no fill
         backCircle3_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle3_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle4_Ev0 = new TEllipse(jFexAdditionalSRJPositionsBackEv0[2].first, jFexAdditionalSRJPositionsBackEv0[2].second, 1.0, 1.0); // R in both x and y
-        backCircle4_Ev0->SetLineColor(kAzure+2);
+        backCircle4_Ev0->SetLineColor(kP10Blue);
         backCircle4_Ev0->SetLineWidth(2);
         backCircle4_Ev0->SetFillStyle(0); // no fill
         backCircle4_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle4_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle5_Ev0 = new TEllipse(jFexAdditionalSRJPositionsBackEv0[3].first, jFexAdditionalSRJPositionsBackEv0[3].second, 1.0, 1.0); // R in both x and y
-        backCircle5_Ev0->SetLineColor(kAzure+2);
+        backCircle5_Ev0->SetLineColor(kP10Blue);
         backCircle5_Ev0->SetLineWidth(2);
         backCircle5_Ev0->SetFillStyle(0); // no fill
         backCircle5_Ev0->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle5_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle6_Ev0 = new TEllipse(newSeedPositionsBackEv0[0].first, newSeedPositionsBackEv0[0].second, 1.0, 1.0); // R in both x and y
-        backCircle6_Ev0->SetLineColor(kGreen+2);
+        backCircle6_Ev0->SetLineColor(kP10Green);
         backCircle6_Ev0->SetLineWidth(2);
         backCircle6_Ev0->SetFillStyle(0); // no fill
         backCircle6_Ev0->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle6_Ev0->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle7_Ev0 = new TEllipse(newSeedPositionsBackEv0[1].first, newSeedPositionsBackEv0[1].second, 1.0, 1.0); // R in both x and y
-        backCircle7_Ev0->SetLineColor(kGreen+2);
+        backCircle7_Ev0->SetLineColor(kP10Green);
         backCircle7_Ev0->SetLineWidth(2);
         backCircle7_Ev0->SetFillStyle(0); // no fill
         backCircle7_Ev0->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -19018,7 +19915,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         backLat2Ev0.SetTextColor(kBlack); // Match backCircle color
         backLat2Ev0.DrawLatex(newSeedPositionsBackEv0[1].first, newSeedPositionsBackEv0[1].second + 0.6, backLabel2Ev0); // Slightly above the backCircle\
 
-        c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev0.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev0.pdf");   
 
         jFexSeedPositionsBackEv0.clear();
         jFexAdditionalSRJPositionsBackEv0.clear();
@@ -19033,56 +19930,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         TEllipse *backCircle0_Ev1 = new TEllipse(jFexSeedPositionsBackEv1[0].first, jFexSeedPositionsBackEv1[0].second, 1.0, 1.0); // R in both x and y
-        backCircle0_Ev1->SetLineColor(kRed);
+        backCircle0_Ev1->SetLineColor(kP10Red);
         backCircle0_Ev1->SetLineWidth(2);
         backCircle0_Ev1->SetFillStyle(0); // no fill
         backCircle0_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle0_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle1_Ev1 = new TEllipse(jFexSeedPositionsBackEv1[1].first, jFexSeedPositionsBackEv1[1].second, 1.0, 1.0); // R in both x and y
-        backCircle1_Ev1->SetLineColor(kRed);
+        backCircle1_Ev1->SetLineColor(kP10Red);
         backCircle1_Ev1->SetLineWidth(2);
         backCircle1_Ev1->SetFillStyle(0); // no fill
         backCircle1_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle1_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle2_Ev1 = new TEllipse(jFexAdditionalSRJPositionsBackEv1[0].first, jFexAdditionalSRJPositionsBackEv1[0].second, 1.0, 1.0); // R in both x and y
-        backCircle2_Ev1->SetLineColor(kAzure+2);
+        backCircle2_Ev1->SetLineColor(kP10Blue);
         backCircle2_Ev1->SetLineWidth(2);
         backCircle2_Ev1->SetFillStyle(0); // no fill
         backCircle2_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle2_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle3_Ev1 = new TEllipse(jFexAdditionalSRJPositionsBackEv1[1].first, jFexAdditionalSRJPositionsBackEv1[1].second, 1.0, 1.0); // R in both x and y
-        backCircle3_Ev1->SetLineColor(kAzure+2);
+        backCircle3_Ev1->SetLineColor(kP10Blue);
         backCircle3_Ev1->SetLineWidth(2);
         backCircle3_Ev1->SetFillStyle(0); // no fill
         backCircle3_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle3_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle4_Ev1 = new TEllipse(jFexAdditionalSRJPositionsBackEv1[2].first, jFexAdditionalSRJPositionsBackEv1[2].second, 1.0, 1.0); // R in both x and y
-        backCircle4_Ev1->SetLineColor(kAzure+2);
+        backCircle4_Ev1->SetLineColor(kP10Blue);
         backCircle4_Ev1->SetLineWidth(2);
         backCircle4_Ev1->SetFillStyle(0); // no fill
         backCircle4_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle4_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle5_Ev1 = new TEllipse(jFexAdditionalSRJPositionsBackEv1[3].first, jFexAdditionalSRJPositionsBackEv1[3].second, 1.0, 1.0); // R in both x and y
-        backCircle5_Ev1->SetLineColor(kAzure+2);
+        backCircle5_Ev1->SetLineColor(kP10Blue);
         backCircle5_Ev1->SetLineWidth(2);
         backCircle5_Ev1->SetFillStyle(0); // no fill
         backCircle5_Ev1->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle5_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle6_Ev1 = new TEllipse(newSeedPositionsBackEv1[0].first, newSeedPositionsBackEv1[0].second, 1.0, 1.0); // R in both x and y
-        backCircle6_Ev1->SetLineColor(kGreen+2);
+        backCircle6_Ev1->SetLineColor(kP10Green);
         backCircle6_Ev1->SetLineWidth(2);
         backCircle6_Ev1->SetFillStyle(0); // no fill
         backCircle6_Ev1->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle6_Ev1->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle7_Ev1 = new TEllipse(newSeedPositionsBackEv1[1].first, newSeedPositionsBackEv1[1].second, 1.0, 1.0); // R in both x and y
-        backCircle7_Ev1->SetLineColor(kGreen+2);
+        backCircle7_Ev1->SetLineColor(kP10Green);
         backCircle7_Ev1->SetLineWidth(2);
         backCircle7_Ev1->SetFillStyle(0); // no fill
         backCircle7_Ev1->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -19106,7 +20003,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         backLat2Ev1.SetTextColor(kBlack); // Match backCircle color
         backLat2Ev1.DrawLatex(newSeedPositionsBackEv1[1].first, newSeedPositionsBackEv1[1].second + 0.6, backLabel2Ev1); // Slightly above the backCircle\
 
-        c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev1.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev1.pdf");   
         
         
         jFexSeedPositionsBackEv1.clear();
@@ -19122,56 +20019,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         TEllipse *backCircle0_Ev2 = new TEllipse(jFexSeedPositionsBackEv2[0].first, jFexSeedPositionsBackEv2[0].second, 1.0, 1.0); // R in both x and y
-        backCircle0_Ev2->SetLineColor(kRed);
+        backCircle0_Ev2->SetLineColor(kP10Red);
         backCircle0_Ev2->SetLineWidth(2);
         backCircle0_Ev2->SetFillStyle(0); // no fill
         backCircle0_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle0_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle1_Ev2 = new TEllipse(jFexSeedPositionsBackEv2[1].first, jFexSeedPositionsBackEv2[1].second, 1.0, 1.0); // R in both x and y
-        backCircle1_Ev2->SetLineColor(kRed);
+        backCircle1_Ev2->SetLineColor(kP10Red);
         backCircle1_Ev2->SetLineWidth(2);
         backCircle1_Ev2->SetFillStyle(0); // no fill
         backCircle1_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle1_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle2_Ev2 = new TEllipse(jFexAdditionalSRJPositionsBackEv2[0].first, jFexAdditionalSRJPositionsBackEv2[0].second, 1.0, 1.0); // R in both x and y
-        backCircle2_Ev2->SetLineColor(kAzure+2);
+        backCircle2_Ev2->SetLineColor(kP10Blue);
         backCircle2_Ev2->SetLineWidth(2);
         backCircle2_Ev2->SetFillStyle(0); // no fill
         backCircle2_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle2_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle3_Ev2 = new TEllipse(jFexAdditionalSRJPositionsBackEv2[1].first, jFexAdditionalSRJPositionsBackEv2[1].second, 1.0, 1.0); // R in both x and y
-        backCircle3_Ev2->SetLineColor(kAzure+2);
+        backCircle3_Ev2->SetLineColor(kP10Blue);
         backCircle3_Ev2->SetLineWidth(2);
         backCircle3_Ev2->SetFillStyle(0); // no fill
         backCircle3_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle3_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle4_Ev2 = new TEllipse(jFexAdditionalSRJPositionsBackEv2[2].first, jFexAdditionalSRJPositionsBackEv2[2].second, 1.0, 1.0); // R in both x and y
-        backCircle4_Ev2->SetLineColor(kAzure+2);
+        backCircle4_Ev2->SetLineColor(kP10Blue);
         backCircle4_Ev2->SetLineWidth(2);
         backCircle4_Ev2->SetFillStyle(0); // no fill
         backCircle4_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle4_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle5_Ev2 = new TEllipse(jFexAdditionalSRJPositionsBackEv2[3].first, jFexAdditionalSRJPositionsBackEv2[3].second, 1.0, 1.0); // R in both x and y
-        backCircle5_Ev2->SetLineColor(kAzure+2);
+        backCircle5_Ev2->SetLineColor(kP10Blue);
         backCircle5_Ev2->SetLineWidth(2);
         backCircle5_Ev2->SetFillStyle(0); // no fill
         backCircle5_Ev2->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle5_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle6_Ev2 = new TEllipse(newSeedPositionsBackEv2[0].first, newSeedPositionsBackEv2[0].second, 1.0, 1.0); // R in both x and y
-        backCircle6_Ev2->SetLineColor(kGreen+2);
+        backCircle6_Ev2->SetLineColor(kP10Green);
         backCircle6_Ev2->SetLineWidth(2);
         backCircle6_Ev2->SetFillStyle(0); // no fill
         backCircle6_Ev2->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle6_Ev2->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle7_Ev2 = new TEllipse(newSeedPositionsBackEv2[1].first, newSeedPositionsBackEv2[1].second, 1.0, 1.0); // R in both x and y
-        backCircle7_Ev2->SetLineColor(kGreen+2);
+        backCircle7_Ev2->SetLineColor(kP10Green);
         backCircle7_Ev2->SetLineWidth(2);
         backCircle7_Ev2->SetFillStyle(0); // no fill
         backCircle7_Ev2->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -19195,7 +20092,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         backLat2Ev2.SetTextColor(kBlack); // Match backCircle color
         backLat2Ev2.DrawLatex(newSeedPositionsBackEv2[1].first, newSeedPositionsBackEv2[1].second + 0.6, backLabel2Ev2); // Slightly above the backCircle\
 
-        c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev2.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev2.pdf");   
         
         
         jFexSeedPositionsBackEv2.clear();
@@ -19212,56 +20109,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         TEllipse *backCircle0_Ev3 = new TEllipse(jFexSeedPositionsBackEv3[0].first, jFexSeedPositionsBackEv3[0].second, 1.0, 1.0); // R in both x and y
-        backCircle0_Ev3->SetLineColor(kRed);
+        backCircle0_Ev3->SetLineColor(kP10Red);
         backCircle0_Ev3->SetLineWidth(2);
         backCircle0_Ev3->SetFillStyle(0); // no fill
         backCircle0_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle0_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle1_Ev3 = new TEllipse(jFexSeedPositionsBackEv3[1].first, jFexSeedPositionsBackEv3[1].second, 1.0, 1.0); // R in both x and y
-        backCircle1_Ev3->SetLineColor(kRed);
+        backCircle1_Ev3->SetLineColor(kP10Red);
         backCircle1_Ev3->SetLineWidth(2);
         backCircle1_Ev3->SetFillStyle(0); // no fill
         backCircle1_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle1_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle2_Ev3 = new TEllipse(jFexAdditionalSRJPositionsBackEv3[0].first, jFexAdditionalSRJPositionsBackEv3[0].second, 1.0, 1.0); // R in both x and y
-        backCircle2_Ev3->SetLineColor(kAzure+2);
+        backCircle2_Ev3->SetLineColor(kP10Blue);
         backCircle2_Ev3->SetLineWidth(2);
         backCircle2_Ev3->SetFillStyle(0); // no fill
         backCircle2_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle2_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle3_Ev3 = new TEllipse(jFexAdditionalSRJPositionsBackEv3[1].first, jFexAdditionalSRJPositionsBackEv3[1].second, 1.0, 1.0); // R in both x and y
-        backCircle3_Ev3->SetLineColor(kAzure+2);
+        backCircle3_Ev3->SetLineColor(kP10Blue);
         backCircle3_Ev3->SetLineWidth(2);
         backCircle3_Ev3->SetFillStyle(0); // no fill
         backCircle3_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle3_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle4_Ev3 = new TEllipse(jFexAdditionalSRJPositionsBackEv3[2].first, jFexAdditionalSRJPositionsBackEv3[2].second, 1.0, 1.0); // R in both x and y
-        backCircle4_Ev3->SetLineColor(kAzure+2);
+        backCircle4_Ev3->SetLineColor(kP10Blue);
         backCircle4_Ev3->SetLineWidth(2);
         backCircle4_Ev3->SetFillStyle(0); // no fill
         backCircle4_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle4_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle5_Ev3 = new TEllipse(jFexAdditionalSRJPositionsBackEv3[3].first, jFexAdditionalSRJPositionsBackEv3[3].second, 1.0, 1.0); // R in both x and y
-        backCircle5_Ev3->SetLineColor(kAzure+2);
+        backCircle5_Ev3->SetLineColor(kP10Blue);
         backCircle5_Ev3->SetLineWidth(2);
         backCircle5_Ev3->SetFillStyle(0); // no fill
         backCircle5_Ev3->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle5_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle6_Ev3 = new TEllipse(newSeedPositionsBackEv3[0].first, newSeedPositionsBackEv3[0].second, 1.0, 1.0); // R in both x and y
-        backCircle6_Ev3->SetLineColor(kGreen+2);
+        backCircle6_Ev3->SetLineColor(kP10Green);
         backCircle6_Ev3->SetLineWidth(2);
         backCircle6_Ev3->SetFillStyle(0); // no fill
         backCircle6_Ev3->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle6_Ev3->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle7_Ev3 = new TEllipse(newSeedPositionsBackEv3[1].first, newSeedPositionsBackEv3[1].second, 1.0, 1.0); // R in both x and y
-        backCircle7_Ev3->SetLineColor(kGreen+2);
+        backCircle7_Ev3->SetLineColor(kP10Green);
         backCircle7_Ev3->SetLineWidth(2);
         backCircle7_Ev3->SetFillStyle(0); // no fill
         backCircle7_Ev3->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -19285,7 +20182,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         backLat2Ev3.SetTextColor(kBlack); // Match backCircle color
         backLat2Ev3.DrawLatex(newSeedPositionsBackEv3[1].first, newSeedPositionsBackEv3[1].second + 0.6, backLabel2Ev3); // Slightly above the backCircle
 
-        c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev3.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev3.pdf");   
         
         
         jFexSeedPositionsBackEv3.clear();
@@ -19303,56 +20200,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
 
         TEllipse *backCircle0_Ev4 = new TEllipse(jFexSeedPositionsBackEv4[0].first, jFexSeedPositionsBackEv4[0].second, 1.0, 1.0); // R in both x and y
-        backCircle0_Ev4->SetLineColor(kRed);
+        backCircle0_Ev4->SetLineColor(kP10Red);
         backCircle0_Ev4->SetLineWidth(2);
         backCircle0_Ev4->SetFillStyle(0); // no fill
         backCircle0_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle0_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle1_Ev4 = new TEllipse(jFexSeedPositionsBackEv4[1].first, jFexSeedPositionsBackEv4[1].second, 1.0, 1.0); // R in both x and y
-        backCircle1_Ev4->SetLineColor(kRed);
+        backCircle1_Ev4->SetLineColor(kP10Red);
         backCircle1_Ev4->SetLineWidth(2);
         backCircle1_Ev4->SetFillStyle(0); // no fill
         backCircle1_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle1_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle2_Ev4 = new TEllipse(jFexAdditionalSRJPositionsBackEv4[0].first, jFexAdditionalSRJPositionsBackEv4[0].second, 1.0, 1.0); // R in both x and y
-        backCircle2_Ev4->SetLineColor(kAzure+2);
+        backCircle2_Ev4->SetLineColor(kP10Blue);
         backCircle2_Ev4->SetLineWidth(2);
         backCircle2_Ev4->SetFillStyle(0); // no fill
         backCircle2_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle2_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle3_Ev4 = new TEllipse(jFexAdditionalSRJPositionsBackEv4[1].first, jFexAdditionalSRJPositionsBackEv4[1].second, 1.0, 1.0); // R in both x and y
-        backCircle3_Ev4->SetLineColor(kAzure+2);
+        backCircle3_Ev4->SetLineColor(kP10Blue);
         backCircle3_Ev4->SetLineWidth(2);
         backCircle3_Ev4->SetFillStyle(0); // no fill
         backCircle3_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle3_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle4_Ev4 = new TEllipse(jFexAdditionalSRJPositionsBackEv4[2].first, jFexAdditionalSRJPositionsBackEv4[2].second, 1.0, 1.0); // R in both x and y
-        backCircle4_Ev4->SetLineColor(kAzure+2);
+        backCircle4_Ev4->SetLineColor(kP10Blue);
         backCircle4_Ev4->SetLineWidth(2);
         backCircle4_Ev4->SetFillStyle(0); // no fill
         backCircle4_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle4_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle5_Ev4 = new TEllipse(jFexAdditionalSRJPositionsBackEv4[3].first, jFexAdditionalSRJPositionsBackEv4[3].second, 1.0, 1.0); // R in both x and y
-        backCircle5_Ev4->SetLineColor(kAzure+2);
+        backCircle5_Ev4->SetLineColor(kP10Blue);
         backCircle5_Ev4->SetLineWidth(2);
         backCircle5_Ev4->SetFillStyle(0); // no fill
         backCircle5_Ev4->SetLineStyle(2);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle5_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle6_Ev4 = new TEllipse(newSeedPositionsBackEv4[0].first, newSeedPositionsBackEv4[0].second, 1.0, 1.0); // R in both x and y
-        backCircle6_Ev4->SetLineColor(kGreen+2);
+        backCircle6_Ev4->SetLineColor(kP10Green);
         backCircle6_Ev4->SetLineWidth(2);
         backCircle6_Ev4->SetFillStyle(0); // no fill
         backCircle6_Ev4->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
         backCircle6_Ev4->Draw("same");    // overlay on the existing plot
 
         TEllipse *backCircle7_Ev4 = new TEllipse(newSeedPositionsBackEv4[1].first, newSeedPositionsBackEv4[1].second, 1.0, 1.0); // R in both x and y
-        backCircle7_Ev4->SetLineColor(kGreen+2);
+        backCircle7_Ev4->SetLineColor(kP10Green);
         backCircle7_Ev4->SetLineWidth(2);
         backCircle7_Ev4->SetFillStyle(0); // no fill
         backCircle7_Ev4->SetLineStyle(1);  // dashed (1=solid, 2=dashed, 3=dotted, etc.)
@@ -19376,7 +20273,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         backLat2Ev4.SetTextColor(kBlack); // Match backCircle color
         backLat2Ev4.DrawLatex(newSeedPositionsBackEv4[1].first, newSeedPositionsBackEv4[1].second + 0.6, backLabel2Ev4); // Slightly above the backCircle
 
-        c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev4.pdf");   
+        c.cd(); DrawATLASLabel(); c.SaveAs(modifiedOutputFileDir + "backTopo422_highest128Et_EtaPhi_Ev4.pdf");   
         
         jFexSeedPositionsBackEv4.clear();
         jFexAdditionalSRJPositionsBackEv4.clear();
@@ -19429,7 +20326,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ450->Draw("P SAME");
     sig_eff_offlineLRJ500->Draw("P SAME");
     sigLegEffLRJ->Draw();
-    cSigEffLRJ.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ.pdf");
+    cSigEffLRJ.cd(); DrawATLASLabel(); cSigEffLRJ.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ.pdf");
 
 
     cSigEffLRJ_Dijet.cd();
@@ -19476,7 +20373,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ450_Dijet->Draw("P SAME");
     sig_eff_offlineLRJ500_Dijet->Draw("P SAME");
     sigLegEffLRJ_Dijet->Draw();
-    cSigEffLRJ_Dijet.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_Dijet.pdf");
+    cSigEffLRJ_Dijet.cd(); DrawATLASLabel(); cSigEffLRJ_Dijet.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_Dijet.pdf");
 
 
     cSigEffLRJ_1Subjet.cd();
@@ -19523,7 +20420,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ450_1Subjet->Draw("P SAME");
     sig_eff_offlineLRJ500_1Subjet->Draw("P SAME");
     sigLegEffLRJ_1Subjet->Draw();
-    cSigEffLRJ_1Subjet.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_1Subjet.pdf");
+    cSigEffLRJ_1Subjet.cd(); DrawATLASLabel(); cSigEffLRJ_1Subjet.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_1Subjet.pdf");
 
     cBackEffLRJ_1Subjet.cd();
 
@@ -19541,7 +20438,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     back_eff_offlineLRJ200_1Subjet->Draw("P SAME");
     back_eff_offlineLRJ300_1Subjet->Draw("P SAME");
     backLegEffLRJ_1Subjet->Draw();
-    cBackEffLRJ_1Subjet.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_1Subjet.pdf");
+    cBackEffLRJ_1Subjet.cd(); DrawATLASLabel(); cBackEffLRJ_1Subjet.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_1Subjet.pdf");
 
 
     cSigEffLRJ_GrEq2Subjets.cd();
@@ -19588,7 +20485,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ450_GrEq2Subjets->Draw("P SAME");
     sig_eff_offlineLRJ500_GrEq2Subjets->Draw("P SAME");
     sigLegEffLRJ_GrEq2Subjets->Draw();
-    cSigEffLRJ_GrEq2Subjets.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_GrEq2Subjets.pdf");
+    cSigEffLRJ_GrEq2Subjets.cd(); DrawATLASLabel(); cSigEffLRJ_GrEq2Subjets.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_GrEq2Subjets.pdf");
 
     cBackEffLRJ_GrEq2Subjets.cd();
 
@@ -19606,7 +20503,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     back_eff_offlineLRJ200_GrEq2Subjets->Draw("P SAME");
     back_eff_offlineLRJ300_GrEq2Subjets->Draw("P SAME");
     backLegEffLRJ_GrEq2Subjets->Draw();
-    cBackEffLRJ_GrEq2Subjets.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_GrEq2Subjets.pdf");
+    cBackEffLRJ_GrEq2Subjets.cd(); DrawATLASLabel(); cBackEffLRJ_GrEq2Subjets.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_GrEq2Subjets.pdf");
 
 
     cSigEffLRJ_Mass100to150.cd();
@@ -19653,7 +20550,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ450_mass100to150->Draw("P SAME");
     sig_eff_offlineLRJ500_mass100to150->Draw("P SAME");
     sigLegEffLRJ_mass100to150->Draw();
-    cSigEffLRJ_Mass100to150.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_mass100to150.pdf");
+    cSigEffLRJ_Mass100to150.cd(); DrawATLASLabel(); cSigEffLRJ_Mass100to150.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_mass100to150.pdf");
 
 
     cBackEffLRJ.cd();
@@ -19695,7 +20592,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     back_eff_offlineLRJ400->Draw("P SAME");
     back_eff_offlineLRJ450->Draw("P SAME");
     backLegEffLRJ->Draw();
-    cBackEffLRJ.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ.pdf");
+    cBackEffLRJ.cd(); DrawATLASLabel(); cBackEffLRJ.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ.pdf");
 
 
     cSigEffLRJ_gFex_Dijet.cd();
@@ -19741,7 +20638,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ450_gFexLRJ_Dijet->Draw("P SAME");
     sig_eff_offlineLRJ500_gFexLRJ_Dijet->Draw("P SAME");
     sigLegEffLRJ_gFex_Dijet->Draw();
-    cSigEffLRJ_gFex_Dijet.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_gFexLRJ_Dijet.pdf");
+    cSigEffLRJ_gFex_Dijet.cd(); DrawATLASLabel(); cSigEffLRJ_gFex_Dijet.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_gFexLRJ_Dijet.pdf");
 
 
     cSigEffLRJ_gFex.cd();
@@ -19787,7 +20684,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ450_gFexLRJ->Draw("P SAME");
     sig_eff_offlineLRJ500_gFexLRJ->Draw("P SAME");
     sigLegEffLRJ_gFex->Draw();
-    cSigEffLRJ_gFex.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_gFexLRJ.pdf");
+    cSigEffLRJ_gFex.cd(); DrawATLASLabel(); cSigEffLRJ_gFex.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_gFexLRJ.pdf");
 
     cSigEffLRJ_jFex.cd();
     // eff. vs. offline leading lrj Et overlay
@@ -19832,7 +20729,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ450_jFexLRJ->Draw("P SAME");
     sig_eff_offlineLRJ500_jFexLRJ->Draw("P SAME");
     sigLegEffLRJ_jFex->Draw();
-    cSigEffLRJ_jFex.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_jFexLRJ.pdf");
+    cSigEffLRJ_jFex.cd(); DrawATLASLabel(); cSigEffLRJ_jFex.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_jFexLRJ.pdf");
 
 
     cBackEffLRJ_gFex.cd();
@@ -19874,7 +20771,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     back_eff_offlineLRJ400_gFexLRJ->Draw("P SAME");
     back_eff_offlineLRJ450_gFexLRJ->Draw("P SAME");
     backLegEffLRJ_gFex->Draw();
-    cBackEffLRJ_gFex.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_gFexLRJ.pdf");
+    cBackEffLRJ_gFex.cd(); DrawATLASLabel(); cBackEffLRJ_gFex.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_gFexLRJ.pdf");
 
     cBackEffLRJ_jFex.cd();
     // eff. vs. offline leading lrj Et overlay
@@ -19915,7 +20812,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     back_eff_offlineLRJ400_jFexLRJ->Draw("P SAME");
     back_eff_offlineLRJ450_jFexLRJ->Draw("P SAME");
     backLegEffLRJ_jFex->Draw();
-    cBackEffLRJ_jFex.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_jFexLRJ.pdf");
+    cBackEffLRJ_jFex.cd(); DrawATLASLabel(); cBackEffLRJ_jFex.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_jFexLRJ.pdf");
 
     cSigEffLRJ_gFex_LRJ_overlay.cd();
 
@@ -19994,7 +20891,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sigLegEffLRJ_gFex_LRJ_overlay->Draw();
 
     // Save to a new file/canvas
-    cSigEffLRJ_gFex_LRJ_overlay.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_gFEX_100_250_400.pdf");
+    cSigEffLRJ_gFex_LRJ_overlay.cd(); DrawATLASLabel(); cSigEffLRJ_gFex_LRJ_overlay.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_gFEX_100_250_400.pdf");
 
 
     // JFEX
@@ -20061,7 +20958,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sigLegEffLRJ_jFex_LRJ_overlay->Draw();
 
     // Save to a new file/canvas
-    cSigEffLRJ_jFex_LRJ_overlay.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_jFex_100_250_400.pdf");
+    cSigEffLRJ_jFex_LRJ_overlay.cd(); DrawATLASLabel(); cSigEffLRJ_jFex_LRJ_overlay.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_jFex_100_250_400.pdf");
 
     cSigEffLRJ_gFex_LRJ_Dijet_overlay.cd();
     // ---- 100 GeV ----
@@ -20126,7 +21023,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     //sigLegEffLRJ_gFex_LRJ_Dijet_overlay->Draw(); // TOGGLE DRAW OR DON'T DRAW
 
     // Save to a new file/canvas
-    cSigEffLRJ_gFex_LRJ_Dijet_overlay.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_gFEX_Dijet_150_250_400.pdf");
+    cSigEffLRJ_gFex_LRJ_Dijet_overlay.cd(); DrawATLASLabel(); cSigEffLRJ_gFex_LRJ_Dijet_overlay.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_gFEX_Dijet_150_250_400.pdf");
 
     cSigEffLRJ_Mass100to150_LRJ_overlay.cd();
     // ---- 150 GeV ----
@@ -20191,7 +21088,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sigLegEffLRJ_mass100to150_LRJ_overlay->Draw(); // DRAW OR DON'T DRAW
 
     // Save to a new file/canvas
-    cSigEffLRJ_Mass100to150_LRJ_overlay.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_LRJ_mass100to150_150_300_450.pdf");
+    cSigEffLRJ_Mass100to150_LRJ_overlay.cd(); DrawATLASLabel(); cSigEffLRJ_Mass100to150_LRJ_overlay.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_LRJ_mass100to150_150_300_450.pdf");
 
 
     cSigEffLRJ_Overlay_1Subjet_GrEq2Subjets.cd();
@@ -20257,7 +21154,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sigLegEffLRJ_1Subjet_GrEq2Subjets_LRJ_overlay->Draw(); // DRAW OR DON'T DRAW
 
     // Save to a new file/canvas
-    cSigEffLRJ_Overlay_1Subjet_GrEq2Subjets.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_1Subjet_GrEq2Subjets_100_250_400.pdf");
+    cSigEffLRJ_Overlay_1Subjet_GrEq2Subjets.cd(); DrawATLASLabel(); cSigEffLRJ_Overlay_1Subjet_GrEq2Subjets.SaveAs(modifiedOutputFileDir + "sig_overlayed_eff_LRJ_off_vs_1Subjet_GrEq2Subjets_100_250_400.pdf");
 
     cBackEffLRJ_Overlay_1Subjet_GrEq2Subjets.cd();
     // ---- 100 GeV ----
@@ -20322,7 +21219,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     backLegEffLRJ_1Subjet_GrEq2Subjets_LRJ_overlay->Draw(); // DRAW OR DON'T DRAW
 
     // Save to a new file/canvas
-    cBackEffLRJ_Overlay_1Subjet_GrEq2Subjets.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_off_vs_1Subjet_GrEq2Subjets_100_200_300.pdf");
+    cBackEffLRJ_Overlay_1Subjet_GrEq2Subjets.cd(); DrawATLASLabel(); cBackEffLRJ_Overlay_1Subjet_GrEq2Subjets.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_off_vs_1Subjet_GrEq2Subjets_100_200_300.pdf");
 
     cBackEffLRJ_gFex_LRJ_overlay.cd();
 
@@ -20388,7 +21285,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     backLegEffLRJ_gFex_LRJ_overlay->Draw();
 
     // Save to a new file/canvas
-    cBackEffLRJ_gFex_LRJ_overlay.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_off_vs_gFEX_100_200_300.pdf");
+    cBackEffLRJ_gFex_LRJ_overlay.cd(); DrawATLASLabel(); cBackEffLRJ_gFex_LRJ_overlay.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_off_vs_gFEX_100_200_300.pdf");
 
     // jFEX
     cBackEffLRJ_jFex_LRJ_overlay.cd();
@@ -20455,7 +21352,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     //backLegEffLRJ_jFex_LRJ_overlay->Draw();
 
     // Save to a new file/canvas
-    cBackEffLRJ_jFex_LRJ_overlay.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_off_vs_jFex_100_200_300.pdf");
+    cBackEffLRJ_jFex_LRJ_overlay.cd(); DrawATLASLabel(); cBackEffLRJ_jFex_LRJ_overlay.SaveAs(modifiedOutputFileDir + "back_overlayed_eff_LRJ_off_vs_jFex_100_200_300.pdf");
 
 
     cSigEffb.cd();
@@ -20481,7 +21378,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_b_Et200->Draw("P SAME");
     sig_eff_b_Et250->Draw("P SAME");
     legEffb->Draw();
-    cSigEffb.SaveAs(modifiedOutputFileDir + "overlayed_eff_b_Et.pdf");
+    cSigEffb.cd(); DrawATLASLabel(); cSigEffb.SaveAs(modifiedOutputFileDir + "overlayed_eff_b_Et.pdf");
 
     // --- Styling ---
     // --- Style background histogram (shaded) ---
@@ -20497,13 +21394,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ10kHz->SetMarkerStyle(20);
     sig_eff_offlineLRJ10kHz->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz->SetMarkerStyle(21);
     sig_eff_offline_gFEX_LRJ10kHz->SetMarkerSize(1.0);
 
-    //sig_eff_offline_jFEX_LRJ10kHz->SetLineColor(kGreen+2);
-    //sig_eff_offline_jFEX_LRJ10kHz->SetMarkerColor(kGreen+2);
+    //sig_eff_offline_jFEX_LRJ10kHz->SetLineColor(kP10Green);
+    //sig_eff_offline_jFEX_LRJ10kHz->SetMarkerColor(kP10Green);
     //sig_eff_offline_jFEX_LRJ10kHz->SetMarkerStyle(22);
     //sig_eff_offline_jFEX_LRJ10kHz->SetMarkerSize(1.0);
 
@@ -20538,7 +21435,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_10kHz_effs->Draw();
 
     // --- Save overlay ---
-    c_effLRJ10kHz.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay.pdf");
+    c_effLRJ10kHz.cd(); DrawATLASLabel(); c_effLRJ10kHz.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay.pdf");
 
 
 
@@ -20559,8 +21456,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ10kHz_SubjetBased->SetMarkerStyle(20);
     sig_eff_offlineLRJ10kHz_SubjetBased->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz->SetMarkerStyle(21);
     sig_eff_offline_gFEX_LRJ10kHz->SetMarkerSize(1.0);
 
@@ -20593,7 +21490,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_10kHz_effs->Draw();
 
     // --- Save overlay ---
-    c_effLRJ10kHz.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_subjetbased.pdf");}
+    c_effLRJ10kHz.cd(); DrawATLASLabel(); c_effLRJ10kHz.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_subjetbased.pdf");}
 
     // ======= 3-way overlay: subjet-based vs ET+mass vs ET-only =======
     auto make3wayOverlay = [&](TH1F* hSubjet, TH1F* hEtMass, TH1F* hEtOnly,
@@ -20601,8 +21498,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                 const char* title, const char* fname, const char* rateLabel){
         if(!hSubjet || !hEtMass || !hEtOnly) return;
         hSubjet->SetLineColor(kBlack);   hSubjet->SetMarkerColor(kBlack);   hSubjet->SetMarkerStyle(20); hSubjet->SetMarkerSize(1.0);
-        hEtMass->SetLineColor(kBlue+1);  hEtMass->SetMarkerColor(kBlue+1);  hEtMass->SetMarkerStyle(21); hEtMass->SetMarkerSize(1.0);
-        hEtOnly->SetLineColor(kRed+1);   hEtOnly->SetMarkerColor(kRed+1);   hEtOnly->SetMarkerStyle(22); hEtOnly->SetMarkerSize(1.0);
+        hEtMass->SetLineColor(kP10Blue);  hEtMass->SetMarkerColor(kP10Blue);  hEtMass->SetMarkerStyle(21); hEtMass->SetMarkerSize(1.0);
+        hEtOnly->SetLineColor(kP10Red);   hEtOnly->SetMarkerColor(kP10Red);   hEtOnly->SetMarkerStyle(22); hEtOnly->SetMarkerSize(1.0);
         hSubjet->SetAxisRange(0.0, 1.1, "Y");
         hSubjet->GetXaxis()->SetTitleOffset(1.1);
         hSubjet->GetYaxis()->SetTitleOffset(1.2);
@@ -20618,7 +21515,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         legOv->AddEntry(hEtMass, Form("Leading LRJ E_{T} > %.0f GeV + m > %.0f GeV", etMassThresh, massMinThresh), "lp");
         legOv->AddEntry(hEtOnly, Form("Leading LRJ E_{T} > %.0f GeV only", etOnlyThresh), "lp");
         legOv->Draw();
-        cOv.SaveAs(rateVsEffFileDir + fname);
+        cOv.cd(); DrawATLASLabel(); cOv.SaveAs(rateVsEffFileDir + fname);
     };
 
     // ======= 2-way overlay =======
@@ -20627,7 +21524,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                 const char* title, const char* fname, const char* rateLabel){
         if(!hA || !hB) return;
         hA->SetLineColor(kBlack);  hA->SetMarkerColor(kBlack);  hA->SetMarkerStyle(20); hA->SetMarkerSize(1.0);
-        hB->SetLineColor(kRed+1);  hB->SetMarkerColor(kRed+1);  hB->SetMarkerStyle(22); hB->SetMarkerSize(1.0);
+        hB->SetLineColor(kP10Red);  hB->SetMarkerColor(kP10Red);  hB->SetMarkerStyle(22); hB->SetMarkerSize(1.0);
         hA->SetAxisRange(0.0, 1.1, "Y");
         hA->GetXaxis()->SetTitleOffset(1.1);
         hA->GetYaxis()->SetTitleOffset(1.2);
@@ -20641,7 +21538,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         legOv->AddEntry(hA, labelA, "lp");
         legOv->AddEntry(hB, labelB, "lp");
         legOv->Draw();
-        cOv.SaveAs(rateVsEffFileDir + fname);
+        cOv.cd(); DrawATLASLabel(); cOv.SaveAs(rateVsEffFileDir + fname);
     };
 
     make3wayOverlay(sig_eff_offlineLRJ10kHz_SubjetBased, eff_ET_mass_10kHz, eff_ET_only_10kHz,
@@ -20650,18 +21547,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                     "sig_eff_3way_overlay_10kHz.pdf",
                     "10 kHz");
 
-    make3wayOverlay(sig_eff_offlineLRJ_SubjetBased_35kHz, eff_ET_mass_35kHz, eff_ET_only_35kHz,
-                    thr_ET_mass_35kHz_p, thr_mass_min_35kHz_p, thr_ET_only_35kHz_p,
-                    "3-way turn-on @ 35 kHz",
-                    "sig_eff_3way_overlay_35kHz.pdf",
-                    "35 kHz");
+    make3wayOverlay(sig_eff_offlineLRJ_SubjetBased_35kHz, eff_ET_mass_40kHz, eff_ET_only_40kHz,
+                    thr_ET_mass_40kHz_p, thr_mass_min_40kHz_p, thr_ET_only_40kHz_p,
+                    "3-way turn-on @ 40 kHz",
+                    "sig_eff_3way_overlay_40kHz.pdf",
+                    "40 kHz");
 
     make2wayOverlay(sig_eff_offlineLRJ10kHz_SubjetBased, sig_eff_offlineLRJ_SubjetBased_35kHz,
                     "Subjet-based E_{T} Thresholds at 10 kHz",
-                    "Subjet-based E_{T} Thresholds at 35 kHz",
-                    "2-way subjet turn-on: 10 kHz vs 35 kHz",
-                    "sig_eff_2way_overlay_subjet_10vs35kHz.pdf",
-                    "10 kHz vs 35 kHz");
+                    "Subjet-based E_{T} Thresholds at 40 kHz",
+                    "2-way subjet turn-on: 10 kHz vs 40 kHz",
+                    "sig_eff_2way_overlay_subjet_10vs40kHz.pdf",
+                    "10 kHz vs 40 kHz");
 
     // ======= Per-selection-type mass-split plots (with/without offline LRJ mass >= threshold) =======
     auto makeMassSplitOverlay = [&](TH1F* hAll, TH1F* hMassSel, TH1F* hNoMassSel,
@@ -20671,8 +21568,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                     const char* fname, const char* rateLabel){
         if(!hAll || !hMassSel || !hNoMassSel) return;
         hAll->SetLineColor(kBlack);      hAll->SetMarkerColor(kBlack);      hAll->SetMarkerStyle(20); hAll->SetMarkerSize(1.0);
-        hMassSel->SetLineColor(kBlue+1); hMassSel->SetMarkerColor(kBlue+1); hMassSel->SetMarkerStyle(21); hMassSel->SetMarkerSize(1.0);
-        hNoMassSel->SetLineColor(kRed+1); hNoMassSel->SetMarkerColor(kRed+1); hNoMassSel->SetMarkerStyle(22); hNoMassSel->SetMarkerSize(1.0);
+        hMassSel->SetLineColor(kP10Blue); hMassSel->SetMarkerColor(kP10Blue); hMassSel->SetMarkerStyle(21); hMassSel->SetMarkerSize(1.0);
+        hNoMassSel->SetLineColor(kP10Red); hNoMassSel->SetMarkerColor(kP10Red); hNoMassSel->SetMarkerStyle(22); hNoMassSel->SetMarkerSize(1.0);
         hAll->SetAxisRange(0.0, 1.1, "Y");
         hAll->GetXaxis()->SetTitleOffset(1.1);
         hAll->GetYaxis()->SetTitleOffset(1.2);
@@ -20688,7 +21585,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         legMs->AddEntry(hMassSel,  Form("Lead. offline LRJ mass #geq %.0f GeV (#varepsilon_{int} = %.3f)", massThreshold, intEff_massSel),  "lp");
         legMs->AddEntry(hNoMassSel, Form("Lead. offline LRJ mass < %.0f GeV (#varepsilon_{int} = %.3f)",  massThreshold, intEff_noMassSel), "lp");
         legMs->Draw();
-        cMs.SaveAs(rateVsEffFileDir + fname);
+        cMs.cd(); DrawATLASLabel(); cMs.SaveAs(rateVsEffFileDir + fname);
     };
 
     // 10 kHz: subjet-based
@@ -20718,33 +21615,33 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                          Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_10kHz_p, thr_mass_min_10kHz_p),
                          "ET+mass: offline mass split @ 10 kHz",
                          "sig_eff_ETmass_massSplit_10kHz.pdf", "10 kHz");
-    // 35 kHz: subjet-based
+    // 40 kHz: subjet-based
     makeMassSplitOverlay(sig_eff_offlineLRJ_SubjetBased_35kHz,
                          sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel,
                          sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel,
                          intEff_SubjetBased_35kHz_all, intEff_SubjetBased_35kHz_massSel, intEff_SubjetBased_35kHz_noMassSel,
                          offlineLRJMassSel_threshold,
                          "5-cat subjet-based E_{T} thresholds",
-                         "Subjet-based: offline mass split @ 35 kHz",
-                         "sig_eff_subjetBased_massSplit_35kHz.pdf", "35 kHz");
-    // 35 kHz: ET-only
-    makeMassSplitOverlay(eff_ET_only_35kHz,
-                         eff_ET_only_35kHz_MassSel,
-                         eff_ET_only_35kHz_NoMassSel,
-                         intEff_ETonly_35kHz_all, intEff_ETonly_35kHz_massSel, intEff_ETonly_35kHz_noMassSel,
+                         "Subjet-based: offline mass split @ 40 kHz",
+                         "sig_eff_subjetBased_massSplit_40kHz.pdf", "40 kHz");
+    // 40 kHz: ET-only
+    makeMassSplitOverlay(eff_ET_only_40kHz,
+                         eff_ET_only_40kHz_MassSel,
+                         eff_ET_only_40kHz_NoMassSel,
+                         intEff_ETonly_40kHz_all, intEff_ETonly_40kHz_massSel, intEff_ETonly_40kHz_noMassSel,
                          offlineLRJMassSel_threshold,
-                         Form("Lead. LRJ E_{T} > %.0f GeV only", thr_ET_only_35kHz_p),
-                         "ET-only: offline mass split @ 35 kHz",
-                         "sig_eff_ETonly_massSplit_35kHz.pdf", "35 kHz");
-    // 35 kHz: ET+mass
-    makeMassSplitOverlay(eff_ET_mass_35kHz,
-                         eff_ET_mass_35kHz_MassSel,
-                         eff_ET_mass_35kHz_NoMassSel,
-                         intEff_ETmass_35kHz_all, intEff_ETmass_35kHz_massSel, intEff_ETmass_35kHz_noMassSel,
+                         Form("Lead. LRJ E_{T} > %.0f GeV only", thr_ET_only_40kHz_p),
+                         "ET-only: offline mass split @ 40 kHz",
+                         "sig_eff_ETonly_massSplit_40kHz.pdf", "40 kHz");
+    // 40 kHz: ET+mass
+    makeMassSplitOverlay(eff_ET_mass_40kHz,
+                         eff_ET_mass_40kHz_MassSel,
+                         eff_ET_mass_40kHz_NoMassSel,
+                         intEff_ETmass_40kHz_all, intEff_ETmass_40kHz_massSel, intEff_ETmass_40kHz_noMassSel,
                          offlineLRJMassSel_threshold,
-                         Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_35kHz_p, thr_mass_min_35kHz_p),
-                         "ET+mass: offline mass split @ 35 kHz",
-                         "sig_eff_ETmass_massSplit_35kHz.pdf", "35 kHz");
+                         Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_40kHz_p, thr_mass_min_40kHz_p),
+                         "ET+mass: offline mass split @ 40 kHz",
+                         "sig_eff_ETmass_massSplit_40kHz.pdf", "40 kHz");
 
     // ======= New: mass>=threshold vs mass<threshold only (no "all events" curve) =======
     // Open markers for >= threshold, closed for < threshold
@@ -20754,8 +21651,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                  const char* triggerLabel, const char* title,
                                  const char* fname, const char* rateLabel){
         if(!hMassSel || !hNoMassSel) return;
-        hMassSel->SetLineColor(kBlue+1);  hMassSel->SetMarkerColor(kBlue+1);  hMassSel->SetMarkerStyle(24); hMassSel->SetMarkerSize(1.0); // open square
-        hNoMassSel->SetLineColor(kRed+1); hNoMassSel->SetMarkerColor(kRed+1); hNoMassSel->SetMarkerStyle(20); hNoMassSel->SetMarkerSize(1.0); // closed circle
+        hMassSel->SetLineColor(kP10Blue);  hMassSel->SetMarkerColor(kP10Blue);  hMassSel->SetMarkerStyle(24); hMassSel->SetMarkerSize(1.0); // open square
+        hNoMassSel->SetLineColor(kP10Red); hNoMassSel->SetMarkerColor(kP10Red); hNoMassSel->SetMarkerStyle(20); hNoMassSel->SetMarkerSize(1.0); // closed circle
         hMassSel->SetAxisRange(0.0, 1.1, "Y");
         hMassSel->GetXaxis()->SetTitleOffset(1.1);
         hMassSel->GetYaxis()->SetTitleOffset(1.2);
@@ -20770,7 +21667,49 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         legMsOnly->AddEntry(hNoMassSel, Form("Lead. offline LRJ mass < %.0f GeV (#varepsilon_{int} = %.3f)",   massThreshold, intEff_noMassSel), "lp");
         legMsOnly->AddEntry((TObject*)nullptr, Form("All events: #varepsilon_{int} = %.3f", intEff_all), "");
         legMsOnly->Draw();
-        cMsOnly.SaveAs(rateVsEffFileDir + fname);
+        cMsOnly.cd(); DrawATLASLabel(); cMsOnly.SaveAs(rateVsEffFileDir + fname);
+    };
+
+    // Mass-split E_T-only comparison: JetTagger vs gFEX (resim) on one canvas, leading offline LRJ
+    // mass >=/< threshold, with per-category integrated efficiency in the legend and the
+    // mass-inclusive (total) integrated efficiency drawn to the right of the ATLAS label.
+    auto makeMassSplitCompare = [&](TH1F* hJtMassSel,   TH1F* hJtNoMassSel,
+                                    TH1F* hGfexMassSel, TH1F* hGfexNoMassSel,
+                                    double jtThr,   double intEff_jt_all,
+                                    double gfexThr, double intEff_gfex_all,
+                                    double intEff_jt_massSel,   double intEff_jt_noMassSel,
+                                    double intEff_gfex_massSel, double intEff_gfex_noMassSel,
+                                    double massThreshold, const char* title,
+                                    const char* fname, const char* rateLabel){
+        if(!hJtMassSel || !hJtNoMassSel || !hGfexMassSel || !hGfexNoMassSel) return;
+        // JetTagger = black, gFEX (resim) = red; mass >= thr = open, mass < thr = filled
+        // (matches the >= 2 subjet = open / 1 subjet = filled convention)
+        hJtMassSel->SetLineColor(kBlack);   hJtMassSel->SetMarkerColor(kBlack);   hJtMassSel->SetMarkerStyle(24); hJtMassSel->SetMarkerSize(1.0); // open circle
+        hJtNoMassSel->SetLineColor(kBlack); hJtNoMassSel->SetMarkerColor(kBlack); hJtNoMassSel->SetMarkerStyle(20); hJtNoMassSel->SetMarkerSize(1.0); // filled circle
+        hGfexMassSel->SetLineColor(kP10Red);   hGfexMassSel->SetMarkerColor(kP10Red);   hGfexMassSel->SetMarkerStyle(25); hGfexMassSel->SetMarkerSize(1.0); // open square
+        hGfexNoMassSel->SetLineColor(kP10Red); hGfexNoMassSel->SetMarkerColor(kP10Red); hGfexNoMassSel->SetMarkerStyle(21); hGfexNoMassSel->SetMarkerSize(1.0); // filled square
+        hJtMassSel->SetAxisRange(0.0, 1.1, "Y");
+        hJtMassSel->GetXaxis()->SetTitleOffset(1.1);
+        hJtMassSel->GetYaxis()->SetTitleOffset(1.2);
+        TCanvas cMsCmp(Form("cMassSplitCompare_%s", fname), title, 900, 700);
+        hJtMassSel->Draw("P");
+        hJtNoMassSel->Draw("P SAME");
+        hGfexMassSel->Draw("P SAME");
+        hGfexNoMassSel->Draw("P SAME");
+        sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+        TLegend *legMsCmp = new TLegend(0.28, 0.18, 0.90, 0.4);
+        legMsCmp->SetBorderSize(0); legMsCmp->SetFillStyle(0); legMsCmp->SetTextSize(0.024);
+        legMsCmp->SetHeader(Form("E_{T}-only, cuts tuned to %s bkg", rateLabel), "C");
+        legMsCmp->AddEntry(hJtMassSel,     Form("JetTagger E_{T} > %.0f GeV, m #geq %.0f GeV (#varepsilon_{int} = %.3f)", jtThr,   massThreshold, intEff_jt_massSel),    "lp");
+        legMsCmp->AddEntry(hJtNoMassSel,   Form("JetTagger E_{T} > %.0f GeV, m < %.0f GeV (#varepsilon_{int} = %.3f)",    jtThr,   massThreshold, intEff_jt_noMassSel),  "lp");
+        legMsCmp->AddEntry(hGfexMassSel,   Form("gFEX (Resim) E_{T} > %.0f GeV, m #geq %.0f GeV (#varepsilon_{int} = %.3f)", gfexThr, massThreshold, intEff_gfex_massSel),  "lp");
+        legMsCmp->AddEntry(hGfexNoMassSel, Form("gFEX (Resim) E_{T} > %.0f GeV, m < %.0f GeV (#varepsilon_{int} = %.3f)",    gfexThr, massThreshold, intEff_gfex_noMassSel),"lp");
+        legMsCmp->Draw();
+        cMsCmp.cd(); DrawATLASLabel(0.18);
+        // Total (mass-inclusive) integrated efficiency, to the right of the ATLAS label
+        TLatex tTot; tTot.SetNDC(); tTot.SetTextFont(42); tTot.SetTextColor(kBlack); tTot.SetTextSize(0.028);
+        tTot.DrawLatex(0.52, 0.945, Form("All Events #varepsilon_{int}: JetTagger = %.3f, gFEX = %.3f", intEff_jt_all, intEff_gfex_all));
+        cMsCmp.SaveAs(rateVsEffFileDir + fname);
     };
 
     /*makeMassSplitOnly(sig_eff_offlineLRJ10kHz_SubjetBased_MassSel, sig_eff_offlineLRJ10kHz_SubjetBased_NoMassSel,
@@ -20791,18 +21730,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     makeMassSplitOnly(sig_eff_offlineLRJ_SubjetBased_35kHz_MassSel, sig_eff_offlineLRJ_SubjetBased_35kHz_NoMassSel,
                       intEff_SubjetBased_35kHz_all, intEff_SubjetBased_35kHz_massSel, intEff_SubjetBased_35kHz_noMassSel,
                       offlineLRJMassSel_threshold, "5-cat subjet-based E_{T} thresholds",
-                      "Subjet-based: mass>=/<threshold @ 35 kHz",
-                      "sig_eff_subjetBased_massSplitOnly_35kHz.pdf", "35 kHz");
-    makeMassSplitOnly(eff_ET_only_35kHz_MassSel, eff_ET_only_35kHz_NoMassSel,
-                      intEff_ETonly_35kHz_all, intEff_ETonly_35kHz_massSel, intEff_ETonly_35kHz_noMassSel,
-                      offlineLRJMassSel_threshold, Form("Lead. LRJ E_{T} > %.0f GeV only", thr_ET_only_35kHz_p),
-                      "ET-only: mass>=/<threshold @ 35 kHz",
-                      "sig_eff_ETonly_massSplitOnly_35kHz.pdf", "35 kHz");
-    makeMassSplitOnly(eff_ET_mass_35kHz_MassSel, eff_ET_mass_35kHz_NoMassSel,
-                      intEff_ETmass_35kHz_all, intEff_ETmass_35kHz_massSel, intEff_ETmass_35kHz_noMassSel,
-                      offlineLRJMassSel_threshold, Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_35kHz_p, thr_mass_min_35kHz_p),
-                      "ET+mass: mass>=/<threshold @ 35 kHz",
-                      "sig_eff_ETmass_massSplitOnly_35kHz.pdf", "35 kHz");
+                      "Subjet-based: mass>=/<threshold @ 40 kHz",
+                      "sig_eff_subjetBased_massSplitOnly_40kHz.pdf", "40 kHz");
+    makeMassSplitOnly(eff_ET_only_40kHz_MassSel, eff_ET_only_40kHz_NoMassSel,
+                      intEff_ETonly_40kHz_all, intEff_ETonly_40kHz_massSel, intEff_ETonly_40kHz_noMassSel,
+                      offlineLRJMassSel_threshold, Form("Lead. LRJ E_{T} > %.0f GeV only", thr_ET_only_40kHz_p),
+                      "ET-only: mass>=/<threshold @ 40 kHz",
+                      "sig_eff_ETonly_massSplitOnly_40kHz.pdf", "40 kHz");
+    makeMassSplitOnly(eff_ET_mass_40kHz_MassSel, eff_ET_mass_40kHz_NoMassSel,
+                      intEff_ETmass_40kHz_all, intEff_ETmass_40kHz_massSel, intEff_ETmass_40kHz_noMassSel,
+                      offlineLRJMassSel_threshold, Form("Lead. LRJ E_{T} > %.0f GeV + const. mass > %.0f GeV", thr_ET_mass_40kHz_p, thr_mass_min_40kHz_p),
+                      "ET+mass: mass>=/<threshold @ 40 kHz",
+                      "sig_eff_ETmass_massSplitOnly_40kHz.pdf", "40 kHz");
+    // JetTagger vs gFEX (resim) E_T-only, mass-split, @ 40 kHz
+    makeMassSplitCompare(eff_ET_only_40kHz_MassSel, eff_ET_only_40kHz_NoMassSel,
+                         eff_gFEX_ETonly_40kHz_MassSel, eff_gFEX_ETonly_40kHz_NoMassSel,
+                         thr_ET_only_40kHz_p,            intEff_ETonly_40kHz_all,
+                         gFEX_Sim_40kHz_Threshold_Leading, intEff_gFEX_ETonly_40kHz_all,
+                         intEff_ETonly_40kHz_massSel,      intEff_ETonly_40kHz_noMassSel,
+                         intEff_gFEX_ETonly_40kHz_massSel, intEff_gFEX_ETonly_40kHz_noMassSel,
+                         offlineLRJMassSel_threshold,
+                         "ET-only compare: JetTagger vs gFEX resim, mass>=/<threshold @ 40 kHz",
+                         "sig_eff_ETonly_massSplit_JetTagger_vs_gFEXresim_40kHz.pdf", "40 kHz");
 
     // For mass window applied
     sig_eff_offlineLRJ10kHz_HiggsMassWindow->SetLineColor(kBlack);
@@ -20815,13 +21764,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ10kHz->SetMarkerStyle(20); // filled in circle
     sig_eff_offlineLRJ10kHz->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->SetMarkerStyle(25); // open square
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz->SetMarkerStyle(21); // filled in square
     sig_eff_offline_gFEX_LRJ10kHz->SetMarkerSize(1.0);
 
@@ -20864,7 +21813,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_10kHz_effs_HiggsMassWindow->Draw();
 
     // --- Save overlay ---
-    c_effLRJ10kHz_HiggsMassWindow.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_HiggsMassWindow.pdf");
+    c_effLRJ10kHz_HiggsMassWindow.cd(); DrawATLASLabel(); c_effLRJ10kHz_HiggsMassWindow.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_HiggsMassWindow.pdf");
 
     // For mass window applied
     sig_eff_offlineLRJ10kHz_1Subjet->SetLineColor(kBlack);
@@ -20877,13 +21826,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ10kHz_GrEq2Subjets->SetMarkerStyle(24); // open circle
     sig_eff_offlineLRJ10kHz_GrEq2Subjets->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz_1Subjet->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz_1Subjet->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz_1Subjet->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz_1Subjet->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz_1Subjet->SetMarkerStyle(21); // filled in square
     sig_eff_offline_gFEX_LRJ10kHz_1Subjet->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets->SetMarkerStyle(25); // open square
     sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets->SetMarkerSize(1.0);
 
@@ -20924,7 +21873,84 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_10kHz_effs_Subjets->Draw();
 
     // --- Save overlay ---
-    c_effLRJ10kHz_Subjet.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets.pdf");
+    c_effLRJ10kHz_Subjet.cd(); DrawATLASLabel(); c_effLRJ10kHz_Subjet.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets.pdf");
+
+    // ===== Same subjet-split overlay, but cuts tuned to 40 kHz background (gFEX = resimulated objects) =====
+    sig_eff_offlineLRJ40kHz_1Subjet->SetLineColor(kBlack);
+    sig_eff_offlineLRJ40kHz_1Subjet->SetMarkerColor(kBlack);
+    sig_eff_offlineLRJ40kHz_1Subjet->SetMarkerStyle(20); // filled in circle
+    sig_eff_offlineLRJ40kHz_1Subjet->SetMarkerSize(1.0);
+
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->SetLineColor(kBlack);
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->SetMarkerColor(kBlack);
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->SetMarkerStyle(24); // open circle
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->SetMarkerSize(1.0);
+
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->SetMarkerColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->SetMarkerStyle(21); // filled in square
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->SetMarkerSize(1.0);
+
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->SetMarkerColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->SetMarkerStyle(25); // open square
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->SetMarkerSize(1.0);
+
+    // Axis range / cosmetics
+    sig_eff_offlineLRJ40kHz_1Subjet->SetAxisRange(0.0, 1.1, "Y");
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->SetAxisRange(0.0, 1.1, "Y");
+    sig_eff_offlineLRJ40kHz_1Subjet->GetXaxis()->SetTitleOffset(1.1);
+    sig_eff_offlineLRJ40kHz_1Subjet->GetYaxis()->SetTitleOffset(1.2);
+
+    // --- Draw overlay ---
+    TCanvas c_effLRJ40kHz_Subjet("c_effLRJ40kHz_Subjet","LRJ Efficiencies @ 40 kHz bkg",900,700);
+
+    sig_eff_offlineLRJ40kHz_1Subjet->Draw("P");          // first: JetTagger (offline)
+    sig_eff_offline_gFEX_LRJ40kHz_1Subjet->Draw("P SAME");
+    sig_eff_offlineLRJ40kHz_GrEq2Subjets->Draw("P SAME");
+    sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets->Draw("P SAME");
+    sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+
+    // --- Per-subjet-category integrated efficiencies (num/den still intact after the Divide clones) ---
+    auto intEffRatio = [](TH1F* num, TH1F* den){ return (den && den->Integral() > 0) ? num->Integral() / den->Integral() : 0.0; };
+    double ie_jt_1sub_40   = intEffRatio(sig_h_offlineLRJ_Et_num40kHz_1Subjet,             sig_h_offlineLRJ_Et_denom40kHz_1Subjet);
+    double ie_jt_ge2_40    = intEffRatio(sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets,        sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets);
+    double ie_gfex_1sub_40 = intEffRatio(sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet,     sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet);
+    double ie_gfex_ge2_40  = intEffRatio(sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets,sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets);
+    // Subjet-inclusive (all shown categories) integrated efficiency, per trigger
+    double jt_den_all_40   = sig_h_offlineLRJ_Et_denom40kHz_1Subjet->Integral() + sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets->Integral();
+    double jt_num_all_40   = sig_h_offlineLRJ_Et_num40kHz_1Subjet->Integral()   + sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets->Integral();
+    double gfex_den_all_40 = sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet->Integral() + sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets->Integral();
+    double gfex_num_all_40 = sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet->Integral()   + sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets->Integral();
+    double ie_jt_all_40    = (jt_den_all_40   > 0) ? jt_num_all_40   / jt_den_all_40   : 0.0;
+    double ie_gfex_all_40  = (gfex_den_all_40 > 0) ? gfex_num_all_40 / gfex_den_all_40 : 0.0;
+
+    // --- Legend (styled like the mass-split compare plot): per-category integrated efficiency ---
+    TLegend *leg_40kHz_effs_Subjets = new TLegend(0.30, 0.18, 0.90, 0.42);
+    leg_40kHz_effs_Subjets->SetBorderSize(0);
+    leg_40kHz_effs_Subjets->SetFillStyle(0);
+    leg_40kHz_effs_Subjets->SetTextSize(0.024);
+    leg_40kHz_effs_Subjets->SetHeader("Subjet-split, cuts tuned to 40 kHz background","C"); // clearly states the rate
+    leg_40kHz_effs_Subjets->AddEntry(sig_eff_offlineLRJ40kHz_GrEq2Subjets,
+        Form("JetTagger E_{T} > %.0f GeV, #geq 2 Subjet (#varepsilon_{int} = %.3f)", jetTagger_40kHz_Threshold_Leading, ie_jt_ge2_40), "lp");
+
+    leg_40kHz_effs_Subjets->AddEntry(sig_eff_offlineLRJ40kHz_1Subjet,
+        Form("JetTagger E_{T} > %.0f GeV, 1 Subjet (#varepsilon_{int} = %.3f)", jetTagger_40kHz_Threshold_Leading, ie_jt_1sub_40), "lp");
+
+    leg_40kHz_effs_Subjets->AddEntry(sig_eff_offline_gFEX_LRJ40kHz_GrEq2Subjets,
+        Form("gFEX (Resim) E_{T} > %.0f GeV, #geq 2 Subjet (#varepsilon_{int} = %.3f)", gFEX_Sim_40kHz_Threshold_Leading, ie_gfex_ge2_40), "lp");
+
+    leg_40kHz_effs_Subjets->AddEntry(sig_eff_offline_gFEX_LRJ40kHz_1Subjet,
+        Form("gFEX (Resim) E_{T} > %.0f GeV, 1 Subjet (#varepsilon_{int} = %.3f)", gFEX_Sim_40kHz_Threshold_Leading, ie_gfex_1sub_40), "lp");
+
+    leg_40kHz_effs_Subjets->Draw();
+
+    // --- Save overlay ---
+    c_effLRJ40kHz_Subjet.cd(); DrawATLASLabel(0.18);
+    // Subjet-inclusive (total) integrated efficiency, to the right of the ATLAS label
+    TLatex tTotSub; tTotSub.SetNDC(); tTotSub.SetTextFont(42); tTotSub.SetTextColor(kBlack); tTotSub.SetTextSize(0.028);
+    tTotSub.DrawLatex(0.52, 0.945, Form("All Subjets #varepsilon_{int}: JetTagger = %.3f, gFEX = %.3f", ie_jt_all_40, ie_gfex_all_40));
+    c_effLRJ40kHz_Subjet.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ40kHz_overlay_Subjets.pdf");
 
     // Subleading / dijet selection rate curves @ 10 kHz
 
@@ -20942,8 +21968,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ10kHz_Subleading->SetMarkerStyle(20);
     sig_eff_offlineLRJ10kHz_Subleading->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetMarkerStyle(21);
     sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetMarkerSize(1.0);
 
@@ -20975,7 +22001,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_10kHz_effs_Subleading->Draw();
 
     // --- Save overlay ---
-    c_effLRJ10kHz_Subleading.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subleading.pdf");
+    c_effLRJ10kHz_Subleading.cd(); DrawATLASLabel(); c_effLRJ10kHz_Subleading.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subleading.pdf");
 
     // For mass window applied
     sig_eff_offlineLRJ10kHz_HiggsMassWindow_Subleading->SetLineColor(kBlack);
@@ -20988,13 +22014,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ10kHz_Subleading->SetMarkerStyle(20); // filled in circle
     sig_eff_offlineLRJ10kHz_Subleading->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading->SetMarkerStyle(25); // open square
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow_Subleading->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetMarkerStyle(21); // filled in square
     sig_eff_offline_gFEX_LRJ10kHz_Subleading->SetMarkerSize(1.0);
 
@@ -21035,7 +22061,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_10kHz_effs_HiggsMassWindow_Subleading->Draw();
 
     // --- Save overlay ---
-    c_effLRJ10kHz_HiggsMassWindow_Subleading.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_HiggsMassWindow_Subleading.pdf");
+    c_effLRJ10kHz_HiggsMassWindow_Subleading.cd(); DrawATLASLabel(); c_effLRJ10kHz_HiggsMassWindow_Subleading.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_HiggsMassWindow_Subleading.pdf");
 
     // For mass window applied
     sig_eff_offlineLRJ10kHz_1Subjet_Subleading->SetLineColor(kBlack);
@@ -21048,13 +22074,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     sig_eff_offlineLRJ10kHz_GrEq2Subjets_Subleading->SetMarkerStyle(24); // open circle
     sig_eff_offlineLRJ10kHz_GrEq2Subjets_Subleading->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading->SetMarkerStyle(21); // filled in square
     sig_eff_offline_gFEX_LRJ10kHz_1Subjet_Subleading->SetMarkerSize(1.0);
 
-    sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading->SetLineColor(kRed+1);
-    sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading->SetMarkerColor(kRed+1);
+    sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading->SetLineColor(kP10Red);
+    sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading->SetMarkerColor(kP10Red);
     sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading->SetMarkerStyle(25); // open square
     sig_eff_offline_gFEX_LRJ10kHz_GrEq2Subjets_Subleading->SetMarkerSize(1.0);
 
@@ -21095,11 +22121,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_10kHz_effs_Subjets_Subleading->Draw();
 
     // --- Save overlay ---
-    c_effLRJ10kHz_Subjet_Subleading.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets_Subleading.pdf");
+    c_effLRJ10kHz_Subjet_Subleading.cd(); DrawATLASLabel(); c_effLRJ10kHz_Subjet_Subleading.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets_Subleading.pdf");
 
     sig_h_ConstituentMass_vec.push_back(sig_h_LeadingJetTaggerLRJ_ConstituentMass);
     back_h_ConstituentMass_vec.push_back(back_h_LeadingJetTaggerLRJ_ConstituentMass);
 
+    _lap(Form("[file %u] plotting section", fileIt));
     } // End of original loop through files
 
     // Do overlay plots for multiple files here
@@ -21150,6 +22177,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TCanvas c9_Log = new TCanvas("c8_Log", "Overlays (log)", 800, 600);
     c9_Log.SetLogy();
 
+    // Single-process seed-comparison overlay (Seeded cone only vs Seed Opt.)
+    TCanvas c9b_Log = new TCanvas("c9b_Log", "Seed comparison overlay (log)", 800, 600);
+    c9b_Log.SetLogy();
+
     TCanvas c10_Log = new TCanvas("c10_Log", "Overlays (log)", 800, 600);
     c10_Log.SetLogy();
 
@@ -21186,9 +22217,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TCanvas cMassSplit_SubjetBased_10kHz = new TCanvas("cMassSplit_SubjetBased_10kHz", "Mass split subjet-based 10 kHz", 900, 700);
     TCanvas cMassSplit_ETonly_10kHz      = new TCanvas("cMassSplit_ETonly_10kHz",      "Mass split ET-only 10 kHz",      900, 700);
     TCanvas cMassSplit_ETmass_10kHz      = new TCanvas("cMassSplit_ETmass_10kHz",      "Mass split ET+mass 10 kHz",      900, 700);
-    TCanvas cMassSplit_SubjetBased_35kHz = new TCanvas("cMassSplit_SubjetBased_35kHz", "Mass split subjet-based 35 kHz", 900, 700);
-    TCanvas cMassSplit_ETonly_35kHz      = new TCanvas("cMassSplit_ETonly_35kHz",      "Mass split ET-only 35 kHz",      900, 700);
-    TCanvas cMassSplit_ETmass_35kHz      = new TCanvas("cMassSplit_ETmass_35kHz",      "Mass split ET+mass 35 kHz",      900, 700);
+    TCanvas cMassSplit_SubjetBased_35kHz = new TCanvas("cMassSplit_SubjetBased_35kHz", "Mass split subjet-based 40 kHz", 900, 700);
+    // As above, but with the gFEX (Resim) leading LRJ E_T-only selection overlaid
+    TCanvas cMassSplit_SubjetBased_35kHz_gFEX = new TCanvas("cMassSplit_SubjetBased_35kHz_gFEX", "Mass split subjet-based 40 kHz + gFEX", 900, 700);
+    TCanvas cMassSplit_ETonly_40kHz      = new TCanvas("cMassSplit_ETonly_40kHz",      "Mass split ET-only 40 kHz",      900, 700);
+    TCanvas cMassSplit_ETmass_40kHz      = new TCanvas("cMassSplit_ETmass_40kHz",      "Mass split ET+mass 40 kHz",      900, 700);
 
     TCanvas cBar_sigLead  = new TCanvas("cBar_sigLead",  "Signal Leading Subjet Match Frac Overlay",    800, 600);
     TCanvas cBar_sigSub   = new TCanvas("cBar_sigSub",   "Signal Subleading Subjet Match Frac Overlay", 800, 600);
@@ -21209,6 +22242,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg->SetFillStyle(0);
     leg->SetTextSize(0.025);
 
+    // track which sample types have had their gFEX (Resim) rate-vs-eff curve drawn (once per sample)
+    std::vector<std::string> drawnGFexResimModes_rateEff;
+
     TLegend* leg_SampleInfoOnly = new TLegend(0.17, 0.17, 0.45, 0.5);
     leg_SampleInfoOnly->SetBorderSize(0);
     leg_SampleInfoOnly->SetFillStyle(0);
@@ -21228,6 +22264,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legSigOnlyNoIOTypes_OR4thCone->SetBorderSize(0);
     legSigOnlyNoIOTypes_OR4thCone->SetFillStyle(0);
     legSigOnlyNoIOTypes_OR4thCone->SetTextSize(0.03);
+
+    // Larger legend for the single-process seed-comparison overlay. Shorter
+    // labels (no physics process, no "d_{search} disabled") let it grow.
+    TLegend* legSeedCompare = new TLegend(0.26, 0.20, 0.80, 0.46);
+    legSeedCompare->SetBorderSize(0);
+    legSeedCompare->SetFillStyle(0);
+    legSeedCompare->SetTextSize(0.038);
 
     TLegend *leg_10kHz_effs = new TLegend(0.4, 0.18, 0.78, 0.38);
     leg_10kHz_effs->SetBorderSize(0);
@@ -21277,18 +22320,41 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     TLegend *leg_massSplit_SubjetBased_35kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
     leg_massSplit_SubjetBased_35kHz->SetBorderSize(0); leg_massSplit_SubjetBased_35kHz->SetFillStyle(0); leg_massSplit_SubjetBased_35kHz->SetTextSize(0.018);
-    leg_massSplit_SubjetBased_35kHz->SetHeader(Form("5-cat subjet-based E_{T} thresholds @ 35 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+    leg_massSplit_SubjetBased_35kHz->SetHeader(Form("5-cat subjet-based E_{T} thresholds @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
 
-    TLegend *leg_massSplit_ETonly_35kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
-    leg_massSplit_ETonly_35kHz->SetBorderSize(0); leg_massSplit_ETonly_35kHz->SetFillStyle(0); leg_massSplit_ETonly_35kHz->SetTextSize(0.018);
-    leg_massSplit_ETonly_35kHz->SetHeader(Form("Lead. LRJ E_{T}-only threshold @ 35 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+    // Legend for the gFEX-overlay version: same entries plus a gFEX line, moved up to fit the extra entry.
+    TLegend *leg_massSplit_SubjetBased_35kHz_gFEX = new TLegend(0.27, 0.34, 0.92, 0.60);
+    leg_massSplit_SubjetBased_35kHz_gFEX->SetBorderSize(0); leg_massSplit_SubjetBased_35kHz_gFEX->SetFillStyle(0); leg_massSplit_SubjetBased_35kHz_gFEX->SetTextSize(0.018);
+    leg_massSplit_SubjetBased_35kHz_gFEX->SetHeader(Form("5-cat subjet-based E_{T} thresholds @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
 
-    TLegend *leg_massSplit_ETmass_35kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
-    leg_massSplit_ETmass_35kHz->SetBorderSize(0); leg_massSplit_ETmass_35kHz->SetFillStyle(0); leg_massSplit_ETmass_35kHz->SetTextSize(0.018);
-    leg_massSplit_ETmass_35kHz->SetHeader(
-        Form("Trigger: E_{T} > %.0f GeV + const. mass > %.0f GeV @ 35 kHz",
-             thr_ET_mass_35kHz_vec.empty() ? -1.0 : thr_ET_mass_35kHz_vec[0],
-             thr_mass_min_35kHz_vec.empty() ? -1.0 : thr_mass_min_35kHz_vec[0]), "C");
+    TLegend *leg_massSplit_ETonly_40kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
+    leg_massSplit_ETonly_40kHz->SetBorderSize(0); leg_massSplit_ETonly_40kHz->SetFillStyle(0); leg_massSplit_ETonly_40kHz->SetTextSize(0.018);
+    leg_massSplit_ETonly_40kHz->SetHeader(Form("Lead. LRJ E_{T}-only threshold @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+
+    TLegend *leg_massSplit_ETmass_40kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
+    leg_massSplit_ETmass_40kHz->SetBorderSize(0); leg_massSplit_ETmass_40kHz->SetFillStyle(0); leg_massSplit_ETmass_40kHz->SetTextSize(0.018);
+    leg_massSplit_ETmass_40kHz->SetHeader(
+        Form("Trigger: E_{T} > %.0f GeV + const. mass > %.0f GeV @ 40 kHz",
+             thr_ET_mass_40kHz_vec.empty() ? -1.0 : thr_ET_mass_40kHz_vec[0],
+             thr_mass_min_40kHz_vec.empty() ? -1.0 : thr_mass_min_40kHz_vec[0]), "C");
+
+    // Subjet-based vs ET-only comparison (no mass split) @ 40 kHz
+    TCanvas cCompare_SubjetVsET_40kHz = new TCanvas("cCompare_SubjetVsET_40kHz", "Subjet-based vs ET-only 40 kHz", 900, 700);
+    TLegend *leg_compare_SubjetVsET_40kHz = new TLegend(0.30, 0.12, 0.92, 0.50);
+    leg_compare_SubjetVsET_40kHz->SetBorderSize(0); leg_compare_SubjetVsET_40kHz->SetFillStyle(0); leg_compare_SubjetVsET_40kHz->SetTextSize(0.022);
+    leg_compare_SubjetVsET_40kHz->SetHeader("Subjet-based vs lead. LRJ E_{T}-only thresholds @ 40 kHz", "C");
+
+    // Single-process seed-comparison turn-on overlay (Seeded cone only vs Seed Opt.) @ 40 kHz
+    TCanvas cCompare_SubjetVsET_40kHz_seedComparison = new TCanvas("cCompare_SubjetVsET_40kHz_seedComparison", "Seed comparison turn-on 40 kHz", 900, 700);
+    // As above, but with per-curve integrated-efficiency printouts (all / m>=thr / m<thr) below the process label
+    TCanvas cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts = new TCanvas("cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts", "Seed comparison turn-on 40 kHz + int eff printouts", 900, 700);
+    TLegend *legSeedCompare_TurnOn = new TLegend(0.26, 0.18, 0.80, 0.44);
+    legSeedCompare_TurnOn->SetBorderSize(0); legSeedCompare_TurnOn->SetFillStyle(0); legSeedCompare_TurnOn->SetTextSize(0.038);
+    legSeedCompare_TurnOn->SetHeader("Fixed to 40 kHz rate", "C"); // header above the entries
+    // track which sample types have had their gFEX (Resim) LRJ E_T-only curve drawn (once per sample)
+    std::vector<std::string> drawnGFexResimModes_compare;
+    // same, for the subjet-based mass-split + gFEX overlay
+    std::vector<std::string> drawnGFexResimModes_massSplit;
 
     TLegend* legROC_ET_mass = new TLegend(0.45, 0.12, 0.92, 0.52);
     legROC_ET_mass->SetBorderSize(0); legROC_ET_mass->SetFillStyle(0); legROC_ET_mass->SetTextSize(0.022);
@@ -21587,7 +22653,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             leg->Draw();
-            c1_Log.SaveAs(overlayOutputFileDir + "leading_JetTagger_LRJ_Et.pdf");
+            c1_Log.cd(); DrawATLASLabel(); c1_Log.SaveAs(overlayOutputFileDir + "leading_JetTagger_LRJ_Et.pdf");
         }
         
         // Leading Offline LRJ E_T Distributions
@@ -21615,7 +22681,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if(fileIt == 0) leg_SampleInfoOnly->AddEntry(back_h_leading_offline_LRJ_Et_vec[fileIt], "Background (dijet)", "l");
         if(fileIt == (backgroundFiles.size() - 1)){
             leg_SampleInfoOnly->Draw();
-            c1_Log_Offline.SaveAs(overlayOutputFileDir + "leading_offline_LRJ_Et.pdf");
+            c1_Log_Offline.cd(); DrawATLASLabel(); c1_Log_Offline.SaveAs(overlayOutputFileDir + "leading_offline_LRJ_Et.pdf");
         }
 
         c2_Log_Offline.cd();
@@ -21640,7 +22706,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             leg_SampleInfoOnly->Draw();
-            c1_Log_Offline.SaveAs(overlayOutputFileDir + "subleading_offline_LRJ_Et.pdf");
+            c1_Log_Offline.cd(); DrawATLASLabel(); c1_Log_Offline.SaveAs(overlayOutputFileDir + "subleading_offline_LRJ_Et.pdf");
         }
 
         c3_Log_Offline.cd();
@@ -21666,7 +22732,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             leg_SampleInfoOnly->Draw();
-            c3_Log_Offline.SaveAs(overlayOutputFileDir + "leading_offline_LRJ_Mass.pdf");
+            c3_Log_Offline.cd(); DrawATLASLabel(); c3_Log_Offline.SaveAs(overlayOutputFileDir + "leading_offline_LRJ_Mass.pdf");
         }
 
         // ---- Unique offline LRJ E_T overlay: before (solid) & after (dashed) ----
@@ -21711,7 +22777,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
         if (fileIt == (backgroundFiles.size() - 1)) {
             legUniqueOffline->Draw();
-            cUniqueOfflineLRJ_Et.SaveAs(overlayOutputFileDir + "unique_leading_offline_LRJ_Et.pdf");
+            cUniqueOfflineLRJ_Et.cd(); DrawATLASLabel(); cUniqueOfflineLRJ_Et.SaveAs(overlayOutputFileDir + "unique_leading_offline_LRJ_Et.pdf");
         }
 
         // ---- Unique offline LRJ Mass overlay ----
@@ -21741,7 +22807,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         back_h_leading_offlineLRJ_Mass_unique_vec[fileIt]->Draw("HIST SAME");
         if (fileIt == (backgroundFiles.size() - 1)) {
             legUniqueOffline->Draw();
-            cUniqueOfflineLRJ_Mass.SaveAs(overlayOutputFileDir + "unique_leading_offline_LRJ_Mass.pdf");
+            cUniqueOfflineLRJ_Mass.cd(); DrawATLASLabel(); cUniqueOfflineLRJ_Mass.SaveAs(overlayOutputFileDir + "unique_leading_offline_LRJ_Mass.pdf");
         }
 
         // Subleading JetTagger E_T distribution
@@ -21766,7 +22832,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             leg->Draw();
-            c2_Log.SaveAs(overlayOutputFileDir + "subleading_JetTagger_LRJ_Et.pdf");
+            c2_Log.cd(); DrawATLASLabel(); c2_Log.SaveAs(overlayOutputFileDir + "subleading_JetTagger_LRJ_Et.pdf");
         }
 
         // Psi_R leading JetTagger distribution
@@ -21794,7 +22860,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             leg->Draw();
-            c1.SaveAs(overlayOutputFileDir + "leading_JetTagger_LRJ_Psi_R.pdf");
+            c1.cd(); DrawATLASLabel(); c1.SaveAs(overlayOutputFileDir + "leading_JetTagger_LRJ_Psi_R.pdf");
         }
 
         // Psi_R Subleading JetTagger distribution
@@ -21823,7 +22889,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             leg->Draw();
-            c2.SaveAs(overlayOutputFileDir + "subleading_JetTagger_LRJ_Psi_R.pdf");
+            c2.cd(); DrawATLASLabel(); c2.SaveAs(overlayOutputFileDir + "subleading_JetTagger_LRJ_Psi_R.pdf");
         }
 
         // Psi_R,lead * Psi_R,sublead JetTagger distribution
@@ -21852,7 +22918,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             leg->Draw();
-            c3.SaveAs(overlayOutputFileDir + "JetTagger_LRJ_Psi_R_squared.pdf");
+            c3.cd(); DrawATLASLabel(); c3.SaveAs(overlayOutputFileDir + "JetTagger_LRJ_Psi_R_squared.pdf");
         }
 
         // Overlay efficiency curves
@@ -21889,7 +22955,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if(fileIt == (backgroundFiles.size() - 1)){
             sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
             leg_10kHz_effs->Draw();
-            c4.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz.pdf");
+            c4.cd(); DrawATLASLabel(); c4.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz.pdf");
         }
 
         c5.cd();
@@ -21928,7 +22994,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if(fileIt == (backgroundFiles.size() - 1)){
             sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
             leg_10kHz_effs_HiggsMassWindow->Draw();
-            c5.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_HiggsMassWindow.pdf");
+            c5.cd(); DrawATLASLabel(); c5.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_HiggsMassWindow.pdf");
         }
 
         c6.cd();
@@ -21982,7 +23048,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if(fileIt == (backgroundFiles.size() - 1)){
             sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
             leg_10kHz_effs_Subjets->Draw();
-            c6.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_Subjets.pdf");
+            c6.cd(); DrawATLASLabel(); c6.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_Subjets.pdf");
         }
 
         // SubjetBased 10kHz efficiency overlay (inclusive)
@@ -22011,7 +23077,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if(fileIt == (backgroundFiles.size() - 1)){
             sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
             leg_10kHz_effs_SubjetBased->Draw();
-            c14.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased.pdf");
+            c14.cd(); DrawATLASLabel(); c14.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased.pdf");
         }
 
         // SubjetBased 10kHz efficiency overlay (1 vs >=2 offline subjets on same plot)
@@ -22053,7 +23119,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if(fileIt == (backgroundFiles.size() - 1)){
             sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
             leg_10kHz_effs_SubjetBased_OfflineSubjets->Draw();
-            c15.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased_OfflineSubjets.pdf");
+            c15.cd(); DrawATLASLabel(); c15.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased_OfflineSubjets.pdf");
         }
 
         // --- Mass-split multi-file overlays (mass >= threshold = open markers, < threshold = closed markers) ---
@@ -22093,7 +23159,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if(fileIt == (backgroundFiles.size() - 1)){
                 sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
                 leg_massSplit_SubjetBased_10kHz->Draw();
-                cMassSplit_SubjetBased_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_10kHz_overlay.pdf");
+                cMassSplit_SubjetBased_10kHz.cd(); DrawATLASLabel(); cMassSplit_SubjetBased_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_10kHz_overlay.pdf");
             }
         }*/
 
@@ -22122,7 +23188,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if(fileIt == (backgroundFiles.size() - 1)){
                 sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
                 leg_massSplit_ETonly_10kHz->Draw();
-                cMassSplit_ETonly_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETonly_10kHz_overlay.pdf");
+                cMassSplit_ETonly_10kHz.cd(); DrawATLASLabel(); cMassSplit_ETonly_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETonly_10kHz_overlay.pdf");
             }
         }
 
@@ -22151,11 +23217,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if(fileIt == (backgroundFiles.size() - 1)){
                 sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
                 leg_massSplit_ETmass_10kHz->Draw();
-                cMassSplit_ETmass_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETmass_10kHz_overlay.pdf");
+                cMassSplit_ETmass_10kHz.cd(); DrawATLASLabel(); cMassSplit_ETmass_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETmass_10kHz_overlay.pdf");
             }
         }
 
-        // SubjetBased 35 kHz
+        // SubjetBased 40 kHz
         if(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec.size() > fileIt &&
            sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec.size() > fileIt){
             cMassSplit_SubjetBased_35kHz.cd();
@@ -22180,65 +23246,311 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if(fileIt == (backgroundFiles.size() - 1)){
                 sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
                 leg_massSplit_SubjetBased_35kHz->Draw();
-                cMassSplit_SubjetBased_35kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_35kHz_overlay.pdf");
+                cMassSplit_SubjetBased_35kHz.cd(); DrawATLASLabel(); cMassSplit_SubjetBased_35kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_40kHz_overlay.pdf");
             }
         }
 
-        // ET-only 35 kHz
-        if(sig_eff_ETonly_35kHz_MassSel_vec.size() > fileIt &&
-           sig_eff_ETonly_35kHz_NoMassSel_vec.size() > fileIt){
-            cMassSplit_ETonly_35kHz.cd();
-            setupMassSplitHist(sig_eff_ETonly_35kHz_MassSel_vec[fileIt],  24);
-            setupMassSplitHist(sig_eff_ETonly_35kHz_NoMassSel_vec[fileIt], 20);
-            leg_massSplit_ETonly_35kHz->AddEntry(sig_eff_ETonly_35kHz_MassSel_vec[fileIt],
+        // SubjetBased 40 kHz + gFEX (Resim) leading LRJ E_T-only overlay
+        // Same content and legend printouts as the plot above, with the gFEX
+        // (Resim) leading LRJ E_T-only turn-on added (drawn once per sample type).
+        if(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec.size() > fileIt &&
+           sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec.size() > fileIt){
+            cMassSplit_SubjetBased_35kHz_gFEX.cd();
+            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],  24);
+            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt], 20);
+            leg_massSplit_SubjetBased_35kHz_gFEX->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],
                 Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
                      offlineLRJMassSel_threshold,
-                     (intEff_ETonly_35kHz_all_vec.size()>fileIt    ? intEff_ETonly_35kHz_all_vec[fileIt]    : 0.),
-                     (intEff_ETonly_35kHz_massSel_vec.size()>fileIt  ? intEff_ETonly_35kHz_massSel_vec[fileIt]  : 0.),
-                     (intEff_ETonly_35kHz_noMassSel_vec.size()>fileIt ? intEff_ETonly_35kHz_noMassSel_vec[fileIt] : 0.),
+                     (intEff_SubjetBased_35kHz_all_vec.size()>fileIt    ? intEff_SubjetBased_35kHz_all_vec[fileIt]    : 0.),
+                     (intEff_SubjetBased_35kHz_massSel_vec.size()>fileIt  ? intEff_SubjetBased_35kHz_massSel_vec[fileIt]  : 0.),
+                     (intEff_SubjetBased_35kHz_noMassSel_vec.size()>fileIt ? intEff_SubjetBased_35kHz_noMassSel_vec[fileIt] : 0.),
                      msLegConfig.c_str()), "lp");
-            leg_massSplit_ETonly_35kHz->AddEntry(sig_eff_ETonly_35kHz_NoMassSel_vec[fileIt],
+            leg_massSplit_SubjetBased_35kHz_gFEX->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt],
                 Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
             if(fileIt == 0){
-                sig_eff_ETonly_35kHz_MassSel_vec[fileIt]->Draw("P");
-                sig_eff_ETonly_35kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
             } else {
-                sig_eff_ETonly_35kHz_MassSel_vec[fileIt]->Draw("P SAME");
-                sig_eff_ETonly_35kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
+            }
+            // Overlay gFEX (Resim) leading LRJ E_T-only turn-on once per sample type
+            bool gFexMassSplitAlreadyDrawn = false;
+            for(const auto& m : drawnGFexResimModes_massSplit) if(m == mode) gFexMassSplitAlreadyDrawn = true;
+            if(!gFexMassSplitAlreadyDrawn && sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt){
+                drawnGFexResimModes_massSplit.push_back(mode);
+                TH1F* hGfxMS = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
+                hGfxMS->SetLineColor(color); hGfxMS->SetMarkerColor(color);
+                hGfxMS->SetMarkerStyle(33); hGfxMS->SetMarkerSize(1.2); // filled diamond = gFEX (Resim)
+                hGfxMS->SetAxisRange(0.0, 1.1, "Y");
+                hGfxMS->Draw("P SAME");
+                leg_massSplit_SubjetBased_35kHz_gFEX->AddEntry(hGfxMS,
+                    Form("gFEX LRJ E_{T} > %.0f GeV only, %s",
+                         (thr_gFEX_Sim_40kHz_vec.size()>fileIt ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0),
+                         legLabelSig_SampleInfoOnly.c_str()), "lp");
             }
             if(fileIt == (backgroundFiles.size() - 1)){
                 sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_massSplit_ETonly_35kHz->Draw();
-                cMassSplit_ETonly_35kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETonly_35kHz_overlay.pdf");
+                leg_massSplit_SubjetBased_35kHz_gFEX->Draw();
+                cMassSplit_SubjetBased_35kHz_gFEX.cd(); DrawATLASLabel(); cMassSplit_SubjetBased_35kHz_gFEX.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_40kHz_gFEXoverlay_overlay.pdf");
             }
         }
 
-        // ET+mass 35 kHz
-        if(sig_eff_ETmass_35kHz_MassSel_vec.size() > fileIt &&
-           sig_eff_ETmass_35kHz_NoMassSel_vec.size() > fileIt){
-            cMassSplit_ETmass_35kHz.cd();
-            setupMassSplitHist(sig_eff_ETmass_35kHz_MassSel_vec[fileIt],  24);
-            setupMassSplitHist(sig_eff_ETmass_35kHz_NoMassSel_vec[fileIt], 20);
-            leg_massSplit_ETmass_35kHz->AddEntry(sig_eff_ETmass_35kHz_MassSel_vec[fileIt],
+        // ET-only 40 kHz
+        if(sig_eff_ETonly_40kHz_MassSel_vec.size() > fileIt &&
+           sig_eff_ETonly_40kHz_NoMassSel_vec.size() > fileIt){
+            cMassSplit_ETonly_40kHz.cd();
+            setupMassSplitHist(sig_eff_ETonly_40kHz_MassSel_vec[fileIt],  24);
+            setupMassSplitHist(sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt], 20);
+            leg_massSplit_ETonly_40kHz->AddEntry(sig_eff_ETonly_40kHz_MassSel_vec[fileIt],
                 Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
                      offlineLRJMassSel_threshold,
-                     (intEff_ETmass_35kHz_all_vec.size()>fileIt    ? intEff_ETmass_35kHz_all_vec[fileIt]    : 0.),
-                     (intEff_ETmass_35kHz_massSel_vec.size()>fileIt  ? intEff_ETmass_35kHz_massSel_vec[fileIt]  : 0.),
-                     (intEff_ETmass_35kHz_noMassSel_vec.size()>fileIt ? intEff_ETmass_35kHz_noMassSel_vec[fileIt] : 0.),
+                     (intEff_ETonly_40kHz_all_vec.size()>fileIt    ? intEff_ETonly_40kHz_all_vec[fileIt]    : 0.),
+                     (intEff_ETonly_40kHz_massSel_vec.size()>fileIt  ? intEff_ETonly_40kHz_massSel_vec[fileIt]  : 0.),
+                     (intEff_ETonly_40kHz_noMassSel_vec.size()>fileIt ? intEff_ETonly_40kHz_noMassSel_vec[fileIt] : 0.),
                      msLegConfig.c_str()), "lp");
-            leg_massSplit_ETmass_35kHz->AddEntry(sig_eff_ETmass_35kHz_NoMassSel_vec[fileIt],
+            leg_massSplit_ETonly_40kHz->AddEntry(sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt],
                 Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
             if(fileIt == 0){
-                sig_eff_ETmass_35kHz_MassSel_vec[fileIt]->Draw("P");
-                sig_eff_ETmass_35kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETonly_40kHz_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
             } else {
-                sig_eff_ETmass_35kHz_MassSel_vec[fileIt]->Draw("P SAME");
-                sig_eff_ETmass_35kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETonly_40kHz_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
             }
             if(fileIt == (backgroundFiles.size() - 1)){
                 sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_massSplit_ETmass_35kHz->Draw();
-                cMassSplit_ETmass_35kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETmass_35kHz_overlay.pdf");
+                leg_massSplit_ETonly_40kHz->Draw();
+                cMassSplit_ETonly_40kHz.cd(); DrawATLASLabel(); cMassSplit_ETonly_40kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETonly_40kHz_overlay.pdf");
+            }
+        }
+
+        // ET+mass 40 kHz
+        if(sig_eff_ETmass_40kHz_MassSel_vec.size() > fileIt &&
+           sig_eff_ETmass_40kHz_NoMassSel_vec.size() > fileIt){
+            cMassSplit_ETmass_40kHz.cd();
+            setupMassSplitHist(sig_eff_ETmass_40kHz_MassSel_vec[fileIt],  24);
+            setupMassSplitHist(sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt], 20);
+            leg_massSplit_ETmass_40kHz->AddEntry(sig_eff_ETmass_40kHz_MassSel_vec[fileIt],
+                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
+                     offlineLRJMassSel_threshold,
+                     (intEff_ETmass_40kHz_all_vec.size()>fileIt    ? intEff_ETmass_40kHz_all_vec[fileIt]    : 0.),
+                     (intEff_ETmass_40kHz_massSel_vec.size()>fileIt  ? intEff_ETmass_40kHz_massSel_vec[fileIt]  : 0.),
+                     (intEff_ETmass_40kHz_noMassSel_vec.size()>fileIt ? intEff_ETmass_40kHz_noMassSel_vec[fileIt] : 0.),
+                     msLegConfig.c_str()), "lp");
+            leg_massSplit_ETmass_40kHz->AddEntry(sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt],
+                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
+            if(fileIt == 0){
+                sig_eff_ETmass_40kHz_MassSel_vec[fileIt]->Draw("P");
+                sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            } else {
+                sig_eff_ETmass_40kHz_MassSel_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
+            }
+            if(fileIt == (backgroundFiles.size() - 1)){
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                leg_massSplit_ETmass_40kHz->Draw();
+                cMassSplit_ETmass_40kHz.cd(); DrawATLASLabel(); cMassSplit_ETmass_40kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETmass_40kHz_overlay.pdf");
+            }
+        }
+
+        // Subjet-based vs ET-only comparison (no mass split) @ 40 kHz
+        if(sig_eff_offlineLRJ35kHz_SubjetBased_vec.size() > fileIt &&
+           sig_eff_ETonly_40kHz_vec.size() > fileIt){
+            cCompare_SubjetVsET_40kHz.cd();
+            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt], 26); // open triangle = subjet-based
+            setupMassSplitHist(sig_eff_ETonly_40kHz_vec[fileIt],               20); // closed circle = ET-only
+            // Config label: IO/Seed/N_{IO} dropped; rMerge shown as d_{search} (0.001 => disabled)
+            std::string cmpLegConfig = (std::stod(rMergeValue) == 0.001)
+                ? std::string("d_{search} disabled")
+                : Form("d_{search}: %s", rMergeValue.c_str());
+            double thrETonly_p = (thr_ET_only_40kHz_vec.size() > fileIt ? thr_ET_only_40kHz_vec[fileIt] : -1.0);
+            leg_compare_SubjetVsET_40kHz->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt],
+                Form("Subjet-based, %s [#varepsilon_{int}=%.3f], %s",
+                     legLabelSig_SampleInfoOnly.c_str(),
+                     (intEff_SubjetBased_35kHz_all_vec.size()>fileIt ? intEff_SubjetBased_35kHz_all_vec[fileIt] : 0.),
+                     cmpLegConfig.c_str()), "lp");
+            leg_compare_SubjetVsET_40kHz->AddEntry(sig_eff_ETonly_40kHz_vec[fileIt],
+                Form("Lead. LRJ E_{T} > %.0f GeV only, %s [#varepsilon_{int}=%.3f], %s",
+                     thrETonly_p,
+                     legLabelSig_SampleInfoOnly.c_str(),
+                     (intEff_ETonly_40kHz_all_vec.size()>fileIt ? intEff_ETonly_40kHz_all_vec[fileIt] : 0.),
+                     cmpLegConfig.c_str()), "lp");
+            if(fileIt == 0){
+                sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->Draw("P");
+                // Cut display range at 700 GeV (bin contents untouched)
+                sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->GetXaxis()->SetRangeUser(
+                    sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->GetXaxis()->GetXmin(), 700.0);
+                sig_eff_ETonly_40kHz_vec[fileIt]->Draw("P SAME");
+            } else {
+                sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->Draw("P SAME");
+                sig_eff_ETonly_40kHz_vec[fileIt]->Draw("P SAME");
+            }
+            // Overlay gFEX (Resim) LRJ E_T-only turn-on once per sample type
+            bool gFexAlreadyDrawn = false;
+            for(const auto& m : drawnGFexResimModes_compare) if(m == mode) gFexAlreadyDrawn = true;
+            if(!gFexAlreadyDrawn && sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt){
+                drawnGFexResimModes_compare.push_back(mode);
+                TH1F* hGfx = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
+                hGfx->SetLineColor(color); hGfx->SetMarkerColor(color);
+                hGfx->SetMarkerStyle(33); hGfx->SetMarkerSize(1.2); // filled diamond = gFEX (Resim)
+                hGfx->SetAxisRange(0.0, 1.1, "Y");
+                hGfx->Draw("P SAME");
+                leg_compare_SubjetVsET_40kHz->AddEntry(hGfx,
+                    Form("gFEX LRJ E_{T} > %.0f GeV only, %s",
+                         (thr_gFEX_Sim_40kHz_vec.size()>fileIt ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0),
+                         legLabelSig_SampleInfoOnly.c_str()), "lp");
+            }
+            if(fileIt == (backgroundFiles.size() - 1)){
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                leg_compare_SubjetVsET_40kHz->Draw();
+                cCompare_SubjetVsET_40kHz.cd(); DrawATLASLabel(); cCompare_SubjetVsET_40kHz.SaveAs(overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_overlay.pdf");
+            }
+        }
+
+        // === Single-process seed-comparison turn-on overlay @ 40 kHz ========
+        // Mirrors the rate-vs-eff seed-comparison plot, but for the 40 kHz
+        // turn-on curves:
+        //   "Seeded cone only, Lead. LRJ E_T cut" = ET-only turn-on from the
+        //       d_{search}-disabled file (rMerge == 0.001).
+        //   "Seed Opt., Subjet-based E_T cut"     = subjet-based turn-on from
+        //       the d_{search}-enabled file.
+        // Only generated for a single signal process with both inputs present.
+        if(fileIt == (backgroundFiles.size() - 1)){
+            std::vector<std::string> modesSeenTO;
+            for(unsigned int f = 0; f < backgroundFiles.size(); ++f){
+                std::string m = getProductionMode(signalFiles[f].second);
+                if(std::find(modesSeenTO.begin(), modesSeenTO.end(), m) == modesSeenTO.end())
+                    modesSeenTO.push_back(m);
+            }
+
+            int idxDisabledTO = -1, idxEnabledTO = -1;
+            for(unsigned int f = 0; f < backgroundFiles.size(); ++f){
+                auto fi = ParseFileName(backgroundFiles[f].second);
+                bool disabled = (std::stod(fi.rMergeValue) == 0.001);
+                if(disabled  && idxDisabledTO == -1) idxDisabledTO = (int)f;
+                if(!disabled && idxEnabledTO  == -1) idxEnabledTO  = (int)f;
+            }
+
+            bool dataAvailableTO =
+                (modesSeenTO.size() == 1) &&
+                idxDisabledTO >= 0 && idxEnabledTO >= 0 &&
+                sig_eff_ETonly_40kHz_vec.size()            > (size_t)idxDisabledTO &&
+                sig_eff_offlineLRJ35kHz_SubjetBased_vec.size() > (size_t)idxEnabledTO &&
+                sig_eff_ETonly_40kHz_vec[idxDisabledTO] &&
+                sig_eff_offlineLRJ35kHz_SubjetBased_vec[idxEnabledTO];
+
+            if(!dataAvailableTO){
+                std::cout << "[seedComparison] Skipping single-process seed-comparison turn-on plot: "
+                          << "need exactly one signal process with both d_{search}-disabled and "
+                          << "d_{search}-enabled inputs (distinctModes=" << modesSeenTO.size()
+                          << ", idxDisabled=" << idxDisabledTO
+                          << ", idxEnabled=" << idxEnabledTO << ").\n";
+            } else {
+                // Per-curve colours: subjet-based = red, lead LRJ = blue, gFEX = black.
+                const int colSubjet = kP10Red, colLead = kP10Blue, colGfx = kBlack;
+
+                cCompare_SubjetVsET_40kHz_seedComparison.cd();
+
+                TH1F* hLeadTO   = sig_eff_ETonly_40kHz_vec[idxDisabledTO];
+                TH1F* hSubjetTO = sig_eff_offlineLRJ35kHz_SubjetBased_vec[idxEnabledTO];
+
+                hLeadTO->SetLineColor(colLead);     hLeadTO->SetMarkerColor(colLead);
+                hLeadTO->SetMarkerStyle(21);        hLeadTO->SetMarkerSize(0.8); // filled square
+                hLeadTO->SetAxisRange(0.0, 1.1, "Y");
+                hSubjetTO->SetLineColor(colSubjet); hSubjetTO->SetMarkerColor(colSubjet);
+                hSubjetTO->SetMarkerStyle(26);      hSubjetTO->SetMarkerSize(0.8); // open triangle
+                hSubjetTO->SetAxisRange(0.0, 1.1, "Y");
+
+                hSubjetTO->Draw("P");
+                // Cut display range at 700 GeV (bin contents untouched).
+                hSubjetTO->GetXaxis()->SetRangeUser(hSubjetTO->GetXaxis()->GetXmin(), 700.0);
+                hLeadTO->Draw("P SAME");
+
+                // gFEX overlay (d_{search}-independent; take from the enabled file).
+                TH1F* hGfxTO = nullptr;
+                if(sig_eff_gFEX_Sim_40kHz_vec.size() > (size_t)idxEnabledTO &&
+                   sig_eff_gFEX_Sim_40kHz_vec[idxEnabledTO]){
+                    hGfxTO = sig_eff_gFEX_Sim_40kHz_vec[idxEnabledTO];
+                    hGfxTO->SetLineColor(colGfx); hGfxTO->SetMarkerColor(colGfx);
+                    hGfxTO->SetMarkerStyle(33);   hGfxTO->SetMarkerSize(1.2); // filled diamond
+                    hGfxTO->SetAxisRange(0.0, 1.1, "Y");
+                    hGfxTO->Draw("P SAME");
+                }
+
+                // Offline leading LRJ E_T distribution drawn in the background.
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                // Re-draw the turn-on markers so they sit on top of the distribution.
+                hSubjetTO->Draw("P SAME");
+                hLeadTO->Draw("P SAME");
+                if(hGfxTO) hGfxTO->Draw("P SAME");
+
+                legSeedCompare_TurnOn->Clear();
+                legSeedCompare_TurnOn->SetHeader("Fixed to 40 kHz rate", "C"); // re-set: Clear() drops it
+                legSeedCompare_TurnOn->AddEntry(hSubjetTO, "Seed Opt., Subjet-based E_{T} cut", "lp");
+                legSeedCompare_TurnOn->AddEntry(hLeadTO,   "Seeded cone only, Lead. LRJ E_{T} cut", "lp");
+                if(hGfxTO) legSeedCompare_TurnOn->AddEntry(hGfxTO, "gFEX Lead. LRJ E_{T} cut", "lp");
+                legSeedCompare_TurnOn->Draw();
+
+                cCompare_SubjetVsET_40kHz_seedComparison.cd();
+                DrawATLASLabel();
+                // Single physics process: shown to the right of the ATLAS labels.
+                std::string procLabelTO = legLabelSig_SampleInfoOnly;
+                { size_t hp = procLabelTO.find("[had]");
+                  if(hp != std::string::npos) procLabelTO.replace(hp, 5, "[hadronically decaying]"); }
+                TLatex procTexTO; procTexTO.SetNDC(); procTexTO.SetTextFont(42);
+                procTexTO.SetTextColor(kBlack); procTexTO.SetTextSize(0.04);
+                procTexTO.DrawLatex(0.62, 0.945, procLabelTO.c_str());
+
+                cCompare_SubjetVsET_40kHz_seedComparison.SaveAs(overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_seedComparison_overlay.pdf");
+
+                // --- Copy of the plot above, with per-curve integrated-efficiency printouts
+                //     (total, lead. offline LRJ mass >= threshold, < threshold) placed at the
+                //     top right just below the process label, colour-matched to each curve.
+                cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts.cd();
+                hSubjetTO->Draw("P");
+                hSubjetTO->GetXaxis()->SetRangeUser(hSubjetTO->GetXaxis()->GetXmin(), 700.0);
+                hLeadTO->Draw("P SAME");
+                if(hGfxTO) hGfxTO->Draw("P SAME");
+                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
+                hSubjetTO->Draw("P SAME");
+                hLeadTO->Draw("P SAME");
+                if(hGfxTO) hGfxTO->Draw("P SAME");
+                legSeedCompare_TurnOn->Draw();
+                DrawATLASLabel();
+                procTexTO.DrawLatex(0.62, 0.945, procLabelTO.c_str());
+
+                // Safe accessor for per-file integrated efficiencies.
+                auto ieAt = [](const std::vector<double>& v, int idx) -> double {
+                    return (idx >= 0 && (size_t)idx < v.size()) ? v[idx] : 0.0;
+                };
+                TLatex ieTex; ieTex.SetNDC(); ieTex.SetTextFont(42); ieTex.SetTextSize(0.026);
+                const double xIE = 0.585, yIE = 0.895, dyIE = 0.040;
+                ieTex.SetTextColor(kBlack);
+                ieTex.DrawLatex(xIE, yIE,
+                    Form("#varepsilon_{int}: all, m #geq %.0f, m < %.0f GeV", offlineLRJMassSel_threshold, offlineLRJMassSel_threshold));
+                ieTex.SetTextColor(colSubjet);
+                ieTex.DrawLatex(xIE, yIE - dyIE,
+                    Form("Subjet-based E_{T}: %.3f, %.3f, %.3f",
+                         ieAt(intEff_SubjetBased_35kHz_all_vec,      idxEnabledTO),
+                         ieAt(intEff_SubjetBased_35kHz_massSel_vec,  idxEnabledTO),
+                         ieAt(intEff_SubjetBased_35kHz_noMassSel_vec,idxEnabledTO)));
+                ieTex.SetTextColor(colLead);
+                ieTex.DrawLatex(xIE, yIE - 2*dyIE,
+                    Form("Lead. LRJ E_{T}: %.3f, %.3f, %.3f",
+                         ieAt(intEff_ETonly_40kHz_all_vec,      idxDisabledTO),
+                         ieAt(intEff_ETonly_40kHz_massSel_vec,  idxDisabledTO),
+                         ieAt(intEff_ETonly_40kHz_noMassSel_vec,idxDisabledTO)));
+                if(hGfxTO){
+                    ieTex.SetTextColor(colGfx);
+                    ieTex.DrawLatex(xIE, yIE - 3*dyIE,
+                        Form("gFEX Lead. LRJ E_{T}: %.3f, %.3f, %.3f",
+                             ieAt(intEff_gFEX_ETonly_40kHz_all_vec,      idxEnabledTO),
+                             ieAt(intEff_gFEX_ETonly_40kHz_massSel_vec,  idxEnabledTO),
+                             ieAt(intEff_gFEX_ETonly_40kHz_noMassSel_vec,idxEnabledTO)));
+                }
+
+                cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts.SaveAs(overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_seedComparison_effPrintouts_overlay.pdf");
             }
         }
 
@@ -22282,10 +23594,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg_bar_backSub->AddEntry(back_h_subSubjet_matchFrac_vec[fileIt], legLabel.c_str(), "f");
 
             if(fileIt == (backgroundFiles.size() - 1)){
-                cBar_sigLead.cd();  leg_bar_sigLead->Draw();  cBar_sigLead.SaveAs(overlayOutputFileDir  + "sig_leadSubjet_matchFrac_overlay.pdf");
-                cBar_sigSub.cd();   leg_bar_sigSub->Draw();   cBar_sigSub.SaveAs(overlayOutputFileDir   + "sig_subSubjet_matchFrac_overlay.pdf");
-                cBar_backLead.cd(); leg_bar_backLead->Draw(); cBar_backLead.SaveAs(overlayOutputFileDir + "back_leadSubjet_matchFrac_overlay.pdf");
-                cBar_backSub.cd();  leg_bar_backSub->Draw();  cBar_backSub.SaveAs(overlayOutputFileDir  + "back_subSubjet_matchFrac_overlay.pdf");
+                cBar_sigLead.cd();  leg_bar_sigLead->Draw();  cBar_sigLead.cd(); DrawATLASLabel(); cBar_sigLead.SaveAs(overlayOutputFileDir  + "sig_leadSubjet_matchFrac_overlay.pdf");
+                cBar_sigSub.cd();   leg_bar_sigSub->Draw();   cBar_sigSub.cd(); DrawATLASLabel(); cBar_sigSub.SaveAs(overlayOutputFileDir   + "sig_subSubjet_matchFrac_overlay.pdf");
+                cBar_backLead.cd(); leg_bar_backLead->Draw(); cBar_backLead.cd(); DrawATLASLabel(); cBar_backLead.SaveAs(overlayOutputFileDir + "back_leadSubjet_matchFrac_overlay.pdf");
+                cBar_backSub.cd();  leg_bar_backSub->Draw();  cBar_backSub.cd(); DrawATLASLabel(); cBar_backSub.SaveAs(overlayOutputFileDir  + "back_subSubjet_matchFrac_overlay.pdf");
             }
         }
 
@@ -22301,7 +23613,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         
         if(fileIt == (backgroundFiles.size() - 1)){
             legSigOnly->Draw(); // Use this legend when only plotting signal 
-            c7.SaveAs(overlayOutputFileDir + "lead_ET_scan_EffVsThresh.pdf");
+            c7.cd(); DrawATLASLabel(); c7.SaveAs(overlayOutputFileDir + "lead_ET_scan_EffVsThresh.pdf");
         }
 
         c8.cd();
@@ -22314,7 +23626,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             legSigOnly->Draw();
-            c8.SaveAs(overlayOutputFileDir + "sublead_ET_scan_EffVsThresh.pdf");
+            c8.cd(); DrawATLASLabel(); c8.SaveAs(overlayOutputFileDir + "sublead_ET_scan_EffVsThresh.pdf");
         }
 
         c3_Log.cd();
@@ -22327,7 +23639,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             legSigOnly->Draw();
-            c3_Log.SaveAs(overlayOutputFileDir + "lead_ET_Scan_RateVsThresh.pdf");
+            c3_Log.cd(); DrawATLASLabel(); c3_Log.SaveAs(overlayOutputFileDir + "lead_ET_Scan_RateVsThresh.pdf");
         }
 
         c4_Log.cd();
@@ -22340,7 +23652,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         if(fileIt == (backgroundFiles.size() - 1)){
             legSigOnly->Draw();
-            c4_Log.SaveAs(overlayOutputFileDir + "sublead_ET_Scan_RateVsThresh.pdf");
+            c4_Log.cd(); DrawATLASLabel(); c4_Log.SaveAs(overlayOutputFileDir + "sublead_ET_Scan_RateVsThresh.pdf");
         }
         
 
@@ -22386,7 +23698,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             hline10k->SetLineWidth(2);
             hline10k->Draw("SAME");
             legSigOnly->Draw();
-            c7_Log.SaveAs(overlayOutputFileDir + "lead_ET_Scan_RatesVsEff.pdf");
+            c7_Log.cd(); DrawATLASLabel(); c7_Log.SaveAs(overlayOutputFileDir + "lead_ET_Scan_RatesVsEff.pdf");
         }
 
         c8_Log.cd();
@@ -22426,7 +23738,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             hline10k->SetLineWidth(2);
             hline10k->Draw("SAME");
             legSigOnly->Draw();
-            c8_Log.SaveAs(overlayOutputFileDir + "sublead_ET_Scan_RatesVsEff.pdf");
+            c8_Log.cd(); DrawATLASLabel(); c8_Log.SaveAs(overlayOutputFileDir + "sublead_ET_Scan_RatesVsEff.pdf");
         }
 
         // ---- Unique leading LRJ E_T rate vs. efficiency overlay ----
@@ -22461,15 +23773,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             hline10k->SetLineWidth(2);
             hline10k->Draw("SAME");
             legSigOnly->Draw();
-            cUniqueLead_Log.SaveAs(overlayOutputFileDir + "unique_lead_LRJ_ET_Scan_RatesVsEff.pdf");
+            cUniqueLead_Log.cd(); DrawATLASLabel(); cUniqueLead_Log.SaveAs(overlayOutputFileDir + "unique_lead_LRJ_ET_Scan_RatesVsEff.pdf");
         }
 
         c9_Log.cd();
-        if(color == kYellow) color = kOrange;
+        if(color == kP10Yellow) color = kP10Orange;
         // FIXME need to fix labels to actually indicate if ggF or whatever (in-progress)
         subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->SetLineColor(color);
         subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->SetMarkerColor(color);
-        subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->SetMarkerStyle(24); // open circle for SOME clarity...
+        subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->SetMarkerStyle(26); // open triangle for SOME clarity...
         subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->SetMarkerSize(0.6);
 
         lead_ET_Scan_RatesVsEff_vec[fileIt]->SetLineColor(color);
@@ -22485,7 +23797,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
         
         legSigOnlyNoIOTypes->AddEntry(subjetBased_ET_Scan_RatesVsEff_vec[fileIt],
-            (legLabelSigNoIOType_SubjetBasedCut + ", Seed: " + seedObjectType).c_str(), "p");
+            (legLabelSigNoIOType_SubjetBasedCut /* + ", Seed: " + seedObjectType */).c_str(), "p");
         legSigOnlyNoIOTypes->AddEntry(lead_ET_Scan_RatesVsEff_vec[fileIt], legLabelSigNoIOType_EtCutOnly.c_str(), "p");
         if(overlay4thLeadConeJetSel) legSigOnlyNoIOTypes->AddEntry(fouth_lead_ConeJet_ET_Scan_RatesVsEff_vec[fileIt], legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly.c_str(), "p");
         if (fileIt == 0) {
@@ -22495,7 +23807,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             gPad->Update();  // make sure frame histogram exists
             auto frame = subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->GetHistogram();
             frame->SetMinimum(50.);   // lower bound (log axis requires >0)
-            frame->SetMaximum(5.0e4);     // y-axis max (example)
+            frame->SetMaximum(1.0e5);     // y-axis max: zoom out to 100 kHz
             frame->GetXaxis()->SetLimits(0, 1.0);  // <-- x-axis min/max
             //auto frame2 = lead_ET_Scan_RatesVsEff_vec[fileIt]->GetHistogram();
             //frame2->SetMinimum(50.);   // lower bound (log axis requires >0)
@@ -22504,39 +23816,157 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             gPad->Modified();
             gPad->Update();  
         } else {
-            subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->Draw("P SAME"); 
-            lead_ET_Scan_RatesVsEff_vec[fileIt]->Draw("P SAME"); 
-            if(overlay4thLeadConeJetSel) fouth_lead_ConeJet_ET_Scan_RatesVsEff_vec[fileIt]->Draw("P SAME");  
+            subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->Draw("P SAME");
+            lead_ET_Scan_RatesVsEff_vec[fileIt]->Draw("P SAME");
+            if(overlay4thLeadConeJetSel) fouth_lead_ConeJet_ET_Scan_RatesVsEff_vec[fileIt]->Draw("P SAME");
+        }
+
+        // Overlay gFEX (Resim) leading LRJ E_T-only rate-vs-eff scan once per sample type
+        {
+            bool gFexAlreadyDrawn = false;
+            for(const auto& m : drawnGFexResimModes_rateEff) if(m == mode) gFexAlreadyDrawn = true;
+            if(!gFexAlreadyDrawn && gFEX_Sim_ET_Scan_RatesVsEff_vec.size() > fileIt){
+                drawnGFexResimModes_rateEff.push_back(mode);
+                TGraph* gGfx = gFEX_Sim_ET_Scan_RatesVsEff_vec[fileIt];
+                gGfx->SetLineColor(color); gGfx->SetMarkerColor(color);
+                gGfx->SetMarkerStyle(33); gGfx->SetMarkerSize(1.0); // filled diamond = gFEX (Resim)
+                gGfx->Draw("P SAME");
+                legSigOnlyNoIOTypes->AddEntry(gGfx,
+                    Form("gFEX LRJ E_{T} Cut, %s", legLabelSig_SampleInfoOnly.c_str()), "p");
+            }
         }
 
         { // put this within its own scope so I can reuse...
-            auto best10k = FindBestPointBelowRate(subjetBased_ET_Scan_RatesVsEff_vec[fileIt], 1e4);
-            double bestEff  = best10k.first;
-            double bestRate = best10k.second;
+            auto best40k = FindBestPointBelowRate(subjetBased_ET_Scan_RatesVsEff_vec[fileIt], 4e4);
+            double bestEff  = best40k.first;
+            double bestRate = best40k.second;
 
             auto frame = subjetBased_ET_Scan_RatesVsEff_vec[0]->GetHistogram(); // or grab it once
             double ymin = frame->GetMinimum();  // should be 50
 
-            TLine *vline10k = new TLine(bestEff, ymin, bestEff, 1e4);
-            vline10k->SetLineColor(color);
-            vline10k->SetLineStyle(2);
-            vline10k->SetLineWidth(2);
+            TLine *vline40k = new TLine(bestEff, ymin, bestEff, 4e4);
+            vline40k->SetLineColor(color);
+            vline40k->SetLineStyle(2);
+            vline40k->SetLineWidth(2);
 
-            vline10k->Draw("SAME");
+            vline40k->Draw("SAME");
         }
 
         if(fileIt == (backgroundFiles.size() - 1)){
-            // Horizontal line at 10 kHz
+            // Horizontal line at 40 kHz
             double xmin = gPad->GetUxmin();
             double xmax = gPad->GetUxmax();
 
-            TLine *hline10k = new TLine(xmin, 1e4, xmax, 1e4);
-            hline10k->SetLineColor(kGray + 2);
-            hline10k->SetLineStyle(2);
-            hline10k->SetLineWidth(2);
-            hline10k->Draw("SAME");
+            TLine *hline40k = new TLine(xmin, 4e4, xmax, 4e4);
+            hline40k->SetLineColor(kGray + 2);
+            hline40k->SetLineStyle(2);
+            hline40k->SetLineWidth(2);
+            hline40k->Draw("SAME");
             legSigOnlyNoIOTypes->Draw();
-            c9_Log.SaveAs(overlayOutputFileDir + "subjetBased_ET_Scan_RatesVsEff.pdf");
+            c9_Log.cd(); DrawATLASLabel(); c9_Log.SaveAs(overlayOutputFileDir + "subjetBased_ET_Scan_RatesVsEff.pdf");
+        }
+
+        // === Single-process seed-comparison overlay =========================
+        // "Seeded cone only, Lead. LRJ E_T cut"  = lead-LRJ curve from the
+        //     d_{search}-disabled file (rMerge == 0.001).
+        // "Seed Opt., Subjet-based E_T cut"      = subjet-based curve from the
+        //     d_{search}-enabled file.
+        // Only generated when exactly one signal process is present AND both a
+        // disabled and an enabled input exist for it. All curves share one
+        // colour (black); the physics process is shown top-right, not in the
+        // legend, so the legend can be larger.
+        if(fileIt == (backgroundFiles.size() - 1)){
+            // Count distinct signal processes across all files.
+            std::vector<std::string> modesSeen;
+            for(unsigned int f = 0; f < backgroundFiles.size(); ++f){
+                std::string m = getProductionMode(signalFiles[f].second);
+                if(std::find(modesSeen.begin(), modesSeen.end(), m) == modesSeen.end())
+                    modesSeen.push_back(m);
+            }
+
+            // Locate first d_{search}-disabled and first d_{search}-enabled file.
+            int idxDisabled = -1, idxEnabled = -1;
+            for(unsigned int f = 0; f < backgroundFiles.size(); ++f){
+                auto fi = ParseFileName(backgroundFiles[f].second);
+                bool disabled = (std::stod(fi.rMergeValue) == 0.001);
+                if(disabled  && idxDisabled == -1) idxDisabled = (int)f;
+                if(!disabled && idxEnabled  == -1) idxEnabled  = (int)f;
+            }
+
+            bool dataAvailable =
+                (modesSeen.size() == 1) &&
+                idxDisabled >= 0 && idxEnabled >= 0 &&
+                lead_ET_Scan_RatesVsEff_vec.size()       > (size_t)idxDisabled &&
+                subjetBased_ET_Scan_RatesVsEff_vec.size() > (size_t)idxEnabled  &&
+                lead_ET_Scan_RatesVsEff_vec[idxDisabled] &&
+                subjetBased_ET_Scan_RatesVsEff_vec[idxEnabled];
+
+            if(!dataAvailable){
+                std::cout << "[seedComparison] Skipping single-process seed-comparison plot: "
+                          << "need exactly one signal process with both d_{search}-disabled and "
+                          << "d_{search}-enabled inputs (distinctModes=" << modesSeen.size()
+                          << ", idxDisabled=" << idxDisabled
+                          << ", idxEnabled=" << idxEnabled << ").\n";
+            } else {
+                // Per-curve colours: subjet-based = red, lead LRJ = blue, gFEX = black.
+                const int colSubjet = kP10Red, colLead = kP10Blue, colGfx = kBlack;
+
+                c9b_Log.cd();
+
+                TGraph* gLead   = (TGraph*) lead_ET_Scan_RatesVsEff_vec[idxDisabled];
+                TGraph* gSubjet = (TGraph*) subjetBased_ET_Scan_RatesVsEff_vec[idxEnabled];
+
+                gLead->SetLineColor(colLead);     gLead->SetMarkerColor(colLead);
+                gLead->SetMarkerStyle(21);        gLead->SetMarkerSize(0.6); // filled square
+                gSubjet->SetLineColor(colSubjet); gSubjet->SetMarkerColor(colSubjet);
+                gSubjet->SetMarkerStyle(26);      gSubjet->SetMarkerSize(0.6); // open triangle
+
+                gSubjet->Draw("AP");
+                gPad->Update();
+                auto frameSC = gSubjet->GetHistogram();
+                frameSC->SetMinimum(50.);
+                frameSC->SetMaximum(1.0e5);
+                frameSC->GetXaxis()->SetLimits(0, 1.0);
+                gPad->Modified(); gPad->Update();
+                gLead->Draw("P SAME");
+
+                // gFEX overlay (d_{search}-independent; take from the enabled file).
+                TGraph* gGfxSC = nullptr;
+                if(gFEX_Sim_ET_Scan_RatesVsEff_vec.size() > (size_t)idxEnabled &&
+                   gFEX_Sim_ET_Scan_RatesVsEff_vec[idxEnabled]){
+                    gGfxSC = gFEX_Sim_ET_Scan_RatesVsEff_vec[idxEnabled];
+                    gGfxSC->SetLineColor(colGfx); gGfxSC->SetMarkerColor(colGfx);
+                    gGfxSC->SetMarkerStyle(33);   gGfxSC->SetMarkerSize(1.0); // filled diamond
+                    gGfxSC->Draw("P SAME");
+                }
+
+                legSeedCompare->Clear();
+                legSeedCompare->AddEntry(gSubjet, "Seed Opt., Subjet-based E_{T} cut", "p");
+                legSeedCompare->AddEntry(gLead,   "Seeded cone only, Lead. LRJ E_{T} cut", "p");
+                if(gGfxSC) legSeedCompare->AddEntry(gGfxSC, "gFEX Lead. LRJ E_{T} cut", "p");
+                legSeedCompare->Draw();
+
+                // Horizontal line at 40 kHz.
+                double xminSC = gPad->GetUxmin();
+                double xmaxSC = gPad->GetUxmax();
+                TLine *hline40kSC = new TLine(xminSC, 4e4, xmaxSC, 4e4);
+                hline40kSC->SetLineColor(kGray + 2);
+                hline40kSC->SetLineStyle(2);
+                hline40kSC->SetLineWidth(2);
+                hline40kSC->Draw("SAME");
+
+                c9b_Log.cd();
+                DrawATLASLabel();
+                // Single physics process: shown to the right of the ATLAS labels.
+                std::string procLabelSC = legLabelSig_SampleInfoOnly;
+                { size_t hp = procLabelSC.find("[had]");
+                  if(hp != std::string::npos) procLabelSC.replace(hp, 5, "[hadronically decaying]"); }
+                TLatex procTexSC; procTexSC.SetNDC(); procTexSC.SetTextFont(42);
+                procTexSC.SetTextColor(kBlack); procTexSC.SetTextSize(0.04);
+                procTexSC.DrawLatex(0.62, 0.945, procLabelSC.c_str());
+
+                c9b_Log.SaveAs(overlayOutputFileDir + "subjetBased_ET_Scan_RatesVsEff_seedComparison.pdf");
+            }
         }
         //std::cout << "new overlay 1.1" << "\n";
         if(compute4thConeOR){
@@ -22588,7 +24018,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 hline10k_or->SetLineWidth(2);
                 hline10k_or->Draw("SAME");
                 legSigOnlyNoIOTypes_OR4thCone->Draw();
-                c10_Log.SaveAs(overlayOutputFileDir + "subjetBased_ET_OR_4thLeadCone_Scan_RatesVsEff.pdf");
+                c10_Log.cd(); DrawATLASLabel(); c10_Log.SaveAs(overlayOutputFileDir + "subjetBased_ET_OR_4thLeadCone_Scan_RatesVsEff.pdf");
             }
         }
         
@@ -22614,7 +24044,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             legConsMass->AddEntry(hBackMass, Form("%s (bkg)",  legLabelBkg.c_str()), "l");
             if (fileIt == backgroundFiles.size() - 1) {
                 legConsMass->Draw();
-                cConsMass.SaveAs(overlayOutputFileDir + "leading_LRJ_ConstituentMass_overlay.pdf");
+                cConsMass.cd(); DrawATLASLabel(); cConsMass.SaveAs(overlayOutputFileDir + "leading_LRJ_ConstituentMass_overlay.pdf");
             }
         }
 
@@ -22656,7 +24086,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             hline10k_roc->Draw("SAME");
             legROC_ET_mass->Draw();
             gPad->RedrawAxis();
-            cROC_ET_mass.SaveAs(overlayOutputFileDir + "RatesVsEff_mass_AllEvents_overlay.pdf");
+            cROC_ET_mass.cd(); DrawATLASLabel(); cROC_ET_mass.SaveAs(overlayOutputFileDir + "RatesVsEff_mass_AllEvents_overlay.pdf");
         }
 
     } // Loop to overlay plots after having already filled vectors through main file loop
@@ -22683,7 +24113,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 nInputObjects_vec[i], thr_ET_mass_10kHz_vec[i], thr_mass_min_10kHz_vec[i]), "lp");
         }
         legIO->Draw();
-        cEtMassIO.SaveAs(overlayOutputFileDir + "sig_eff_ET_mass_10kHz_overlay.pdf");
+        cEtMassIO.cd(); DrawATLASLabel(); cEtMassIO.SaveAs(overlayOutputFileDir + "sig_eff_ET_mass_10kHz_overlay.pdf");
     }*/
 
 TString outputFileDir = "overlayLargeRJetHistograms/"; // FIXME all the following code should now be deprecated
@@ -22781,7 +24211,7 @@ if (overlayThreeFiles){
     //bLegThresh->Draw();
 
     // Save
-    cBack.SaveAs(outputFileDir + "back_eff_overlay_all_files_100_200_300.pdf");
+    cBack.cd(); DrawATLASLabel(); cBack.SaveAs(outputFileDir + "back_eff_overlay_all_files_100_200_300.pdf");
 
 
     // -----------------------------
@@ -22886,10 +24316,11 @@ if (overlayThreeFiles){
     legThresh->Draw();
 
     // Save
-    cSig.SaveAs(outputFileDir + "sig_eff_overlay_all_files_100_250_400.pdf");
+    cSig.cd(); DrawATLASLabel(); cSig.SaveAs(outputFileDir + "sig_eff_overlay_all_files_100_250_400.pdf");
 } // Designed for 3 file overlay
 
-} 
+    _lap("post-loop overlays");
+}
 
 
 
@@ -22897,6 +24328,8 @@ if (overlayThreeFiles){
 void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now();
+
+    SetAtlasStyle();
 
     // Jet-tagger output files (contain only jetTaggerLRJsTree, jetTaggerLeadingLRJsTree, jetTaggerSubleadingLRJsTree)
     std::vector<std::string > signalJetTaggerFileNames = {
@@ -22985,7 +24418,7 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
 
                                                     // New jet types
                                                     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
-                                                    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
+                                                    //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
                                                         };
     std::vector<std::string > backgroundJetTaggerFileNames = {
                                                         // for FEX comparison (ggF)
@@ -23070,30 +24503,54 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
 
                                                         // Updated samples
                                                         "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
-                                                        "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
+                                                        //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
                                                         };
     // Signal pairs: {ntuple root file, jet tagger output file}.
     // Declared explicitly so different physics processes can be paired correctly.
     // Edit these manually when changing signal samples or algorithm configurations.
     std::vector<std::pair<std::string,std::string>> signalFiles = {
-        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v3/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_resim_DAOD_NTUPLE_GEP.root",
-          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
-        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v3/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_resim_DAOD_NTUPLE_GEP.root",
-          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+        // ggF HH->4b v4 ntuples
+        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+          { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+
+        // ttbar v4 ntuples
+          //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+          //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+
+        //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+        //  "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+        // Z'->ttbar (all-had, flat pT) v4 — uncomment once emulation hadd completes
+        //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/Zprime_ttbar_allhad_flatpT_v4/mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+        //  "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
     };
 
     // Background pairs: {ntuple root file, jet tagger output file}.
     // Edit these manually in step with backgroundJetTaggerFileNames above.
     std::vector<std::pair<std::string,std::string>> backgroundFiles = {
+        // v4 QCD JZ merged ntuple: run hadd --ntuples --version 4 --merge-jz first
+        //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+        //  "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+        // v3 QCD JZ (fallback until v4 JZ hadd is run)
         { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
-          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
-        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
-          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+          { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+
+          //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+          //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+        //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP_v3.root",
+        //  "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
     };
 
-    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_NewSamples_KeepOutOfTimePileupRateSpike/";
+    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_Plots_v4_ggF/";
     gSystem->mkdir(overlayOutputFileDir);
-    gSystem->RedirectOutput("debug_newsamples_fixed.log", "w");
+    gSystem->RedirectOutput("debug_newsamples_atlaslabel_v3_ggF_Plots.log", "w");
     gErrorIgnoreLevel = kError;
     std::cout << "number of signal files: " << signalFiles.size() << " number of background files: " << backgroundFiles.size() << "\n";
     bool categorySubjetEtScan_8 = false;

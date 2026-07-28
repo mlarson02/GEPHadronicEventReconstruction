@@ -15,12 +15,76 @@
 #include "TCanvas.h"
 #include "TLegend.h"
 #include "TLine.h"
+#include "TLatex.h"
 #include "TSystem.h"
 #include "TROOT.h"
 #include "analysisHelperFunctions.h"
 
-const int   nColors = 6;
-const Color_t cols[nColors] = { kRed, kBlue, kGreen+2, kMagenta+1, kOrange+1, kCyan+2 };
+#include "/home/larsonma/atlasrootstyle/AtlasStyle.C"
+
+// Colorblind-friendly palettes (Petroff 6/8/10).
+// 6-color palette
+const int kP6Blue   = TColor::GetColor("#5790fc");
+const int kP6Yellow = TColor::GetColor("#f89c20");
+const int kP6Red    = TColor::GetColor("#e42536");
+const int kP6Grape  = TColor::GetColor("#964a8b");
+const int kP6Gray   = TColor::GetColor("#9c9ca1");
+const int kP6Violet = TColor::GetColor("#7a21dd");
+
+// 8-color palette
+const int kP8Blue   = TColor::GetColor("#1845fb");
+const int kP8Orange = TColor::GetColor("#ff5e02");
+const int kP8Red    = TColor::GetColor("#c91f16");
+const int kP8Pink   = TColor::GetColor("#c849a9");
+const int kP8Green  = TColor::GetColor("#adad7d");
+const int kP8Cyan   = TColor::GetColor("#86c8dd");
+const int kP8Azure  = TColor::GetColor("#578dff");
+const int kP8Gray   = TColor::GetColor("#656364");
+
+// 10-color palette
+const int kP10Blue   = TColor::GetColor("#3f90da");
+const int kP10Yellow = TColor::GetColor("#ffa90e");
+const int kP10Red    = TColor::GetColor("#bd1f01");
+const int kP10Gray   = TColor::GetColor("#94a4a2");
+const int kP10Violet = TColor::GetColor("#832db6");
+const int kP10Brown  = TColor::GetColor("#a96b59");
+const int kP10Orange = TColor::GetColor("#e76300");
+const int kP10Green  = TColor::GetColor("#b9ac70");
+const int kP10Ash    = TColor::GetColor("#717581");
+const int kP10Cyan   = TColor::GetColor("#92dadd");
+
+// Process label (e.g. signal name) drawn at the top-right of the ATLAS label on every plot.
+// Set per-file before the per-file plots and cleared for multi-file overlays. Empty = nothing drawn.
+std::string gProcLabel = "";
+
+// Draw the ATLAS "Work in progress" label (plus beam-energy / pileup info) in a
+// white strip ABOVE the plot frame on the currently active canvas.
+// Call after cd()'ing to the canvas and before SaveAs/Print.
+// The top margin is enlarged so the frame shrinks down and leaves room above it.
+void DrawATLASLabel(double x = 0.20, double /*y*/ = 0.88, const char* status = "Work in progress") {
+    if (gPad) {
+        gPad->SetTopMargin(0.14);   // frame top now ~0.86, leaving a white strip above
+        gPad->Modified();
+        gPad->Update();
+    }
+    const double yAtlas = 0.945;    // "ATLAS <status>" line, in the strip above the frame
+    const double yInfo  = 0.895;    // beam-energy / pileup line, just below it
+    TLatex l; l.SetNDC(); l.SetTextFont(72); l.SetTextColor(kBlack); l.SetTextSize(0.04);
+    l.DrawLatex(x, yAtlas, "ATLAS");
+    TLatex p; p.SetNDC(); p.SetTextFont(42); p.SetTextColor(kBlack); p.SetTextSize(0.04);
+    p.DrawLatex(x + 0.13, yAtlas, status);
+    TLatex e; e.SetNDC(); e.SetTextFont(42); e.SetTextColor(kBlack); e.SetTextSize(0.035);
+    e.DrawLatex(x, yInfo, "#sqrt{s} = 14 TeV, <PU> = 200");
+    // Process label at the top-right of the strip (right-aligned), to the right of "ATLAS <status>".
+    if (!gProcLabel.empty()) {
+        TLatex s; s.SetNDC(); s.SetTextFont(42); s.SetTextColor(kBlack); s.SetTextSize(0.038);
+        s.SetTextAlign(31);
+        s.DrawLatex(0.95, yAtlas, gProcLabel.c_str());
+    }
+}
+
+const int   nColors = 7;
+int cols[nColors] = { kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan};
 
 // Skip background events with passHSTP == false (HSTP filter removes high-energy
 // pileup transients that are not modelled correctly in dijet MC).
@@ -63,8 +127,8 @@ void drawOverlay(TH1F* sig, TH1F* back, const std::string& title,
     normalizeHist(sig);
     normalizeHist(back);
 
-    sig->SetLineColor(kRed);   sig->SetLineWidth(2);
-    back->SetLineColor(kBlue); back->SetLineWidth(2);
+    sig->SetLineColor(kP10Red);   sig->SetLineWidth(2);
+    back->SetLineColor(kP10Blue); back->SetLineWidth(2);
     sig->SetTitle(title.c_str());
     sig->GetXaxis()->SetTitle(xLabel.c_str());
     sig->GetYaxis()->SetTitle(Form("Fraction of Events / %.4g GeV", sig->GetBinWidth(1)));
@@ -86,7 +150,7 @@ void drawOverlay(TH1F* sig, TH1F* back, const std::string& title,
     leg.AddEntry(back, "Background", "l");
     leg.Draw();
 
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
 
 // -----------------------------------------------------------------------
@@ -115,8 +179,8 @@ void drawComponentOverlay(TH1F* sig, TH1F* back, const std::string& title,
     normalizeHist(sig);
     normalizeHist(back);
 
-    sig->SetLineColor(kRed);   sig->SetLineWidth(2);
-    back->SetLineColor(kBlue); back->SetLineWidth(2);
+    sig->SetLineColor(kP10Red);   sig->SetLineWidth(2);
+    back->SetLineColor(kP10Blue); back->SetLineWidth(2);
     sig->SetTitle(title.c_str());
     sig->GetXaxis()->SetTitle(xLabel.c_str());
     sig->GetYaxis()->SetTitle(Form("Fraction of Events / %.4g GeV", sig->GetBinWidth(1)));
@@ -138,7 +202,7 @@ void drawComponentOverlay(TH1F* sig, TH1F* back, const std::string& title,
     leg.AddEntry(back, Form("Back. (mean=%+.1f,med=%+.1f GeV)", backMean, backMedian), "l");
     leg.Draw();
 
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
 
 // -----------------------------------------------------------------------
@@ -161,8 +225,8 @@ void drawAlgoComparison(TH1F* sig1, TH1F* back1, TH1F* sig2, TH1F* back2,
         h->GetYaxis()->SetTitle(yTitle.c_str());
         h->SetMaximum(ymax); h->SetMinimum(1e-8);
     };
-    style(sig1,  kRed,  1); style(back1, kRed,  2);
-    style(sig2,  kBlue, 1); style(back2, kBlue, 2);
+    style(sig1,  kP10Red,  1); style(back1, kP10Red,  2);
+    style(sig2,  kP10Blue, 1); style(back2, kP10Blue, 2);
 
     TCanvas c("c", "", 700, 600);
     gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
@@ -184,7 +248,7 @@ void drawAlgoComparison(TH1F* sig1, TH1F* back1, TH1F* sig2, TH1F* back2,
     leg.AddEntry(back2, (label2 + " (bkg)").c_str(), "l");
     leg.Draw();
 
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
 
 // -----------------------------------------------------------------------
@@ -242,7 +306,7 @@ void drawOverlayMulti(std::vector<TH1F*>& sigs, std::vector<TH1F*>& backs,
         leg.AddEntry(backs[i], (labels[i] + " (bkg)").c_str(), "l");
     }
     leg.Draw();
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
 
 // -----------------------------------------------------------------------
@@ -280,14 +344,14 @@ void drawEffVsThresholdMulti(std::vector<TH1F*>& sigs,
     if (!signalName.empty())
         leg.AddEntry((TObject*)nullptr, signalName.c_str(), "");
 
-    const Color_t mcols[] = { kBlack, kRed, kBlue, kGreen+2, kMagenta+1, kOrange+1, kCyan+2, kViolet+1 };
+    int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
     const int nMcols = 8;
     std::vector<TGraph*> graphs;
     for (unsigned int i = 0; i < sigs.size(); i++) {
         TGraph* g = makeEffVsThresholdGraph(sigs[i], mcols[i % nMcols]);
         g->SetTitle((title + ";" + xLabel + ";Signal Efficiency").c_str());
         graphs.push_back(g);
-        g->Draw(i == 0 ? "AL" : "L SAME");
+        g->Draw(i == 0 ? "AP" : "P SAME");
         leg.AddEntry(g, labels[i].c_str(), "l");
     }
     // Fix y-axis range after drawing
@@ -295,14 +359,14 @@ void drawEffVsThresholdMulti(std::vector<TH1F*>& sigs,
         graphs[0]->GetYaxis()->SetRangeUser(0.0, 1.05);
     }
     leg.Draw();
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
     for (auto* g : graphs) delete g;
 }
 
 // -----------------------------------------------------------------------
 // Build a TGraphErrors of rate vs threshold from a weighted background histogram.
 // Rate error = sqrt(sum of squared bin errors) from threshold bin upward.
-TGraphErrors* makeRateGraph(TH1F* h, Color_t col) {
+TGraphErrors* makeRateGraph(TH1F* h, Color_t col, Style_t markerStyle = 20) {
     int nBins = h->GetNbinsX();
     std::vector<double> thresholds, rates, xErrs, rateErrs;
     for (int iBin = 1; iBin <= nBins; iBin++) {
@@ -317,7 +381,7 @@ TGraphErrors* makeRateGraph(TH1F* h, Color_t col) {
                                        thresholds.data(), rates.data(),
                                        xErrs.data(),      rateErrs.data());
     g->SetLineColor(col);   g->SetLineWidth(2);
-    g->SetMarkerColor(col); g->SetMarkerStyle(20); g->SetMarkerSize(0.7);
+    g->SetMarkerColor(col); g->SetMarkerStyle(markerStyle); g->SetMarkerSize(0.7);
     return g;
 }
 
@@ -325,14 +389,14 @@ TGraphErrors* makeRateGraph(TH1F* h, Color_t col) {
 // Rate vs threshold from a weighted background histogram (rate in Hz)
 void drawRateVsThreshold(TH1F* back_weighted, const std::string& title,
                          const std::string& xLabel, const std::string& outputPath) {
-    TGraphErrors* g = makeRateGraph(back_weighted, kBlue);
+    TGraphErrors* g = makeRateGraph(back_weighted, kP10Blue);
     g->SetTitle((title + ";" + xLabel + ";Rate [Hz]").c_str());
 
     TCanvas c("c", title.c_str(), 700, 600);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
     gPad->SetLogy();
     g->Draw("AP");
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
     delete g;
 }
 
@@ -342,31 +406,43 @@ void drawRateVsThresholdMulti(const std::vector<TH1F*>& backs_weighted,
                               const std::vector<std::string>& labels,
                               const std::string& title, const std::string& xLabel,
                               const std::string& outputPath, const std::string& signalName = "",
-                              const std::string& yLabel = "Rate [Hz]") {
+                              const std::string& yLabel = "Rate [Hz]",
+                              double xMax = -1.0, double yScale = 1.0, double yMin = -1.0) {
     if (backs_weighted.empty()) return;
     TCanvas c("c", title.c_str(), 700, 600);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
     gPad->SetLogy();
 
     int nConfigs = (int)backs_weighted.size();
-    double legTop = 0.88, legH = 0.06 * (!signalName.empty() + nConfigs);
-    TLegend leg(0.38, legTop - legH, 0.88, legTop);
+    double legTop = 0.92, legH = 0.04 * (!signalName.empty() + nConfigs);
+    TLegend leg(0.54, legTop - legH, 0.88, legTop);
     leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
     if (!signalName.empty())
         leg.AddEntry((TObject*)nullptr, signalName.c_str(), "");
 
-    const Color_t mcols[] = { kBlack, kRed, kBlue, kGreen+2, kMagenta+1, kOrange+1, kCyan+2, kViolet+1 };
+    int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
     const int nMcols = 8;
+    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47 };
+    const int nStyles = 8;
     std::vector<TGraphErrors*> graphs;
     for (unsigned int i = 0; i < backs_weighted.size(); i++) {
-        TGraphErrors* g = makeRateGraph(backs_weighted[i], mcols[i % nMcols]);
+        TGraphErrors* g = makeRateGraph(backs_weighted[i], mcols[i % nMcols], mkstyles[i % nStyles]);
+        if (yScale != 1.0)
+            for (int p = 0; p < g->GetN(); ++p) {
+                g->SetPoint(p, g->GetX()[p], g->GetY()[p] * yScale);
+                g->SetPointError(p, g->GetEX()[p], g->GetEY()[p] * yScale);
+            }
         g->SetTitle((title + ";" + xLabel + ";" + yLabel).c_str());
         graphs.push_back(g);
         g->Draw(i == 0 ? "AP" : "P SAME");
+        if (i == 0 && xMax > 0.0)
+            g->GetXaxis()->SetLimits(backs_weighted[0]->GetXaxis()->GetXmin(), xMax);
+        if (i == 0 && yMin > 0.0)
+            g->SetMinimum(yMin);
         leg.AddEntry(g, labels[i].c_str(), "lp");
     }
     leg.Draw();
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
     for (auto* g : graphs) delete g;
 }
 
@@ -377,8 +453,8 @@ void drawMultiDist(std::vector<TH1F*> hists, const std::vector<std::string>& lab
                    const std::string& outputPath, bool logy = true,
                    const std::string& units = "GeV") {
     if (hists.empty()) return;
-    const Color_t mcols[] = { kBlack, kRed, kBlue, kGreen+2, kMagenta+1,
-                               kOrange+1, kCyan+2, kViolet+2, kGray+2, kPink+1 };
+    int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet,
+                               kP10Orange, kP10Cyan, kP10Brown, kGray+2, kP10Yellow };
     for (auto* h : hists) normalizeHist(h);
     double ymax = 0;
     for (auto* h : hists) ymax = std::max(ymax, h->GetMaximum());
@@ -392,7 +468,7 @@ void drawMultiDist(std::vector<TH1F*> hists, const std::vector<std::string>& lab
     if (logy) gPad->SetLogy();
 
     double legTop = 0.88, legH = 0.055 * hists.size();
-    TLegend leg(0.40, legTop - legH, 0.88, legTop);
+    TLegend leg(0.58, legTop - legH, 0.88, legTop);
     leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
 
     for (unsigned int i = 0; i < hists.size(); i++) {
@@ -405,7 +481,7 @@ void drawMultiDist(std::vector<TH1F*> hists, const std::vector<std::string>& lab
         leg.AddEntry(hists[i], labels[i].c_str(), "l");
     }
     leg.Draw();
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
 
 // -----------------------------------------------------------------------
@@ -429,7 +505,7 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
                        TH1F* truthDist = nullptr,
                        double legX1 = 0.45, double legY1 = 0.15) {
     if (effs.empty()) return;
-    const Color_t  mcols[]    = { kBlack, kRed, kBlue, kGreen+2, kMagenta+1, kOrange+1 };
+    int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan};
     const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33 };
 
     TCanvas c("c", title.c_str(), 700, 600);
@@ -443,9 +519,9 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
         leg.AddEntry((TObject*)nullptr, rateLabel.c_str(), "");
 
     for (unsigned int i = 0; i < effs.size(); i++) {
-        effs[i]->SetLineColor(mcols[i % 6]);
-        effs[i]->SetMarkerColor(mcols[i % 6]);
-        effs[i]->SetMarkerStyle(mkstyles[i % 6]);
+        effs[i]->SetLineColor(mcols[i % 7]);
+        effs[i]->SetMarkerColor(mcols[i % 7]);
+        effs[i]->SetMarkerStyle(mkstyles[i % 7]);
         effs[i]->SetMarkerSize(0.8);
         effs[i]->SetLineWidth(2);
         effs[i]->SetTitle(title.c_str());
@@ -471,7 +547,7 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
     }
 
     leg.Draw();
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
 
 // -----------------------------------------------------------------------
@@ -481,7 +557,7 @@ void drawRateVsEffOverlay(std::vector<TGraph*> graphs,
                           const std::string& outputPath,
                           const std::string& signalName = "") {
     if (graphs.empty()) return;
-    const Color_t  mcols[]    = { kBlack, kRed, kBlue, kGreen+2, kMagenta+1, kOrange+1, kCyan+2, kViolet+1 };
+    int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
     const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33, 20, 21 };
     const int nStyles = 8;
 
@@ -490,10 +566,32 @@ void drawRateVsEffOverlay(std::vector<TGraph*> graphs,
     gPad->SetLogy(); gPad->SetLogx();
 
     int nLeg = (int)(!signalName.empty()) + (int)graphs.size();
-    TLegend leg(0.30, 0.19, 0.83, 0.19 + 0.06 * nLeg);
+    TLegend leg(0.2, 0.45, 0.43, 0.49 + 0.05 * nLeg);
     leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.025);
     if (!signalName.empty())
         leg.AddEntry((TObject*)nullptr, signalName.c_str(), "");
+
+    // Clamp the y-axis to a 10 Hz floor (the curves dip far below physical interest and
+    // would otherwise push the frame down to ~1e-3 Hz, crowding the legend).
+    /*double ymax = 0.0;
+    for (auto* g : graphs)
+        for (int p = 0; p < g->GetN(); ++p) {
+            double x, y; g->GetPoint(p, x, y);
+            if (y > ymax) ymax = y;
+        }
+    if (ymax <= 0) ymax = 1e8;
+    graphs[0]->SetMinimum(10.0);
+    graphs[0]->SetMaximum(ymax * 3.0);*/
+
+    // Enforce axis floors on this log-log plot: signal efficiency (x) >= 1e-5, rate (y) >= 1e-3.
+    /*double xmax = 0.0;
+    for (auto* g : graphs)
+        for (int p = 0; p < g->GetN(); ++p) {
+            double x, y; g->GetPoint(p, x, y);
+            if (x > xmax) xmax = x;
+        }
+    if (xmax <= 1e-5) xmax = 1.0;
+    graphs[0]->SetMinimum(1e-3);   // y-axis (rate) floor*/
 
     for (unsigned int i = 0; i < graphs.size(); i++) {
         graphs[i]->SetLineColor(mcols[i % nStyles]);
@@ -504,10 +602,12 @@ void drawRateVsEffOverlay(std::vector<TGraph*> graphs,
         graphs[i]->GetXaxis()->SetTitle("Signal Efficiency");
         graphs[i]->GetYaxis()->SetTitle("Estimated Background Rate [Hz]");
         graphs[i]->Draw(i == 0 ? "AP" : "P SAME");
+        //if (i == 0) graphs[0]->GetXaxis()->SetLimits(1e-5, xmax * 1.05); // x-axis (efficiency) floor
         leg.AddEntry(graphs[i], labels[i].c_str(), "lp");
     }
+    gPad->Modified(); gPad->Update();
     leg.Draw();
-    c.SaveAs(outputPath.c_str());
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
 
 // -----------------------------------------------------------------------
@@ -566,15 +666,128 @@ TGraph* extractFrontier2D(const RateEff2DOut& out2D) {
 }
 
 // -----------------------------------------------------------------------
+// Per-event effective SoftKiller threshold = smallest non-zero Et among
+// surviving towers (post-SK). gepCellsTowers{SK,EtaSK}Tree stores all towers
+// with Et=0 for killed ones, so this is min(Et) over the kept subset.
+// Reads only from the HERNTupler input ntuples (same input across all MET-emu
+// configs), so we run this once per analyze_files call.
+void plotSKThresholds(const std::string& sigPath, const std::string& backPath,
+                      const std::string& outputDir) {
+    TFile* sigF  = TFile::Open(sigPath.c_str(),  "READ");
+    TFile* backF = TFile::Open(backPath.c_str(), "READ");
+    if (!sigF || sigF->IsZombie() || !backF || backF->IsZombie()) {
+        std::cerr << "plotSKThresholds: cannot open input ntuples\n";
+        return;
+    }
+    TTree* skSig    = (TTree*)sigF->Get("gepCellsTowersSKTree");
+    TTree* skBack   = (TTree*)backF->Get("gepCellsTowersSKTree");
+    TTree* etaSig   = (TTree*)sigF->Get("gepCellsTowersEtaSKTree");
+    TTree* etaBack  = (TTree*)backF->Get("gepCellsTowersEtaSKTree");
+    TTree* evtBack  = (TTree*)backF->Get("eventInfoTree");
+    if (!skSig || !skBack || !etaSig || !etaBack || !evtBack) {
+        std::cerr << "plotSKThresholds: missing SK/EtaSK/eventInfo tree\n";
+        sigF->Close(); backF->Close();
+        return;
+    }
+
+    std::vector<double>* skSigEt   = nullptr;
+    std::vector<double>* skBackEt  = nullptr;
+    std::vector<double>* etaSigEt  = nullptr;
+    std::vector<double>* etaBackEt = nullptr;
+    skSig->SetBranchAddress("Et",   &skSigEt);
+    skBack->SetBranchAddress("Et",  &skBackEt);
+    etaSig->SetBranchAddress("Et",  &etaSigEt);
+    etaBack->SetBranchAddress("Et", &etaBackEt);
+
+    std::vector<double>* eventWeightsValuesBack = nullptr;
+    bool passHSTPValuesBack = true;
+    evtBack->SetBranchAddress("eventWeights", &eventWeightsValuesBack);
+    evtBack->SetBranchAddress("passHSTP",     &passHSTPValuesBack);
+
+    const int nBins = 40;
+    const double xlo = 0.0, xhi = 4.0; // GeV
+    TH1F* sig_h_SKThresh    = new TH1F("sig_h_SKThresh",    "", nBins, xlo, xhi);
+    TH1F* back_h_SKThresh   = new TH1F("back_h_SKThresh",   "", nBins, xlo, xhi);
+    TH1F* sig_h_EtaSKThresh = new TH1F("sig_h_EtaSKThresh", "", nBins, xlo, xhi);
+    TH1F* back_h_EtaSKThresh= new TH1F("back_h_EtaSKThresh","", nBins, xlo, xhi);
+    sig_h_SKThresh->SetDirectory(0);   back_h_SKThresh->SetDirectory(0);
+    sig_h_EtaSKThresh->SetDirectory(0);back_h_EtaSKThresh->SetDirectory(0);
+
+    auto minPositive = [](const std::vector<double>* v) {
+        double mn = 1e18;
+        bool found = false;
+        for (double et : *v) {
+            if (et > 0.0 && et < mn) { mn = et; found = true; }
+        }
+        return found ? mn : -1.0;
+    };
+
+    Long64_t nSig = std::min(skSig->GetEntries(), etaSig->GetEntries());
+    std::cout << "plotSKThresholds: signal events = " << nSig << "\n";
+    for (Long64_t i = 0; i < nSig; ++i) {
+        skSig->GetEntry(i);
+        etaSig->GetEntry(i);
+        double tSK    = minPositive(skSigEt);
+        double tEtaSK = minPositive(etaSigEt);
+        if (tSK    >= 0.0) sig_h_SKThresh->Fill(std::min(tSK,    xhi - 1e-9));
+        if (tEtaSK >= 0.0) sig_h_EtaSKThresh->Fill(std::min(tEtaSK, xhi - 1e-9));
+    }
+
+    Long64_t nBack = std::min({skBack->GetEntries(), etaBack->GetEntries(), evtBack->GetEntries()});
+    std::cout << "plotSKThresholds: background events = " << nBack << "\n";
+    for (Long64_t i = 0; i < nBack; ++i) {
+        evtBack->GetEntry(i);
+        if (applyHSTPFilter && !passHSTPValuesBack) continue;
+        double w = eventWeightsValuesBack->at(0);
+        skBack->GetEntry(i);
+        etaBack->GetEntry(i);
+        double tSK    = minPositive(skBackEt);
+        double tEtaSK = minPositive(etaBackEt);
+        if (tSK    >= 0.0) back_h_SKThresh->Fill(std::min(tSK,    xhi - 1e-9), w);
+        if (tEtaSK >= 0.0) back_h_EtaSKThresh->Fill(std::min(tEtaSK, xhi - 1e-9), w);
+    }
+
+    std::string thrDir = outputDir + "SKThresholds/";
+    gSystem->mkdir(thrDir.c_str(), true);
+
+    drawOverlay(sig_h_SKThresh,    back_h_SKThresh,
+                "Effective SK threshold (gepCellsTowersSK)",
+                "Effective SK threshold per event [GeV]",
+                thrDir + "SK_EffectiveThreshold.pdf");
+    drawOverlay(sig_h_EtaSKThresh, back_h_EtaSKThresh,
+                "Effective EtaSK threshold (gepCellsTowersEtaSK)",
+                "Effective EtaSK threshold per event [GeV]",
+                thrDir + "EtaSK_EffectiveThreshold.pdf");
+    drawMultiDist({sig_h_SKThresh,  sig_h_EtaSKThresh,
+                   back_h_SKThresh, back_h_EtaSKThresh},
+                  {"SK signal", "EtaSK signal", "SK bkg", "EtaSK bkg"},
+                  "Effective SoftKiller threshold per event",
+                  "Effective threshold [GeV]",
+                  thrDir + "SK_vs_EtaSK_EffectiveThreshold.pdf", true, "GeV");
+
+    sigF->Close(); backF->Close();
+}
+
+// -----------------------------------------------------------------------
 // Each signal/background entry is a pair: .first = HERNTupler input ntuple,
 // .second = MET emulator output (contains metTree + emulEventInfoTree only).
 void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                    std::vector<std::pair<std::string, std::string>> backgroundFiles,
                    std::vector<std::string> labels,
                    std::string outputDir,
-                   std::string signalName = "") {
+                   std::string signalName = "", std::string overlayDir = "multiFileOverlay_MET/",
+                   std::vector<std::string> signalNames = {}) {
+    // signalName    : legend header used for multi-file overlays (all configs).
+    // signalNames   : optional per-file legend headers (parallel to signalFiles/labels);
+    //                 lets one analyze_files call mix signal processes (e.g. ZvvHbb,
+    //                 ttbar semilep, ttbar dilep). When empty or short, falls back to signalName.
 
     gSystem->mkdir(outputDir.c_str(), true);
+
+    // Effective SoftKiller / EtaSoftKiller threshold distributions (input
+    // ntuples don't vary across emu configs, so do this once).
+    if (!signalFiles.empty() && !backgroundFiles.empty())
+        plotSKThresholds(signalFiles[0].first, backgroundFiles[0].first, outputDir);
 
     // Per-file histogram vectors for multi-file overlays
     std::vector<TH1F*> sig_h_TotalMET_vec,  back_h_TotalMET_vec;
@@ -615,21 +828,43 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
     std::vector<double> thr_JetMET_80kHz_vec;
     std::vector<double> thr_TowerMET_80kHz_vec;
     std::vector<double> thr_TotalMET_80kHz_vec;
+
+    // 60 kHz efficiency histograms and thresholds per file for multi-file turn-on comparison
+    std::vector<TH1F*> eff_gMET_60kHz_vec;
+    std::vector<TH1F*> eff_gMET_NC_60kHz_vec;
+    std::vector<TH1F*> eff_gMET_Rms_60kHz_vec;
+    std::vector<TH1F*> eff_jMET_60kHz_vec;
+    std::vector<TH1F*> eff_JetMET_60kHz_vec;
+    std::vector<TH1F*> eff_TowerMET_60kHz_vec;
+    std::vector<TH1F*> eff_TotalMET_60kHz_vec;
+    std::vector<double> thr_gMET_60kHz_vec;
+    std::vector<double> thr_gMET_NC_60kHz_vec;
+    std::vector<double> thr_gMET_Rms_60kHz_vec;
+    std::vector<double> thr_jMET_60kHz_vec;
+    std::vector<double> thr_JetMET_60kHz_vec;
+    std::vector<double> thr_TowerMET_60kHz_vec;
+    std::vector<double> thr_TotalMET_60kHz_vec;
     std::vector<TH1F*> sig_h_metTruthNonInt_unscaled_vec; // unscaled clone for truth overlay
 
     // Resimulated gFEX MET histogram vectors (populated only when hasGFexSimMET)
-    std::vector<TH1F*> sig_h_gMET_JwoJSim_vec, back_h_gMET_JwoJSim_vec;
-    std::vector<TH1F*> sig_h_gMET_NCSim_vec,   back_h_gMET_NCSim_vec;
-    std::vector<TH1F*> sig_h_gMET_RmsSim_vec,  back_h_gMET_RmsSim_vec;
-    std::vector<TH1F*> back_hw_gMET_JwoJSim_vec;
-    std::vector<TH1F*> back_hw_gMET_NCSim_vec;
-    std::vector<TH1F*> back_hw_gMET_RmsSim_vec;
-    std::vector<TH1F*> eff_gMET_JwoJSim_80kHz_vec;
-    std::vector<TH1F*> eff_gMET_NCSim_80kHz_vec;
-    std::vector<TH1F*> eff_gMET_RmsSim_80kHz_vec;
-    std::vector<double> thr_gMET_JwoJSim_80kHz_vec;
-    std::vector<double> thr_gMET_NCSim_80kHz_vec;
-    std::vector<double> thr_gMET_RmsSim_80kHz_vec;
+    std::vector<TH1F*> sig_h_gMET_JwoJAOD_vec, back_h_gMET_JwoJAOD_vec;
+    std::vector<TH1F*> sig_h_gMET_NCAOD_vec,   back_h_gMET_NCAOD_vec;
+    std::vector<TH1F*> sig_h_gMET_RmsAOD_vec,  back_h_gMET_RmsAOD_vec;
+    std::vector<TH1F*> back_hw_gMET_JwoJAOD_vec;
+    std::vector<TH1F*> back_hw_gMET_NCAOD_vec;
+    std::vector<TH1F*> back_hw_gMET_RmsAOD_vec;
+    std::vector<TH1F*> eff_gMET_JwoJAOD_80kHz_vec;
+    std::vector<TH1F*> eff_gMET_NCAOD_80kHz_vec;
+    std::vector<TH1F*> eff_gMET_RmsAOD_80kHz_vec;
+    std::vector<double> thr_gMET_JwoJAOD_80kHz_vec;
+    std::vector<double> thr_gMET_NCAOD_80kHz_vec;
+    std::vector<double> thr_gMET_RmsAOD_80kHz_vec;
+    std::vector<TH1F*> eff_gMET_JwoJAOD_60kHz_vec;
+    std::vector<TH1F*> eff_gMET_NCAOD_60kHz_vec;
+    std::vector<TH1F*> eff_gMET_RmsAOD_60kHz_vec;
+    std::vector<double> thr_gMET_JwoJAOD_60kHz_vec;
+    std::vector<double> thr_gMET_NCAOD_60kHz_vec;
+    std::vector<double> thr_gMET_RmsAOD_60kHz_vec;
 
     bool hasSumJetET   = false;
     bool hasSumTowerET = false;
@@ -769,70 +1004,62 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         }
 
         // --- Branch variables: gFEX MET ---
-        double sig_gMET, sig_gMETX, sig_gMETY, sig_gSumET;
-        double back_gMET, back_gMETX, back_gMETY, back_gSumET;
+        // Nominal gFEX := the RESIMULATED gFEX (read from gFexMET*SimTree) for ALL plots; when
+        // resim trees are absent we fall back to the AOD gFEX. The AOD values are kept separately
+        // in the *_*AOD variables below, used only by the AOD-vs-Sim comparison block.
+        TTree* gNomJwoJSig  = hasGFexSimMET ? gFexMETJwoJSimTreeSig      : gFexMETTreeSig;
+        TTree* gNomJwoJBack = hasGFexSimMET ? gFexMETJwoJSimTreeBack     : gFexMETTreeBack;
+        TTree* gNomNCSig    = hasGFexSimMET ? gFexMETNoiseCutSimTreeSig  : gFexMETNoiseCutTreeSig;
+        TTree* gNomNCBack   = hasGFexSimMET ? gFexMETNoiseCutSimTreeBack : gFexMETNoiseCutTreeBack;
+        TTree* gNomRmsSig   = hasGFexSimMET ? gFexMETRmsSimTreeSig       : gFexMETRmsTreeSig;
+        TTree* gNomRmsBack  = hasGFexSimMET ? gFexMETRmsSimTreeBack      : gFexMETRmsTreeBack;
 
-        gFexMETTreeSig->SetBranchAddress("gMET",   &sig_gMET);
-        gFexMETTreeSig->SetBranchAddress("gMETX",  &sig_gMETX);
-        gFexMETTreeSig->SetBranchAddress("gMETY",  &sig_gMETY);
-        gFexMETTreeSig->SetBranchAddress("gSumET", &sig_gSumET);
+        double sig_gMET = 0.0, sig_gSumET = 0.0;
+        double back_gMET = 0.0, back_gSumET = 0.0;
+        double sig_gMET_NC = 0.0, sig_gSumET_NC = 0.0;
+        double back_gMET_NC = 0.0, back_gSumET_NC = 0.0;
+        double sig_gMET_Rms = 0.0, sig_gSumET_Rms = 0.0;
+        double back_gMET_Rms = 0.0, back_gSumET_Rms = 0.0;
 
-        gFexMETTreeBack->SetBranchAddress("gMET",   &back_gMET);
-        gFexMETTreeBack->SetBranchAddress("gMETX",  &back_gMETX);
-        gFexMETTreeBack->SetBranchAddress("gMETY",  &back_gMETY);
-        gFexMETTreeBack->SetBranchAddress("gSumET", &back_gSumET);
-
-        // --- Branch variables: gFEX MET NoiseCut ---
-        double sig_gMET_NC = 0.0, sig_gMETX_NC = 0.0, sig_gMETY_NC = 0.0, sig_gSumET_NC = 0.0;
-        double back_gMET_NC = 0.0, back_gMETX_NC = 0.0, back_gMETY_NC = 0.0, back_gSumET_NC = 0.0;
-
-        gFexMETNoiseCutTreeSig->SetBranchAddress("gMET",   &sig_gMET_NC);
-        gFexMETNoiseCutTreeSig->SetBranchAddress("gMETX",  &sig_gMETX_NC);
-        gFexMETNoiseCutTreeSig->SetBranchAddress("gMETY",  &sig_gMETY_NC);
-        gFexMETNoiseCutTreeSig->SetBranchAddress("gSumET", &sig_gSumET_NC);
-        gFexMETNoiseCutTreeBack->SetBranchAddress("gMET",   &back_gMET_NC);
-        gFexMETNoiseCutTreeBack->SetBranchAddress("gMETX",  &back_gMETX_NC);
-        gFexMETNoiseCutTreeBack->SetBranchAddress("gMETY",  &back_gMETY_NC);
-        gFexMETNoiseCutTreeBack->SetBranchAddress("gSumET", &back_gSumET_NC);
-
-        // --- Branch variables: gFEX MET Rms ---
-        double sig_gMET_Rms = 0.0, sig_gMETX_Rms = 0.0, sig_gMETY_Rms = 0.0, sig_gSumET_Rms = 0.0;
-        double back_gMET_Rms = 0.0, back_gMETX_Rms = 0.0, back_gMETY_Rms = 0.0, back_gSumET_Rms = 0.0;
-
-        gFexMETRmsTreeSig->SetBranchAddress("gMET",   &sig_gMET_Rms);
-        gFexMETRmsTreeSig->SetBranchAddress("gMETX",  &sig_gMETX_Rms);
-        gFexMETRmsTreeSig->SetBranchAddress("gMETY",  &sig_gMETY_Rms);
-        gFexMETRmsTreeSig->SetBranchAddress("gSumET", &sig_gSumET_Rms);
-        gFexMETRmsTreeBack->SetBranchAddress("gMET",   &back_gMET_Rms);
-        gFexMETRmsTreeBack->SetBranchAddress("gMETX",  &back_gMETX_Rms);
-        gFexMETRmsTreeBack->SetBranchAddress("gMETY",  &back_gMETY_Rms);
-        gFexMETRmsTreeBack->SetBranchAddress("gSumET", &back_gSumET_Rms);
+        gNomJwoJSig->SetBranchAddress("gMET",    &sig_gMET);
+        gNomJwoJSig->SetBranchAddress("gSumET",  &sig_gSumET);
+        gNomJwoJBack->SetBranchAddress("gMET",   &back_gMET);
+        gNomJwoJBack->SetBranchAddress("gSumET", &back_gSumET);
+        gNomNCSig->SetBranchAddress("gMET",    &sig_gMET_NC);
+        gNomNCSig->SetBranchAddress("gSumET",  &sig_gSumET_NC);
+        gNomNCBack->SetBranchAddress("gMET",   &back_gMET_NC);
+        gNomNCBack->SetBranchAddress("gSumET", &back_gSumET_NC);
+        gNomRmsSig->SetBranchAddress("gMET",    &sig_gMET_Rms);
+        gNomRmsSig->SetBranchAddress("gSumET",  &sig_gSumET_Rms);
+        gNomRmsBack->SetBranchAddress("gMET",   &back_gMET_Rms);
+        gNomRmsBack->SetBranchAddress("gSumET", &back_gSumET_Rms);
 
         // --- Branch variables: jFEX MET (magnitude only) ---
         double sig_jMET = 0.0, back_jMET = 0.0;
         jFexMETTreeSig->SetBranchAddress("jMET",  &sig_jMET);
         jFexMETTreeBack->SetBranchAddress("jMET", &back_jMET);
 
-        // --- Branch variables: resimulated gFEX MET (no X/Y components) ---
-        double sig_gMET_JwoJSim = 0.0, sig_gSumET_JwoJSim = 0.0;
-        double back_gMET_JwoJSim = 0.0, back_gSumET_JwoJSim = 0.0;
-        double sig_gMET_NCSim = 0.0, sig_gSumET_NCSim = 0.0;
-        double back_gMET_NCSim = 0.0, back_gSumET_NCSim = 0.0;
-        double sig_gMET_RmsSim = 0.0, sig_gSumET_RmsSim = 0.0;
-        double back_gMET_RmsSim = 0.0, back_gSumET_RmsSim = 0.0;
+        // --- Branch variables: AOD gFEX MET (read from gFexMETTree etc.; no X/Y components) ---
+        // These hold the AOD gFEX and are used ONLY by the AOD-vs-Sim comparison block.
+        double sig_gMET_JwoJAOD = 0.0, sig_gSumET_JwoJAOD = 0.0;
+        double back_gMET_JwoJAOD = 0.0, back_gSumET_JwoJAOD = 0.0;
+        double sig_gMET_NCAOD = 0.0, sig_gSumET_NCAOD = 0.0;
+        double back_gMET_NCAOD = 0.0, back_gSumET_NCAOD = 0.0;
+        double sig_gMET_RmsAOD = 0.0, sig_gSumET_RmsAOD = 0.0;
+        double back_gMET_RmsAOD = 0.0, back_gSumET_RmsAOD = 0.0;
         if (hasGFexSimMET) {
-            gFexMETJwoJSimTreeSig->SetBranchAddress("gMET",   &sig_gMET_JwoJSim);
-            gFexMETJwoJSimTreeSig->SetBranchAddress("gSumET", &sig_gSumET_JwoJSim);
-            gFexMETJwoJSimTreeBack->SetBranchAddress("gMET",   &back_gMET_JwoJSim);
-            gFexMETJwoJSimTreeBack->SetBranchAddress("gSumET", &back_gSumET_JwoJSim);
-            gFexMETNoiseCutSimTreeSig->SetBranchAddress("gMET",   &sig_gMET_NCSim);
-            gFexMETNoiseCutSimTreeSig->SetBranchAddress("gSumET", &sig_gSumET_NCSim);
-            gFexMETNoiseCutSimTreeBack->SetBranchAddress("gMET",   &back_gMET_NCSim);
-            gFexMETNoiseCutSimTreeBack->SetBranchAddress("gSumET", &back_gSumET_NCSim);
-            gFexMETRmsSimTreeSig->SetBranchAddress("gMET",   &sig_gMET_RmsSim);
-            gFexMETRmsSimTreeSig->SetBranchAddress("gSumET", &sig_gSumET_RmsSim);
-            gFexMETRmsSimTreeBack->SetBranchAddress("gMET",   &back_gMET_RmsSim);
-            gFexMETRmsSimTreeBack->SetBranchAddress("gSumET", &back_gSumET_RmsSim);
+            gFexMETTreeSig->SetBranchAddress("gMET",   &sig_gMET_JwoJAOD);
+            gFexMETTreeSig->SetBranchAddress("gSumET", &sig_gSumET_JwoJAOD);
+            gFexMETTreeBack->SetBranchAddress("gMET",   &back_gMET_JwoJAOD);
+            gFexMETTreeBack->SetBranchAddress("gSumET", &back_gSumET_JwoJAOD);
+            gFexMETNoiseCutTreeSig->SetBranchAddress("gMET",   &sig_gMET_NCAOD);
+            gFexMETNoiseCutTreeSig->SetBranchAddress("gSumET", &sig_gSumET_NCAOD);
+            gFexMETNoiseCutTreeBack->SetBranchAddress("gMET",   &back_gMET_NCAOD);
+            gFexMETNoiseCutTreeBack->SetBranchAddress("gSumET", &back_gSumET_NCAOD);
+            gFexMETRmsTreeSig->SetBranchAddress("gMET",   &sig_gMET_RmsAOD);
+            gFexMETRmsTreeSig->SetBranchAddress("gSumET", &sig_gSumET_RmsAOD);
+            gFexMETRmsTreeBack->SetBranchAddress("gMET",   &back_gMET_RmsAOD);
+            gFexMETRmsTreeBack->SetBranchAddress("gSumET", &back_gSumET_RmsAOD);
         }
 
         // --- Branch variables: truth MET ---
@@ -1006,16 +1233,16 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* back_hw_TowerMET = new TH1F(("back_hw_TowerMET_"+tag).c_str(), "", nMETBins, metBinEdges);
 
         // Resimulated gFEX MET distribution histograms and weighted background histograms
-        TH1F* sig_h_gMET_JwoJSim  = new TH1F(("sig_h_gMET_JwoJSim_" +tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* back_h_gMET_JwoJSim = new TH1F(("back_h_gMET_JwoJSim_"+tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* sig_h_gMET_NCSim    = new TH1F(("sig_h_gMET_NCSim_"   +tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* back_h_gMET_NCSim   = new TH1F(("back_h_gMET_NCSim_"  +tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* sig_h_gMET_RmsSim   = new TH1F(("sig_h_gMET_RmsSim_"  +tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* back_h_gMET_RmsSim  = new TH1F(("back_h_gMET_RmsSim_" +tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* back_hw_gMET_JwoJSim = new TH1F(("back_hw_gMET_JwoJSim_"+tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* back_hw_gMET_NCSim   = new TH1F(("back_hw_gMET_NCSim_"  +tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* back_hw_gMET_RmsSim  = new TH1F(("back_hw_gMET_RmsSim_" +tag).c_str(), "", nMETBins, metBinEdges);
-        back_hw_gMET_JwoJSim->Sumw2(); back_hw_gMET_NCSim->Sumw2(); back_hw_gMET_RmsSim->Sumw2();
+        TH1F* sig_h_gMET_JwoJAOD  = new TH1F(("sig_h_gMET_JwoJAOD_" +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_h_gMET_JwoJAOD = new TH1F(("back_h_gMET_JwoJAOD_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* sig_h_gMET_NCAOD    = new TH1F(("sig_h_gMET_NCAOD_"   +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_h_gMET_NCAOD   = new TH1F(("back_h_gMET_NCAOD_"  +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* sig_h_gMET_RmsAOD   = new TH1F(("sig_h_gMET_RmsAOD_"  +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_h_gMET_RmsAOD  = new TH1F(("back_h_gMET_RmsAOD_" +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_JwoJAOD = new TH1F(("back_hw_gMET_JwoJAOD_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_NCAOD   = new TH1F(("back_hw_gMET_NCAOD_"  +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_RmsAOD  = new TH1F(("back_hw_gMET_RmsAOD_" +tag).c_str(), "", nMETBins, metBinEdges);
+        back_hw_gMET_JwoJAOD->Sumw2(); back_hw_gMET_NCAOD->Sumw2(); back_hw_gMET_RmsAOD->Sumw2();
 
         // 2D histograms for combined gFEX + GEP selection (x = gFEX MET, y = GEP MET), 10 GeV bins 0-600
         const int n2D = 60; const double lo2D = 0.0, hi2D = 600.0;
@@ -1161,56 +1388,72 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* h_turnOn_num_gMET_20kHz    = new TH1F(("h_turnOn_num_gMET_20kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_gMET_40kHz    = new TH1F(("h_turnOn_num_gMET_40kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_gMET_80kHz    = new TH1F(("h_turnOn_num_gMET_80kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_60kHz    = new TH1F(("h_turnOn_num_gMET_60kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_JetMET_20kHz  = new TH1F(("h_turnOn_num_JetMET_20kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_JetMET_40kHz  = new TH1F(("h_turnOn_num_JetMET_40kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_JetMET_80kHz  = new TH1F(("h_turnOn_num_JetMET_80kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_JetMET_60kHz  = new TH1F(("h_turnOn_num_JetMET_60kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_TowerMET_20kHz = new TH1F(("h_turnOn_num_TowerMET_20kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_TowerMET_40kHz = new TH1F(("h_turnOn_num_TowerMET_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_TowerMET_80kHz = new TH1F(("h_turnOn_num_TowerMET_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_TowerMET_60kHz = new TH1F(("h_turnOn_num_TowerMET_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_TotalMET_20kHz = new TH1F(("h_turnOn_num_TotalMET_20kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_TotalMET_40kHz = new TH1F(("h_turnOn_num_TotalMET_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_TotalMET_80kHz = new TH1F(("h_turnOn_num_TotalMET_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_TotalMET_60kHz = new TH1F(("h_turnOn_num_TotalMET_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         // gFEX NoiseCut and Rms individual turn-on numerators
         TH1F* h_turnOn_num_gMET_NC_20kHz  = new TH1F(("h_turnOn_num_gMET_NC_20kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_gMET_NC_40kHz  = new TH1F(("h_turnOn_num_gMET_NC_40kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_gMET_NC_80kHz  = new TH1F(("h_turnOn_num_gMET_NC_80kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_NC_60kHz  = new TH1F(("h_turnOn_num_gMET_NC_60kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_gMET_Rms_20kHz = new TH1F(("h_turnOn_num_gMET_Rms_20kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_gMET_Rms_40kHz = new TH1F(("h_turnOn_num_gMET_Rms_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_gMET_Rms_80kHz = new TH1F(("h_turnOn_num_gMET_Rms_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_Rms_60kHz = new TH1F(("h_turnOn_num_gMET_Rms_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         // jFEX MET turn-on numerators
         TH1F* h_turnOn_num_jMET_20kHz    = new TH1F(("h_turnOn_num_jMET_20kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_jMET_40kHz    = new TH1F(("h_turnOn_num_jMET_40kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_jMET_80kHz    = new TH1F(("h_turnOn_num_jMET_80kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_jMET_60kHz    = new TH1F(("h_turnOn_num_jMET_60kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         // Resimulated gFEX MET turn-on numerators
-        TH1F* h_turnOn_num_gMET_JwoJSim_20kHz = new TH1F(("h_turnOn_num_gMET_JwoJSim_20kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
-        TH1F* h_turnOn_num_gMET_JwoJSim_40kHz = new TH1F(("h_turnOn_num_gMET_JwoJSim_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
-        TH1F* h_turnOn_num_gMET_JwoJSim_80kHz = new TH1F(("h_turnOn_num_gMET_JwoJSim_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
-        TH1F* h_turnOn_num_gMET_NCSim_20kHz   = new TH1F(("h_turnOn_num_gMET_NCSim_20kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
-        TH1F* h_turnOn_num_gMET_NCSim_40kHz   = new TH1F(("h_turnOn_num_gMET_NCSim_40kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
-        TH1F* h_turnOn_num_gMET_NCSim_80kHz   = new TH1F(("h_turnOn_num_gMET_NCSim_80kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
-        TH1F* h_turnOn_num_gMET_RmsSim_20kHz  = new TH1F(("h_turnOn_num_gMET_RmsSim_20kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
-        TH1F* h_turnOn_num_gMET_RmsSim_40kHz  = new TH1F(("h_turnOn_num_gMET_RmsSim_40kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
-        TH1F* h_turnOn_num_gMET_RmsSim_80kHz  = new TH1F(("h_turnOn_num_gMET_RmsSim_80kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_JwoJAOD_20kHz = new TH1F(("h_turnOn_num_gMET_JwoJAOD_20kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_JwoJAOD_40kHz = new TH1F(("h_turnOn_num_gMET_JwoJAOD_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_JwoJAOD_80kHz = new TH1F(("h_turnOn_num_gMET_JwoJAOD_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_JwoJAOD_60kHz = new TH1F(("h_turnOn_num_gMET_JwoJAOD_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_NCAOD_20kHz   = new TH1F(("h_turnOn_num_gMET_NCAOD_20kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_NCAOD_40kHz   = new TH1F(("h_turnOn_num_gMET_NCAOD_40kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_NCAOD_80kHz   = new TH1F(("h_turnOn_num_gMET_NCAOD_80kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_NCAOD_60kHz   = new TH1F(("h_turnOn_num_gMET_NCAOD_60kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_RmsAOD_20kHz  = new TH1F(("h_turnOn_num_gMET_RmsAOD_20kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_RmsAOD_40kHz  = new TH1F(("h_turnOn_num_gMET_RmsAOD_40kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_RmsAOD_80kHz  = new TH1F(("h_turnOn_num_gMET_RmsAOD_80kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_gMET_RmsAOD_60kHz  = new TH1F(("h_turnOn_num_gMET_RmsAOD_60kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         // Combined gFEX+GEP turn-on numerators (6 combos × 3 rate targets = 18)
         // Declared here as nullptr; created after the 2D scan finds the best thresholds
         TH1F* h_turnOn_num_combo_JwoJ_Jet_20kHz   = new TH1F(("h_turnOn_num_combo_JwoJ_Jet_20kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_JwoJ_Jet_40kHz   = new TH1F(("h_turnOn_num_combo_JwoJ_Jet_40kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_JwoJ_Jet_80kHz   = new TH1F(("h_turnOn_num_combo_JwoJ_Jet_80kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_combo_JwoJ_Jet_60kHz   = new TH1F(("h_turnOn_num_combo_JwoJ_Jet_60kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_JwoJ_Tower_20kHz = new TH1F(("h_turnOn_num_combo_JwoJ_Tower_20kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_JwoJ_Tower_40kHz = new TH1F(("h_turnOn_num_combo_JwoJ_Tower_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_JwoJ_Tower_80kHz = new TH1F(("h_turnOn_num_combo_JwoJ_Tower_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_combo_JwoJ_Tower_60kHz = new TH1F(("h_turnOn_num_combo_JwoJ_Tower_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_NC_Jet_20kHz     = new TH1F(("h_turnOn_num_combo_NC_Jet_20kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_NC_Jet_40kHz     = new TH1F(("h_turnOn_num_combo_NC_Jet_40kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_NC_Jet_80kHz     = new TH1F(("h_turnOn_num_combo_NC_Jet_80kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_combo_NC_Jet_60kHz     = new TH1F(("h_turnOn_num_combo_NC_Jet_60kHz_"   +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_NC_Tower_20kHz   = new TH1F(("h_turnOn_num_combo_NC_Tower_20kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_NC_Tower_40kHz   = new TH1F(("h_turnOn_num_combo_NC_Tower_40kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_NC_Tower_80kHz   = new TH1F(("h_turnOn_num_combo_NC_Tower_80kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_combo_NC_Tower_60kHz   = new TH1F(("h_turnOn_num_combo_NC_Tower_60kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_Rms_Jet_20kHz    = new TH1F(("h_turnOn_num_combo_Rms_Jet_20kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_Rms_Jet_40kHz    = new TH1F(("h_turnOn_num_combo_Rms_Jet_40kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_Rms_Jet_80kHz    = new TH1F(("h_turnOn_num_combo_Rms_Jet_80kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_combo_Rms_Jet_60kHz    = new TH1F(("h_turnOn_num_combo_Rms_Jet_60kHz_"  +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_Rms_Tower_20kHz  = new TH1F(("h_turnOn_num_combo_Rms_Tower_20kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_Rms_Tower_40kHz  = new TH1F(("h_turnOn_num_combo_Rms_Tower_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_Rms_Tower_80kHz  = new TH1F(("h_turnOn_num_combo_Rms_Tower_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_combo_Rms_Tower_60kHz  = new TH1F(("h_turnOn_num_combo_Rms_Tower_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
 
         // Per-JZ-slice MET histograms for background (gFEX MET, GEP Jet MET, GEP Tower MET)
         TH1F* back_h_gMET_jz[nJZSlices_];
@@ -1240,7 +1483,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* sig_sel_gSumET[nSel80],      *back_sel_gSumET[nSel80];
         TH1F* sig_sel_METsig[nSel80],      *back_sel_METsig[nSel80];    // GEP MET / sqrt(SumET)
         TH1F* sig_sel_gMETsig[nSel80],     *back_sel_gMETsig[nSel80];   // gFEX MET / sqrt(gSumET)
-        TH1F* sig_sel_dPhi_GEP_gFEX[nSel80],   *back_sel_dPhi_GEP_gFEX[nSel80];
+        //TH1F* sig_sel_dPhi_GEP_gFEX[nSel80],   *back_sel_dPhi_GEP_gFEX[nSel80];
         TH1F* sig_sel_dPhi_GEP_truth[nSel80],  *back_sel_dPhi_GEP_truth[nSel80];
         TH1F* sig_sel_dPhi_truth_TOB[nSel80],  *back_sel_dPhi_truth_TOB[nSel80];
         TH1F* sig_sel_nJets[nSel80],         *back_sel_nJets[nSel80];
@@ -1263,8 +1506,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_sel_METsig[iSel]          = new TH1F(("back_sel_METsig_"        +st).c_str(), "", 50, 0, 25);
             sig_sel_gMETsig[iSel]          = new TH1F(("sig_sel_gMETsig_"        +st).c_str(), "", 50, 0, 25);
             back_sel_gMETsig[iSel]         = new TH1F(("back_sel_gMETsig_"       +st).c_str(), "", 50, 0, 25);
-            sig_sel_dPhi_GEP_gFEX[iSel]   = new TH1F(("sig_sel_dPhi_GEP_gFEX_" +st).c_str(), "", 32, 0, M_PI);
-            back_sel_dPhi_GEP_gFEX[iSel]  = new TH1F(("back_sel_dPhi_GEP_gFEX_"+st).c_str(), "", 32, 0, M_PI);
+            //sig_sel_dPhi_GEP_gFEX[iSel]   = new TH1F(("sig_sel_dPhi_GEP_gFEX_" +st).c_str(), "", 32, 0, M_PI);
+            //back_sel_dPhi_GEP_gFEX[iSel]  = new TH1F(("back_sel_dPhi_GEP_gFEX_"+st).c_str(), "", 32, 0, M_PI);
             sig_sel_dPhi_GEP_truth[iSel]   = new TH1F(("sig_sel_dPhi_GEP_truth_" +st).c_str(), "", 32, 0, M_PI);
             back_sel_dPhi_GEP_truth[iSel]  = new TH1F(("back_sel_dPhi_GEP_truth_"+st).c_str(), "", 32, 0, M_PI);
             sig_sel_dPhi_truth_TOB[iSel]   = new TH1F(("sig_sel_dPhi_truth_TOB_" +st).c_str(), "", 32, 0, M_PI);
@@ -1288,7 +1531,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_sel_phi2D_TOB_truth[iSel]->Sumw2();
             back_sel_truthMET[iSel]->Sumw2();       back_sel_SumET[iSel]->Sumw2();
             back_sel_gSumET[iSel]->Sumw2();         back_sel_METsig[iSel]->Sumw2();
-            back_sel_gMETsig[iSel]->Sumw2();        back_sel_dPhi_GEP_gFEX[iSel]->Sumw2();
+            back_sel_gMETsig[iSel]->Sumw2();        //back_sel_dPhi_GEP_gFEX[iSel]->Sumw2();
             back_sel_dPhi_GEP_truth[iSel]->Sumw2(); back_sel_dPhi_truth_TOB[iSel]->Sumw2();
             back_sel_nJets[iSel]->Sumw2();
             back_sel_nTruthJets[iSel]->Sumw2();
@@ -1308,9 +1551,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::cout << "  Signal events: " << nSig << "\n";
         for (unsigned int iEvt = 0; iEvt < nSig; iEvt++) {
             metTreeSig->GetEntry(iEvt);
-            gFexMETTreeSig->GetEntry(iEvt);
-            gFexMETNoiseCutTreeSig->GetEntry(iEvt);
-            gFexMETRmsTreeSig->GetEntry(iEvt);
+            gNomJwoJSig->GetEntry(iEvt);   // nominal gFEX (resim when available, else AOD)
+            gNomNCSig->GetEntry(iEvt);
+            gNomRmsSig->GetEntry(iEvt);
             metTruthTreeSig->GetEntry(iEvt);
             // metTruthNonIntX/Y already points in the standard MET direction (sum of NonInt particle
             // momenta = direction of neutrinos). The DAOD note's constraint is consistent with
@@ -1326,21 +1569,22 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             sig_h_SumET->Fill(sig_SumET);
             if (hasSumJetET)   sig_h_SumJetET->Fill(sig_SumJetET);
             if (hasSumTowerET) sig_h_SumTowerET->Fill(sig_SumTowerET);
+            std::cout << "sig_gMET: " << sig_gMET << "\n";
             sig_h_gMET->Fill(clampVal(sig_h_gMET, sig_gMET));
             sig_h_gMET_NC->Fill(clampVal(sig_h_gMET_NC, sig_gMET_NC));
             sig_h_gMET_Rms->Fill(clampVal(sig_h_gMET_Rms, sig_gMET_Rms));
             jFexMETTreeSig->GetEntry(iEvt);
             sig_h_jMET->Fill(clampVal(sig_h_jMET, sig_jMET));
-            sig_h_gMETX->Fill(sig_gMETX); sig_h_gMETY->Fill(sig_gMETY);
-            sig_h_gMETX_NC->Fill(sig_gMETX_NC); sig_h_gMETY_NC->Fill(sig_gMETY_NC);
-            sig_h_gMETX_Rms->Fill(sig_gMETX_Rms); sig_h_gMETY_Rms->Fill(sig_gMETY_Rms);
+            //sig_h_gMETX->Fill(sig_gMETX); sig_h_gMETY->Fill(sig_gMETY);
+            //sig_h_gMETX_NC->Fill(sig_gMETX_NC); sig_h_gMETY_NC->Fill(sig_gMETY_NC);
+           // sig_h_gMETX_Rms->Fill(sig_gMETX_Rms); sig_h_gMETY_Rms->Fill(sig_gMETY_Rms);
             if (hasGFexSimMET) {
-                gFexMETJwoJSimTreeSig->GetEntry(iEvt);
-                gFexMETNoiseCutSimTreeSig->GetEntry(iEvt);
-                gFexMETRmsSimTreeSig->GetEntry(iEvt);
-                sig_h_gMET_JwoJSim->Fill(clampVal(sig_h_gMET_JwoJSim, sig_gMET_JwoJSim));
-                sig_h_gMET_NCSim->Fill(clampVal(sig_h_gMET_NCSim,     sig_gMET_NCSim));
-                sig_h_gMET_RmsSim->Fill(clampVal(sig_h_gMET_RmsSim,   sig_gMET_RmsSim));
+                gFexMETTreeSig->GetEntry(iEvt);          // AOD gFEX copies for the AOD-vs-Sim block
+                gFexMETNoiseCutTreeSig->GetEntry(iEvt);
+                gFexMETRmsTreeSig->GetEntry(iEvt);
+                sig_h_gMET_JwoJAOD->Fill(clampVal(sig_h_gMET_JwoJAOD, sig_gMET_JwoJAOD));
+                sig_h_gMET_NCAOD->Fill(clampVal(sig_h_gMET_NCAOD,     sig_gMET_NCAOD));
+                sig_h_gMET_RmsAOD->Fill(clampVal(sig_h_gMET_RmsAOD,   sig_gMET_RmsAOD));
             }
             sig_h_metTruthNonIntX->Fill(sig_metTruthNonIntX);
             sig_h_metTruthNonIntY->Fill(sig_metTruthNonIntY);
@@ -1407,9 +1651,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::cout << "  Background events: " << nBack << "\n";
         for (unsigned int iEvt = 0; iEvt < nBack; iEvt++) {
             metTreeBack->GetEntry(iEvt);
-            gFexMETTreeBack->GetEntry(iEvt);
-            gFexMETNoiseCutTreeBack->GetEntry(iEvt);
-            gFexMETRmsTreeBack->GetEntry(iEvt);
+            gNomJwoJBack->GetEntry(iEvt);   // nominal gFEX (resim when available, else AOD)
+            gNomNCBack->GetEntry(iEvt);
+            gNomRmsBack->GetEntry(iEvt);
             metTruthTreeBack->GetEntry(iEvt);
             coreEMTopoTreeBack->GetEntry(iEvt);
             coreEMPFlowTreeBack->GetEntry(iEvt);
@@ -1429,9 +1673,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_h_gMET_Rms->Fill(clampVal(back_h_gMET_Rms, back_gMET_Rms), w);
             jFexMETTreeBack->GetEntry(iEvt);
             back_h_jMET->Fill(clampVal(back_h_jMET, back_jMET), w);
-            back_h_gMETX->Fill(back_gMETX, w); back_h_gMETY->Fill(back_gMETY, w);
-            back_h_gMETX_NC->Fill(back_gMETX_NC, w); back_h_gMETY_NC->Fill(back_gMETY_NC, w);
-            back_h_gMETX_Rms->Fill(back_gMETX_Rms, w); back_h_gMETY_Rms->Fill(back_gMETY_Rms, w);
+            //back_h_gMETX->Fill(back_gMETX, w); back_h_gMETY->Fill(back_gMETY, w);
+            //back_h_gMETX_NC->Fill(back_gMETX_NC, w); back_h_gMETY_NC->Fill(back_gMETY_NC, w);
+            //back_h_gMETX_Rms->Fill(back_gMETX_Rms, w); back_h_gMETY_Rms->Fill(back_gMETY_Rms, w);
             back_h_metTruthNonIntX->Fill(back_metTruthNonIntX, w);
             back_h_metTruthNonIntY->Fill(back_metTruthNonIntY, w);
             back_h_JetMetX->Fill(back_JetMetX, w); back_h_JetMetY->Fill(back_JetMetY, w);
@@ -1453,15 +1697,15 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_hw_JetMET->Fill(clampVal(back_hw_JetMET, back_JetMet), w);
             back_hw_TowerMET->Fill(clampVal(back_hw_TowerMET, back_TowerMet), w);
             if (hasGFexSimMET) {
-                gFexMETJwoJSimTreeBack->GetEntry(iEvt);
-                gFexMETNoiseCutSimTreeBack->GetEntry(iEvt);
-                gFexMETRmsSimTreeBack->GetEntry(iEvt);
-                back_h_gMET_JwoJSim->Fill(clampVal(back_h_gMET_JwoJSim, back_gMET_JwoJSim), w);
-                back_h_gMET_NCSim->Fill(clampVal(back_h_gMET_NCSim,     back_gMET_NCSim),   w);
-                back_h_gMET_RmsSim->Fill(clampVal(back_h_gMET_RmsSim,   back_gMET_RmsSim),  w);
-                back_hw_gMET_JwoJSim->Fill(clampVal(back_hw_gMET_JwoJSim, back_gMET_JwoJSim), w);
-                back_hw_gMET_NCSim->Fill(clampVal(back_hw_gMET_NCSim,     back_gMET_NCSim),   w);
-                back_hw_gMET_RmsSim->Fill(clampVal(back_hw_gMET_RmsSim,   back_gMET_RmsSim),  w);
+                gFexMETTreeBack->GetEntry(iEvt);          // AOD gFEX copies for the AOD-vs-Sim block
+                gFexMETNoiseCutTreeBack->GetEntry(iEvt);
+                gFexMETRmsTreeBack->GetEntry(iEvt);
+                back_h_gMET_JwoJAOD->Fill(clampVal(back_h_gMET_JwoJAOD, back_gMET_JwoJAOD), w);
+                back_h_gMET_NCAOD->Fill(clampVal(back_h_gMET_NCAOD,     back_gMET_NCAOD),   w);
+                back_h_gMET_RmsAOD->Fill(clampVal(back_h_gMET_RmsAOD,   back_gMET_RmsAOD),  w);
+                back_hw_gMET_JwoJAOD->Fill(clampVal(back_hw_gMET_JwoJAOD, back_gMET_JwoJAOD), w);
+                back_hw_gMET_NCAOD->Fill(clampVal(back_hw_gMET_NCAOD,     back_gMET_NCAOD),   w);
+                back_hw_gMET_RmsAOD->Fill(clampVal(back_hw_gMET_RmsAOD,   back_gMET_RmsAOD),  w);
             }
             // 2D combined weighted histograms
             auto clamp2D_b = [&](double v) { return std::min(v, hi2D - 1e-9); };
@@ -1522,40 +1766,50 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         double thr_gMET_20kHz      = findThreshold(back_hw_gMET,     20e3);
         double thr_gMET_40kHz      = findThreshold(back_hw_gMET,     40e3);
         double thr_gMET_80kHz      = findThreshold(back_hw_gMET,     80e3);
+        double thr_gMET_60kHz      = findThreshold(back_hw_gMET,     60e3);
         double thr_gMET_NC_20kHz   = findThreshold(back_hw_gMET_NC,  20e3);
         double thr_gMET_NC_40kHz   = findThreshold(back_hw_gMET_NC,  40e3);
         double thr_gMET_NC_80kHz   = findThreshold(back_hw_gMET_NC,  80e3);
+        double thr_gMET_NC_60kHz   = findThreshold(back_hw_gMET_NC,  60e3);
         double thr_gMET_Rms_20kHz  = findThreshold(back_hw_gMET_Rms, 20e3);
         double thr_gMET_Rms_40kHz  = findThreshold(back_hw_gMET_Rms, 40e3);
         double thr_gMET_Rms_80kHz  = findThreshold(back_hw_gMET_Rms, 80e3);
+        double thr_gMET_Rms_60kHz  = findThreshold(back_hw_gMET_Rms, 60e3);
         double thr_jMET_20kHz      = findThreshold(back_hw_jMET,     20e3);
         double thr_jMET_40kHz      = findThreshold(back_hw_jMET,     40e3);
         double thr_jMET_80kHz      = findThreshold(back_hw_jMET,     80e3);
+        double thr_jMET_60kHz      = findThreshold(back_hw_jMET,     60e3);
         double thr_JetMET_20kHz    = findThreshold(back_hw_JetMET,   20e3);
         double thr_JetMET_40kHz    = findThreshold(back_hw_JetMET,   40e3);
         double thr_JetMET_80kHz    = findThreshold(back_hw_JetMET,   80e3);
+        double thr_JetMET_60kHz    = findThreshold(back_hw_JetMET,   60e3);
         double thr_TowerMET_20kHz  = findThreshold(back_hw_TowerMET,  20e3);
         double thr_TowerMET_40kHz  = findThreshold(back_hw_TowerMET,  40e3);
         double thr_TowerMET_80kHz  = findThreshold(back_hw_TowerMET,  80e3);
+        double thr_TowerMET_60kHz  = findThreshold(back_hw_TowerMET,  60e3);
         double thr_TotalMET_20kHz  = findThreshold(back_hw_TotalMET,  20e3);
         double thr_TotalMET_40kHz  = findThreshold(back_hw_TotalMET,  40e3);
         double thr_TotalMET_80kHz  = findThreshold(back_hw_TotalMET,  80e3);
-        double thr_gMET_JwoJSim_20kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJSim, 20e3) : 0.0;
-        double thr_gMET_JwoJSim_40kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJSim, 40e3) : 0.0;
-        double thr_gMET_JwoJSim_80kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJSim, 80e3) : 0.0;
-        double thr_gMET_NCSim_20kHz   = hasGFexSimMET ? findThreshold(back_hw_gMET_NCSim,   20e3) : 0.0;
-        double thr_gMET_NCSim_40kHz   = hasGFexSimMET ? findThreshold(back_hw_gMET_NCSim,   40e3) : 0.0;
-        double thr_gMET_NCSim_80kHz   = hasGFexSimMET ? findThreshold(back_hw_gMET_NCSim,   80e3) : 0.0;
-        double thr_gMET_RmsSim_20kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsSim,  20e3) : 0.0;
-        double thr_gMET_RmsSim_40kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsSim,  40e3) : 0.0;
-        double thr_gMET_RmsSim_80kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsSim,  80e3) : 0.0;
+        double thr_TotalMET_60kHz  = findThreshold(back_hw_TotalMET,  60e3);
+        double thr_gMET_JwoJAOD_20kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJAOD, 20e3) : 0.0;
+        double thr_gMET_JwoJAOD_40kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJAOD, 40e3) : 0.0;
+        double thr_gMET_JwoJAOD_80kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJAOD, 80e3) : 0.0;
+        double thr_gMET_JwoJAOD_60kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJAOD, 60e3) : 0.0;
+        double thr_gMET_NCAOD_20kHz   = hasGFexSimMET ? findThreshold(back_hw_gMET_NCAOD,   20e3) : 0.0;
+        double thr_gMET_NCAOD_40kHz   = hasGFexSimMET ? findThreshold(back_hw_gMET_NCAOD,   40e3) : 0.0;
+        double thr_gMET_NCAOD_80kHz   = hasGFexSimMET ? findThreshold(back_hw_gMET_NCAOD,   80e3) : 0.0;
+        double thr_gMET_NCAOD_60kHz   = hasGFexSimMET ? findThreshold(back_hw_gMET_NCAOD,   60e3) : 0.0;
+        double thr_gMET_RmsAOD_20kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsAOD,  20e3) : 0.0;
+        double thr_gMET_RmsAOD_40kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsAOD,  40e3) : 0.0;
+        double thr_gMET_RmsAOD_80kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsAOD,  80e3) : 0.0;
+        double thr_gMET_RmsAOD_60kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsAOD,  60e3) : 0.0;
         if (hasGFexSimMET)
             std::cout << "  Thresholds [GeV] — gMET JwoJSim 20/40/80 kHz: "
-                      << thr_gMET_JwoJSim_20kHz << " / " << thr_gMET_JwoJSim_40kHz << " / " << thr_gMET_JwoJSim_80kHz << "\n"
+                      << thr_gMET_JwoJAOD_20kHz << " / " << thr_gMET_JwoJAOD_40kHz << " / " << thr_gMET_JwoJAOD_80kHz << "\n"
                       << "                    gMET NCSim   20/40/80 kHz: "
-                      << thr_gMET_NCSim_20kHz   << " / " << thr_gMET_NCSim_40kHz   << " / " << thr_gMET_NCSim_80kHz   << "\n"
+                      << thr_gMET_NCAOD_20kHz   << " / " << thr_gMET_NCAOD_40kHz   << " / " << thr_gMET_NCAOD_80kHz   << "\n"
                       << "                    gMET RmsSim  20/40/80 kHz: "
-                      << thr_gMET_RmsSim_20kHz  << " / " << thr_gMET_RmsSim_40kHz  << " / " << thr_gMET_RmsSim_80kHz  << "\n";
+                      << thr_gMET_RmsAOD_20kHz  << " / " << thr_gMET_RmsAOD_40kHz  << " / " << thr_gMET_RmsAOD_80kHz  << "\n";
         std::cout << "  Thresholds [GeV] — gMET JwoJ 20/40/80 kHz: "
                   << thr_gMET_20kHz     << " / " << thr_gMET_40kHz     << " / " << thr_gMET_80kHz     << "\n"
                   << "                    gMET NC   20/40/80 kHz: "
@@ -1583,21 +1837,27 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         auto best_JwoJ_Jet_20   = findBestThresholds2D(out2D_JwoJ_Jet,   20e3);
         auto best_JwoJ_Jet_40   = findBestThresholds2D(out2D_JwoJ_Jet,   40e3);
         auto best_JwoJ_Jet_80   = findBestThresholds2D(out2D_JwoJ_Jet,   80e3);
+        auto best_JwoJ_Jet_60   = findBestThresholds2D(out2D_JwoJ_Jet,   60e3);
         auto best_JwoJ_Tower_20 = findBestThresholds2D(out2D_JwoJ_Tower, 20e3);
         auto best_JwoJ_Tower_40 = findBestThresholds2D(out2D_JwoJ_Tower, 40e3);
         auto best_JwoJ_Tower_80 = findBestThresholds2D(out2D_JwoJ_Tower, 80e3);
+        auto best_JwoJ_Tower_60 = findBestThresholds2D(out2D_JwoJ_Tower, 60e3);
         auto best_NC_Jet_20     = findBestThresholds2D(out2D_NC_Jet,     20e3);
         auto best_NC_Jet_40     = findBestThresholds2D(out2D_NC_Jet,     40e3);
         auto best_NC_Jet_80     = findBestThresholds2D(out2D_NC_Jet,     80e3);
+        auto best_NC_Jet_60     = findBestThresholds2D(out2D_NC_Jet,     60e3);
         auto best_NC_Tower_20   = findBestThresholds2D(out2D_NC_Tower,   20e3);
         auto best_NC_Tower_40   = findBestThresholds2D(out2D_NC_Tower,   40e3);
         auto best_NC_Tower_80   = findBestThresholds2D(out2D_NC_Tower,   80e3);
+        auto best_NC_Tower_60   = findBestThresholds2D(out2D_NC_Tower,   60e3);
         auto best_Rms_Jet_20    = findBestThresholds2D(out2D_Rms_Jet,    20e3);
         auto best_Rms_Jet_40    = findBestThresholds2D(out2D_Rms_Jet,    40e3);
         auto best_Rms_Jet_80    = findBestThresholds2D(out2D_Rms_Jet,    80e3);
+        auto best_Rms_Jet_60    = findBestThresholds2D(out2D_Rms_Jet,    60e3);
         auto best_Rms_Tower_20  = findBestThresholds2D(out2D_Rms_Tower,  20e3);
         auto best_Rms_Tower_40  = findBestThresholds2D(out2D_Rms_Tower,  40e3);
         auto best_Rms_Tower_80  = findBestThresholds2D(out2D_Rms_Tower,  80e3);
+        auto best_Rms_Tower_60  = findBestThresholds2D(out2D_Rms_Tower,  60e3);
         std::cout << "  Combined best thresholds [gFEX GeV | GEP GeV | eff | rate Hz]\n"
                   << "    JwoJ+Jet  20kHz: " << best_JwoJ_Jet_20.t1 << " | " << best_JwoJ_Jet_20.t2 << " | " << best_JwoJ_Jet_20.eff << " | " << best_JwoJ_Jet_20.rate << "\n"
                   << "    JwoJ+Jet  40kHz: " << best_JwoJ_Jet_40.t1 << " | " << best_JwoJ_Jet_40.t2 << " | " << best_JwoJ_Jet_40.eff << " | " << best_JwoJ_Jet_40.rate << "\n"
@@ -1621,67 +1881,83 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // --- Second signal pass: fill turn-on numerators ---
         for (unsigned int iEvt = 0; iEvt < nSig; iEvt++) {
             metTreeSig->GetEntry(iEvt);
-            gFexMETTreeSig->GetEntry(iEvt);
-            gFexMETNoiseCutTreeSig->GetEntry(iEvt);
-            gFexMETRmsTreeSig->GetEntry(iEvt);
+            gNomJwoJSig->GetEntry(iEvt);   // nominal gFEX (resim when available, else AOD)
+            gNomNCSig->GetEntry(iEvt);
+            gNomRmsSig->GetEntry(iEvt);
             metTruthTreeSig->GetEntry(iEvt);
             double truthMET = clampVal(h_turnOn_denom, sig_metTruthNonInt);
             // Individual gFEX and GEP turn-ons
             if (sig_gMET     > thr_gMET_20kHz)     h_turnOn_num_gMET_20kHz->Fill(truthMET);
             if (sig_gMET     > thr_gMET_40kHz)     h_turnOn_num_gMET_40kHz->Fill(truthMET);
             if (sig_gMET     > thr_gMET_80kHz)     h_turnOn_num_gMET_80kHz->Fill(truthMET);
+            if (sig_gMET     > thr_gMET_60kHz)     h_turnOn_num_gMET_60kHz->Fill(truthMET);
             if (sig_gMET_NC  > thr_gMET_NC_20kHz)  h_turnOn_num_gMET_NC_20kHz->Fill(truthMET);
             if (sig_gMET_NC  > thr_gMET_NC_40kHz)  h_turnOn_num_gMET_NC_40kHz->Fill(truthMET);
             if (sig_gMET_NC  > thr_gMET_NC_80kHz)  h_turnOn_num_gMET_NC_80kHz->Fill(truthMET);
+            if (sig_gMET_NC  > thr_gMET_NC_60kHz)  h_turnOn_num_gMET_NC_60kHz->Fill(truthMET);
             if (sig_gMET_Rms > thr_gMET_Rms_20kHz) h_turnOn_num_gMET_Rms_20kHz->Fill(truthMET);
             if (sig_gMET_Rms > thr_gMET_Rms_40kHz) h_turnOn_num_gMET_Rms_40kHz->Fill(truthMET);
             if (sig_gMET_Rms > thr_gMET_Rms_80kHz) h_turnOn_num_gMET_Rms_80kHz->Fill(truthMET);
+            if (sig_gMET_Rms > thr_gMET_Rms_60kHz) h_turnOn_num_gMET_Rms_60kHz->Fill(truthMET);
             jFexMETTreeSig->GetEntry(iEvt);
             if (sig_jMET     > thr_jMET_20kHz)     h_turnOn_num_jMET_20kHz->Fill(truthMET);
             if (sig_jMET     > thr_jMET_40kHz)     h_turnOn_num_jMET_40kHz->Fill(truthMET);
             if (sig_jMET     > thr_jMET_80kHz)     h_turnOn_num_jMET_80kHz->Fill(truthMET);
+            if (sig_jMET     > thr_jMET_60kHz)     h_turnOn_num_jMET_60kHz->Fill(truthMET);
             if (sig_JetMet   > thr_JetMET_20kHz)   h_turnOn_num_JetMET_20kHz->Fill(truthMET);
             if (sig_JetMet   > thr_JetMET_40kHz)   h_turnOn_num_JetMET_40kHz->Fill(truthMET);
             if (sig_JetMet   > thr_JetMET_80kHz)   h_turnOn_num_JetMET_80kHz->Fill(truthMET);
+            if (sig_JetMet   > thr_JetMET_60kHz)   h_turnOn_num_JetMET_60kHz->Fill(truthMET);
             if (sig_TowerMet  > thr_TowerMET_20kHz)  h_turnOn_num_TowerMET_20kHz->Fill(truthMET);
             if (sig_TowerMet  > thr_TowerMET_40kHz)  h_turnOn_num_TowerMET_40kHz->Fill(truthMET);
             if (sig_TowerMet  > thr_TowerMET_80kHz)  h_turnOn_num_TowerMET_80kHz->Fill(truthMET);
+            if (sig_TowerMet  > thr_TowerMET_60kHz)  h_turnOn_num_TowerMET_60kHz->Fill(truthMET);
             if (sig_TotalMET  > thr_TotalMET_20kHz)  h_turnOn_num_TotalMET_20kHz->Fill(truthMET);
             if (sig_TotalMET  > thr_TotalMET_40kHz)  h_turnOn_num_TotalMET_40kHz->Fill(truthMET);
             if (sig_TotalMET  > thr_TotalMET_80kHz)  h_turnOn_num_TotalMET_80kHz->Fill(truthMET);
+            if (sig_TotalMET  > thr_TotalMET_60kHz)  h_turnOn_num_TotalMET_60kHz->Fill(truthMET);
             if (hasGFexSimMET) {
-                gFexMETJwoJSimTreeSig->GetEntry(iEvt);
-                gFexMETNoiseCutSimTreeSig->GetEntry(iEvt);
-                gFexMETRmsSimTreeSig->GetEntry(iEvt);
-                if (sig_gMET_JwoJSim > thr_gMET_JwoJSim_20kHz) h_turnOn_num_gMET_JwoJSim_20kHz->Fill(truthMET);
-                if (sig_gMET_JwoJSim > thr_gMET_JwoJSim_40kHz) h_turnOn_num_gMET_JwoJSim_40kHz->Fill(truthMET);
-                if (sig_gMET_JwoJSim > thr_gMET_JwoJSim_80kHz) h_turnOn_num_gMET_JwoJSim_80kHz->Fill(truthMET);
-                if (sig_gMET_NCSim   > thr_gMET_NCSim_20kHz)   h_turnOn_num_gMET_NCSim_20kHz->Fill(truthMET);
-                if (sig_gMET_NCSim   > thr_gMET_NCSim_40kHz)   h_turnOn_num_gMET_NCSim_40kHz->Fill(truthMET);
-                if (sig_gMET_NCSim   > thr_gMET_NCSim_80kHz)   h_turnOn_num_gMET_NCSim_80kHz->Fill(truthMET);
-                if (sig_gMET_RmsSim  > thr_gMET_RmsSim_20kHz)  h_turnOn_num_gMET_RmsSim_20kHz->Fill(truthMET);
-                if (sig_gMET_RmsSim  > thr_gMET_RmsSim_40kHz)  h_turnOn_num_gMET_RmsSim_40kHz->Fill(truthMET);
-                if (sig_gMET_RmsSim  > thr_gMET_RmsSim_80kHz)  h_turnOn_num_gMET_RmsSim_80kHz->Fill(truthMET);
+                gFexMETTreeSig->GetEntry(iEvt);          // AOD gFEX copies for the AOD-vs-Sim block
+                gFexMETNoiseCutTreeSig->GetEntry(iEvt);
+                gFexMETRmsTreeSig->GetEntry(iEvt);
+                if (sig_gMET_JwoJAOD > thr_gMET_JwoJAOD_20kHz) h_turnOn_num_gMET_JwoJAOD_20kHz->Fill(truthMET);
+                if (sig_gMET_JwoJAOD > thr_gMET_JwoJAOD_40kHz) h_turnOn_num_gMET_JwoJAOD_40kHz->Fill(truthMET);
+                if (sig_gMET_JwoJAOD > thr_gMET_JwoJAOD_80kHz) h_turnOn_num_gMET_JwoJAOD_80kHz->Fill(truthMET);
+                if (sig_gMET_JwoJAOD > thr_gMET_JwoJAOD_60kHz) h_turnOn_num_gMET_JwoJAOD_60kHz->Fill(truthMET);
+                if (sig_gMET_NCAOD   > thr_gMET_NCAOD_20kHz)   h_turnOn_num_gMET_NCAOD_20kHz->Fill(truthMET);
+                if (sig_gMET_NCAOD   > thr_gMET_NCAOD_40kHz)   h_turnOn_num_gMET_NCAOD_40kHz->Fill(truthMET);
+                if (sig_gMET_NCAOD   > thr_gMET_NCAOD_80kHz)   h_turnOn_num_gMET_NCAOD_80kHz->Fill(truthMET);
+                if (sig_gMET_NCAOD   > thr_gMET_NCAOD_60kHz)   h_turnOn_num_gMET_NCAOD_60kHz->Fill(truthMET);
+                if (sig_gMET_RmsAOD  > thr_gMET_RmsAOD_20kHz)  h_turnOn_num_gMET_RmsAOD_20kHz->Fill(truthMET);
+                if (sig_gMET_RmsAOD  > thr_gMET_RmsAOD_40kHz)  h_turnOn_num_gMET_RmsAOD_40kHz->Fill(truthMET);
+                if (sig_gMET_RmsAOD  > thr_gMET_RmsAOD_80kHz)  h_turnOn_num_gMET_RmsAOD_80kHz->Fill(truthMET);
+                if (sig_gMET_RmsAOD  > thr_gMET_RmsAOD_60kHz)  h_turnOn_num_gMET_RmsAOD_60kHz->Fill(truthMET);
             }
             // Combined gFEX + GEP turn-ons at best thresholds
             if (sig_gMET     > best_JwoJ_Jet_20.t1   && sig_JetMet   > best_JwoJ_Jet_20.t2)   h_turnOn_num_combo_JwoJ_Jet_20kHz->Fill(truthMET);
             if (sig_gMET     > best_JwoJ_Jet_40.t1   && sig_JetMet   > best_JwoJ_Jet_40.t2)   h_turnOn_num_combo_JwoJ_Jet_40kHz->Fill(truthMET);
             if (sig_gMET     > best_JwoJ_Jet_80.t1   && sig_JetMet   > best_JwoJ_Jet_80.t2)   h_turnOn_num_combo_JwoJ_Jet_80kHz->Fill(truthMET);
+            if (sig_gMET     > best_JwoJ_Jet_60.t1   && sig_JetMet   > best_JwoJ_Jet_60.t2)   h_turnOn_num_combo_JwoJ_Jet_60kHz->Fill(truthMET);
             if (sig_gMET     > best_JwoJ_Tower_20.t1 && sig_TowerMet > best_JwoJ_Tower_20.t2) h_turnOn_num_combo_JwoJ_Tower_20kHz->Fill(truthMET);
             if (sig_gMET     > best_JwoJ_Tower_40.t1 && sig_TowerMet > best_JwoJ_Tower_40.t2) h_turnOn_num_combo_JwoJ_Tower_40kHz->Fill(truthMET);
             if (sig_gMET     > best_JwoJ_Tower_80.t1 && sig_TowerMet > best_JwoJ_Tower_80.t2) h_turnOn_num_combo_JwoJ_Tower_80kHz->Fill(truthMET);
+            if (sig_gMET     > best_JwoJ_Tower_60.t1 && sig_TowerMet > best_JwoJ_Tower_60.t2) h_turnOn_num_combo_JwoJ_Tower_60kHz->Fill(truthMET);
             if (sig_gMET_NC  > best_NC_Jet_20.t1     && sig_JetMet   > best_NC_Jet_20.t2)     h_turnOn_num_combo_NC_Jet_20kHz->Fill(truthMET);
             if (sig_gMET_NC  > best_NC_Jet_40.t1     && sig_JetMet   > best_NC_Jet_40.t2)     h_turnOn_num_combo_NC_Jet_40kHz->Fill(truthMET);
             if (sig_gMET_NC  > best_NC_Jet_80.t1     && sig_JetMet   > best_NC_Jet_80.t2)     h_turnOn_num_combo_NC_Jet_80kHz->Fill(truthMET);
+            if (sig_gMET_NC  > best_NC_Jet_60.t1     && sig_JetMet   > best_NC_Jet_60.t2)     h_turnOn_num_combo_NC_Jet_60kHz->Fill(truthMET);
             if (sig_gMET_NC  > best_NC_Tower_20.t1   && sig_TowerMet > best_NC_Tower_20.t2)   h_turnOn_num_combo_NC_Tower_20kHz->Fill(truthMET);
             if (sig_gMET_NC  > best_NC_Tower_40.t1   && sig_TowerMet > best_NC_Tower_40.t2)   h_turnOn_num_combo_NC_Tower_40kHz->Fill(truthMET);
             if (sig_gMET_NC  > best_NC_Tower_80.t1   && sig_TowerMet > best_NC_Tower_80.t2)   h_turnOn_num_combo_NC_Tower_80kHz->Fill(truthMET);
+            if (sig_gMET_NC  > best_NC_Tower_60.t1   && sig_TowerMet > best_NC_Tower_60.t2)   h_turnOn_num_combo_NC_Tower_60kHz->Fill(truthMET);
             if (sig_gMET_Rms > best_Rms_Jet_20.t1    && sig_JetMet   > best_Rms_Jet_20.t2)    h_turnOn_num_combo_Rms_Jet_20kHz->Fill(truthMET);
             if (sig_gMET_Rms > best_Rms_Jet_40.t1    && sig_JetMet   > best_Rms_Jet_40.t2)    h_turnOn_num_combo_Rms_Jet_40kHz->Fill(truthMET);
             if (sig_gMET_Rms > best_Rms_Jet_80.t1    && sig_JetMet   > best_Rms_Jet_80.t2)    h_turnOn_num_combo_Rms_Jet_80kHz->Fill(truthMET);
+            if (sig_gMET_Rms > best_Rms_Jet_60.t1    && sig_JetMet   > best_Rms_Jet_60.t2)    h_turnOn_num_combo_Rms_Jet_60kHz->Fill(truthMET);
             if (sig_gMET_Rms > best_Rms_Tower_20.t1  && sig_TowerMet > best_Rms_Tower_20.t2)  h_turnOn_num_combo_Rms_Tower_20kHz->Fill(truthMET);
             if (sig_gMET_Rms > best_Rms_Tower_40.t1  && sig_TowerMet > best_Rms_Tower_40.t2)  h_turnOn_num_combo_Rms_Tower_40kHz->Fill(truthMET);
             if (sig_gMET_Rms > best_Rms_Tower_80.t1  && sig_TowerMet > best_Rms_Tower_80.t2)  h_turnOn_num_combo_Rms_Tower_80kHz->Fill(truthMET);
+            if (sig_gMET_Rms > best_Rms_Tower_60.t1  && sig_TowerMet > best_Rms_Tower_60.t2)  h_turnOn_num_combo_Rms_Tower_60kHz->Fill(truthMET);
 
             // --- Event properties at 80 kHz selections ---
             if (hasWTAConeJets) gepWTAConeCellsTowersJetsTreeSig->GetEntry(iEvt);
@@ -1689,7 +1965,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             if (hasInTimeAntiKt4TruthJets) inTimeAntiKt4TruthJetsTreeSig->GetEntry(iEvt);
             {
                 double phi_GEP  = std::atan2(sig_TotalMETY, sig_TotalMETX);
-                double phi_gFEX = std::atan2(sig_gMETY, sig_gMETX);
+                //double phi_gFEX = std::atan2(sig_gMETY, sig_gMETX);
                 double METsig   = (sig_SumET  > 0) ? sig_TotalMET / std::sqrt(sig_SumET)  : 0.0;
                 double gMETsig  = (sig_gSumET > 0) ? sig_gMET    / std::sqrt(sig_gSumET) : 0.0;
                 int    nJets    = 0;
@@ -1714,14 +1990,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     for (double et : *inTimeAntiKt4TruthJetsEtValuesSig)
                         if (et > 15.0) nPileupJets++;
                 // Per-selection TOB MET phi: Incl/JwoJ=gFEX JwoJ, NC, Rms, Jet, Tower
-                double phi_TOBsig[nSel80] = {
+                /*double phi_TOBsig[nSel80] = {
                     phi_gFEX,
                     phi_gFEX,
-                    std::atan2(sig_gMETY_NC,  sig_gMETX_NC),
-                    std::atan2(sig_gMETY_Rms, sig_gMETX_Rms),
+                   // std::atan2(sig_gMETY_NC,  sig_gMETX_NC),
+                    //std::atan2(sig_gMETY_Rms, sig_gMETX_Rms),
                     hasJetMetXY   ? std::atan2(sig_JetMetY,   sig_JetMetX)   : 0.0,
                     hasTowerMetXY ? std::atan2(sig_TowerMetY, sig_TowerMetX) : 0.0
-                };
+                };*/
                 bool passes80[nSel80] = {
                     true,
                     sig_gMET     > thr_gMET_80kHz,
@@ -1737,15 +2013,15 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     sig_sel_gSumET[iSel]->Fill(std::min(sig_gSumET, 1039.9));
                     if (METsig  < 25.0) sig_sel_METsig[iSel]->Fill(METsig);
                     if (gMETsig < 25.0) sig_sel_gMETsig[iSel]->Fill(gMETsig);
-                    sig_sel_dPhi_GEP_gFEX[iSel]->Fill(absDeltaPhi(phi_GEP, phi_gFEX));
+                    //sig_sel_dPhi_GEP_gFEX[iSel]->Fill(absDeltaPhi(phi_GEP, phi_gFEX));
                     if (hasTruthNonIntXY && (sig_metTruthNonIntX != 0.0 || sig_metTruthNonIntY != 0.0)) {
                         double phi_truth = std::atan2(sig_metTruthNonIntY, sig_metTruthNonIntX);
                         sig_sel_dPhi_GEP_truth[iSel]->Fill(absDeltaPhi(phi_GEP, phi_truth));
                         bool hasTOBphi = (iSel < 4) || (iSel == 4 && hasJetMetXY) || (iSel == 5 && hasTowerMetXY);
-                        if (hasTOBphi) {
+                        /*if (hasTOBphi) {
                             sig_sel_dPhi_truth_TOB[iSel]->Fill(absDeltaPhi(phi_truth, phi_TOBsig[iSel]));
                             sig_sel_phi2D_TOB_truth[iSel]->Fill(phi_truth, phi_TOBsig[iSel]);
-                        }
+                        }*/
                     }
                     if (hasWTAConeJets) {
                         sig_sel_nJets[iSel]->Fill(nWTAConeJets);
@@ -1767,9 +2043,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // --- Background event-property pass: fill selection histograms at 80 kHz ---
         for (unsigned int iEvt = 0; iEvt < nBack; iEvt++) {
             metTreeBack->GetEntry(iEvt);
-            gFexMETTreeBack->GetEntry(iEvt);
-            gFexMETNoiseCutTreeBack->GetEntry(iEvt);
-            gFexMETRmsTreeBack->GetEntry(iEvt);
+            gNomJwoJBack->GetEntry(iEvt);   // nominal gFEX (resim when available, else AOD)
+            gNomNCBack->GetEntry(iEvt);
+            gNomRmsBack->GetEntry(iEvt);
             metTruthTreeBack->GetEntry(iEvt);
             eventInfoTreeBack->GetEntry(iEvt);
             if (applyHSTPFilter && !passHSTPValuesBack) continue;
@@ -1779,7 +2055,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             double w = eventWeightsValuesBack->at(0);
 
             double phi_GEP  = std::atan2(back_TotalMETY, back_TotalMETX);
-            double phi_gFEX = std::atan2(back_gMETY, back_gMETX);
+            //double phi_gFEX = std::atan2(back_gMETY, back_gMETX);
             double METsig   = (back_SumET  > 0) ? back_TotalMET / std::sqrt(back_SumET)  : 0.0;
             double gMETsig  = (back_gSumET > 0) ? back_gMET    / std::sqrt(back_gSumET) : 0.0;
             int    nJets    = 0;
@@ -1804,14 +2080,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 for (double et : *inTimeAntiKt4TruthJetsEtValuesBack)
                     if (et > 15.0) nPileupJets++;
             // Per-selection TOB MET phi: Incl/JwoJ=gFEX JwoJ, NC, Rms, Jet, Tower
-            double phi_TOBback[nSel80] = {
+            /*double phi_TOBback[nSel80] = {
                 phi_gFEX,
                 phi_gFEX,
                 std::atan2(back_gMETY_NC,  back_gMETX_NC),
                 std::atan2(back_gMETY_Rms, back_gMETX_Rms),
                 hasJetMetXY   ? std::atan2(back_JetMetY,   back_JetMetX)   : 0.0,
                 hasTowerMetXY ? std::atan2(back_TowerMetY, back_TowerMetX) : 0.0
-            };
+            };*/
             bool passesB[nSel80] = {
                 true,
                 back_gMET     > thr_gMET_80kHz,
@@ -1827,15 +2103,15 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 back_sel_gSumET[iSel]->Fill(std::min(back_gSumET, 1039.9), w);
                 if (METsig  < 25.0) back_sel_METsig[iSel]->Fill(METsig,  w);
                 if (gMETsig < 25.0) back_sel_gMETsig[iSel]->Fill(gMETsig, w);
-                back_sel_dPhi_GEP_gFEX[iSel]->Fill(absDeltaPhi(phi_GEP, phi_gFEX), w);
+                //back_sel_dPhi_GEP_gFEX[iSel]->Fill(absDeltaPhi(phi_GEP, phi_gFEX), w);
                 if (hasTruthNonIntXY && (back_metTruthNonIntX != 0.0 || back_metTruthNonIntY != 0.0)) {
                     double phi_truth = std::atan2(back_metTruthNonIntY, back_metTruthNonIntX);
                     back_sel_dPhi_GEP_truth[iSel]->Fill(absDeltaPhi(phi_GEP, phi_truth), w);
                     bool hasTOBphi = (iSel < 4) || (iSel == 4 && hasJetMetXY) || (iSel == 5 && hasTowerMetXY);
-                    if (hasTOBphi) {
+                    /*if (hasTOBphi) {
                         back_sel_dPhi_truth_TOB[iSel]->Fill(absDeltaPhi(phi_truth, phi_TOBback[iSel]), w);
                         back_sel_phi2D_TOB_truth[iSel]->Fill(phi_truth, phi_TOBback[iSel], w);
-                    }
+                    }*/
                 }
                 if (hasWTAConeJets) {
                     back_sel_nJets[iSel]->Fill(nWTAConeJets, w);
@@ -1863,52 +2139,68 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* eff_gMET_20kHz      = makeEff(h_turnOn_num_gMET_20kHz,      "eff_gMET_20kHz_"     +tag);
         TH1F* eff_gMET_40kHz      = makeEff(h_turnOn_num_gMET_40kHz,      "eff_gMET_40kHz_"     +tag);
         TH1F* eff_gMET_80kHz      = makeEff(h_turnOn_num_gMET_80kHz,      "eff_gMET_80kHz_"     +tag);
+        TH1F* eff_gMET_60kHz      = makeEff(h_turnOn_num_gMET_60kHz,      "eff_gMET_60kHz_"     +tag);
         TH1F* eff_gMET_NC_20kHz   = makeEff(h_turnOn_num_gMET_NC_20kHz,   "eff_gMET_NC_20kHz_"  +tag);
         TH1F* eff_gMET_NC_40kHz   = makeEff(h_turnOn_num_gMET_NC_40kHz,   "eff_gMET_NC_40kHz_"  +tag);
         TH1F* eff_gMET_NC_80kHz   = makeEff(h_turnOn_num_gMET_NC_80kHz,   "eff_gMET_NC_80kHz_"  +tag);
+        TH1F* eff_gMET_NC_60kHz   = makeEff(h_turnOn_num_gMET_NC_60kHz,   "eff_gMET_NC_60kHz_"  +tag);
         TH1F* eff_gMET_Rms_20kHz  = makeEff(h_turnOn_num_gMET_Rms_20kHz,  "eff_gMET_Rms_20kHz_" +tag);
         TH1F* eff_gMET_Rms_40kHz  = makeEff(h_turnOn_num_gMET_Rms_40kHz,  "eff_gMET_Rms_40kHz_" +tag);
         TH1F* eff_gMET_Rms_80kHz  = makeEff(h_turnOn_num_gMET_Rms_80kHz,  "eff_gMET_Rms_80kHz_" +tag);
+        TH1F* eff_gMET_Rms_60kHz  = makeEff(h_turnOn_num_gMET_Rms_60kHz,  "eff_gMET_Rms_60kHz_" +tag);
         TH1F* eff_jMET_20kHz      = makeEff(h_turnOn_num_jMET_20kHz,      "eff_jMET_20kHz_"     +tag);
         TH1F* eff_jMET_40kHz      = makeEff(h_turnOn_num_jMET_40kHz,      "eff_jMET_40kHz_"     +tag);
         TH1F* eff_jMET_80kHz      = makeEff(h_turnOn_num_jMET_80kHz,      "eff_jMET_80kHz_"     +tag);
+        TH1F* eff_jMET_60kHz      = makeEff(h_turnOn_num_jMET_60kHz,      "eff_jMET_60kHz_"     +tag);
         TH1F* eff_JetMET_20kHz    = makeEff(h_turnOn_num_JetMET_20kHz,    "eff_JetMET_20kHz_"   +tag);
         TH1F* eff_JetMET_40kHz    = makeEff(h_turnOn_num_JetMET_40kHz,    "eff_JetMET_40kHz_"   +tag);
         TH1F* eff_JetMET_80kHz    = makeEff(h_turnOn_num_JetMET_80kHz,    "eff_JetMET_80kHz_"   +tag);
+        TH1F* eff_JetMET_60kHz    = makeEff(h_turnOn_num_JetMET_60kHz,    "eff_JetMET_60kHz_"   +tag);
         TH1F* eff_TowerMET_20kHz  = makeEff(h_turnOn_num_TowerMET_20kHz,  "eff_TowerMET_20kHz_" +tag);
         TH1F* eff_TowerMET_40kHz  = makeEff(h_turnOn_num_TowerMET_40kHz,  "eff_TowerMET_40kHz_" +tag);
         TH1F* eff_TowerMET_80kHz  = makeEff(h_turnOn_num_TowerMET_80kHz,  "eff_TowerMET_80kHz_" +tag);
+        TH1F* eff_TowerMET_60kHz  = makeEff(h_turnOn_num_TowerMET_60kHz,  "eff_TowerMET_60kHz_" +tag);
         TH1F* eff_TotalMET_20kHz  = makeEff(h_turnOn_num_TotalMET_20kHz,  "eff_TotalMET_20kHz_" +tag);
         TH1F* eff_TotalMET_40kHz  = makeEff(h_turnOn_num_TotalMET_40kHz,  "eff_TotalMET_40kHz_" +tag);
         TH1F* eff_TotalMET_80kHz  = makeEff(h_turnOn_num_TotalMET_80kHz,  "eff_TotalMET_80kHz_" +tag);
+        TH1F* eff_TotalMET_60kHz  = makeEff(h_turnOn_num_TotalMET_60kHz,  "eff_TotalMET_60kHz_" +tag);
         // Combined efficiencies
         TH1F* eff_combo_JwoJ_Jet_20kHz   = makeEff(h_turnOn_num_combo_JwoJ_Jet_20kHz,   "eff_combo_JwoJ_Jet_20kHz_"  +tag);
         TH1F* eff_combo_JwoJ_Jet_40kHz   = makeEff(h_turnOn_num_combo_JwoJ_Jet_40kHz,   "eff_combo_JwoJ_Jet_40kHz_"  +tag);
         TH1F* eff_combo_JwoJ_Jet_80kHz   = makeEff(h_turnOn_num_combo_JwoJ_Jet_80kHz,   "eff_combo_JwoJ_Jet_80kHz_"  +tag);
+        TH1F* eff_combo_JwoJ_Jet_60kHz   = makeEff(h_turnOn_num_combo_JwoJ_Jet_60kHz,   "eff_combo_JwoJ_Jet_60kHz_"  +tag);
         TH1F* eff_combo_JwoJ_Tower_20kHz = makeEff(h_turnOn_num_combo_JwoJ_Tower_20kHz, "eff_combo_JwoJ_Tower_20kHz_"+tag);
         TH1F* eff_combo_JwoJ_Tower_40kHz = makeEff(h_turnOn_num_combo_JwoJ_Tower_40kHz, "eff_combo_JwoJ_Tower_40kHz_"+tag);
         TH1F* eff_combo_JwoJ_Tower_80kHz = makeEff(h_turnOn_num_combo_JwoJ_Tower_80kHz, "eff_combo_JwoJ_Tower_80kHz_"+tag);
+        TH1F* eff_combo_JwoJ_Tower_60kHz = makeEff(h_turnOn_num_combo_JwoJ_Tower_60kHz, "eff_combo_JwoJ_Tower_60kHz_"+tag);
         TH1F* eff_combo_NC_Jet_20kHz     = makeEff(h_turnOn_num_combo_NC_Jet_20kHz,     "eff_combo_NC_Jet_20kHz_"    +tag);
         TH1F* eff_combo_NC_Jet_40kHz     = makeEff(h_turnOn_num_combo_NC_Jet_40kHz,     "eff_combo_NC_Jet_40kHz_"    +tag);
         TH1F* eff_combo_NC_Jet_80kHz     = makeEff(h_turnOn_num_combo_NC_Jet_80kHz,     "eff_combo_NC_Jet_80kHz_"    +tag);
+        TH1F* eff_combo_NC_Jet_60kHz     = makeEff(h_turnOn_num_combo_NC_Jet_60kHz,     "eff_combo_NC_Jet_60kHz_"    +tag);
         TH1F* eff_combo_NC_Tower_20kHz   = makeEff(h_turnOn_num_combo_NC_Tower_20kHz,   "eff_combo_NC_Tower_20kHz_"  +tag);
         TH1F* eff_combo_NC_Tower_40kHz   = makeEff(h_turnOn_num_combo_NC_Tower_40kHz,   "eff_combo_NC_Tower_40kHz_"  +tag);
         TH1F* eff_combo_NC_Tower_80kHz   = makeEff(h_turnOn_num_combo_NC_Tower_80kHz,   "eff_combo_NC_Tower_80kHz_"  +tag);
+        TH1F* eff_combo_NC_Tower_60kHz   = makeEff(h_turnOn_num_combo_NC_Tower_60kHz,   "eff_combo_NC_Tower_60kHz_"  +tag);
         TH1F* eff_combo_Rms_Jet_20kHz    = makeEff(h_turnOn_num_combo_Rms_Jet_20kHz,    "eff_combo_Rms_Jet_20kHz_"   +tag);
         TH1F* eff_combo_Rms_Jet_40kHz    = makeEff(h_turnOn_num_combo_Rms_Jet_40kHz,    "eff_combo_Rms_Jet_40kHz_"   +tag);
         TH1F* eff_combo_Rms_Jet_80kHz    = makeEff(h_turnOn_num_combo_Rms_Jet_80kHz,    "eff_combo_Rms_Jet_80kHz_"   +tag);
+        TH1F* eff_combo_Rms_Jet_60kHz    = makeEff(h_turnOn_num_combo_Rms_Jet_60kHz,    "eff_combo_Rms_Jet_60kHz_"   +tag);
         TH1F* eff_combo_Rms_Tower_20kHz  = makeEff(h_turnOn_num_combo_Rms_Tower_20kHz,  "eff_combo_Rms_Tower_20kHz_" +tag);
         TH1F* eff_combo_Rms_Tower_40kHz  = makeEff(h_turnOn_num_combo_Rms_Tower_40kHz,  "eff_combo_Rms_Tower_40kHz_" +tag);
         TH1F* eff_combo_Rms_Tower_80kHz  = makeEff(h_turnOn_num_combo_Rms_Tower_80kHz,  "eff_combo_Rms_Tower_80kHz_" +tag);
-        TH1F* eff_gMET_JwoJSim_20kHz = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_JwoJSim_20kHz, "eff_gMET_JwoJSim_20kHz_"+tag) : nullptr;
-        TH1F* eff_gMET_JwoJSim_40kHz = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_JwoJSim_40kHz, "eff_gMET_JwoJSim_40kHz_"+tag) : nullptr;
-        TH1F* eff_gMET_JwoJSim_80kHz = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_JwoJSim_80kHz, "eff_gMET_JwoJSim_80kHz_"+tag) : nullptr;
-        TH1F* eff_gMET_NCSim_20kHz   = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_NCSim_20kHz,   "eff_gMET_NCSim_20kHz_"+tag)   : nullptr;
-        TH1F* eff_gMET_NCSim_40kHz   = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_NCSim_40kHz,   "eff_gMET_NCSim_40kHz_"+tag)   : nullptr;
-        TH1F* eff_gMET_NCSim_80kHz   = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_NCSim_80kHz,   "eff_gMET_NCSim_80kHz_"+tag)   : nullptr;
-        TH1F* eff_gMET_RmsSim_20kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsSim_20kHz,  "eff_gMET_RmsSim_20kHz_"+tag)  : nullptr;
-        TH1F* eff_gMET_RmsSim_40kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsSim_40kHz,  "eff_gMET_RmsSim_40kHz_"+tag)  : nullptr;
-        TH1F* eff_gMET_RmsSim_80kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsSim_80kHz,  "eff_gMET_RmsSim_80kHz_"+tag)  : nullptr;
+        TH1F* eff_combo_Rms_Tower_60kHz  = makeEff(h_turnOn_num_combo_Rms_Tower_60kHz,  "eff_combo_Rms_Tower_60kHz_" +tag);
+        TH1F* eff_gMET_JwoJAOD_20kHz = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_JwoJAOD_20kHz, "eff_gMET_JwoJAOD_20kHz_"+tag) : nullptr;
+        TH1F* eff_gMET_JwoJAOD_40kHz = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_JwoJAOD_40kHz, "eff_gMET_JwoJAOD_40kHz_"+tag) : nullptr;
+        TH1F* eff_gMET_JwoJAOD_80kHz = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_JwoJAOD_80kHz, "eff_gMET_JwoJAOD_80kHz_"+tag) : nullptr;
+        TH1F* eff_gMET_JwoJAOD_60kHz = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_JwoJAOD_60kHz, "eff_gMET_JwoJAOD_60kHz_"+tag) : nullptr;
+        TH1F* eff_gMET_NCAOD_20kHz   = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_NCAOD_20kHz,   "eff_gMET_NCAOD_20kHz_"+tag)   : nullptr;
+        TH1F* eff_gMET_NCAOD_40kHz   = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_NCAOD_40kHz,   "eff_gMET_NCAOD_40kHz_"+tag)   : nullptr;
+        TH1F* eff_gMET_NCAOD_80kHz   = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_NCAOD_80kHz,   "eff_gMET_NCAOD_80kHz_"+tag)   : nullptr;
+        TH1F* eff_gMET_NCAOD_60kHz   = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_NCAOD_60kHz,   "eff_gMET_NCAOD_60kHz_"+tag)   : nullptr;
+        TH1F* eff_gMET_RmsAOD_20kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsAOD_20kHz,  "eff_gMET_RmsAOD_20kHz_"+tag)  : nullptr;
+        TH1F* eff_gMET_RmsAOD_40kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsAOD_40kHz,  "eff_gMET_RmsAOD_40kHz_"+tag)  : nullptr;
+        TH1F* eff_gMET_RmsAOD_80kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsAOD_80kHz,  "eff_gMET_RmsAOD_80kHz_"+tag)  : nullptr;
+        TH1F* eff_gMET_RmsAOD_60kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsAOD_60kHz,  "eff_gMET_RmsAOD_60kHz_"+tag)  : nullptr;
 
         // --- Per-file signal vs background overlays ---
         // Extract signal tag from the emulation-output basename (includes config tags: N_Towers, jetEt, SK/OR)
@@ -1917,6 +2209,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::string sigTag  = sigBase.substr(0, sigBase.rfind('.'));  // strip .root
         std::string fDir = outputDir + "metPlots/" + sigTag + "_" + labels[fileIt] + "/";
         gSystem->mkdir(fDir.c_str(), true);
+        // Per-file legend header — use the process-specific name when provided, else the global one.
+        std::string fileSignalName = (fileIt < signalNames.size() && !signalNames[fileIt].empty())
+            ? signalNames[fileIt] : signalName;
+        // Per-file plots show the process name at the top-right of the ATLAS label (not in legends).
+        gProcLabel = fileSignalName;
 
         drawOverlay(sig_h_TotalMET,        back_h_TotalMET,        "Total MET (GEP)",      "Total MET (GEP) [GeV]",          fDir + "TotalMET.pdf");
         drawComponentOverlay(sig_h_TotalMETX, back_h_TotalMETX, "Total MET_{x} (GEP)", "Total MET_{x} (GEP) [GeV]",      fDir + "TotalMETx.pdf");
@@ -1938,8 +2235,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         drawComponentOverlay(sig_h_gMETY,     back_h_gMETY,     "gFEX MET_{y} (JwoJ)",     "gFEX MET_{y} (JwoJ) [GeV]", fDir + "gFEX_METY_JwoJ.pdf");
         drawComponentOverlay(sig_h_gMETX_NC,  back_h_gMETX_NC,  "gFEX MET_{x} (NoiseCut)", "gFEX MET_{x} (NoiseCut) [GeV]", fDir + "gFEX_METX_NoiseCut.pdf");
         drawComponentOverlay(sig_h_gMETY_NC,  back_h_gMETY_NC,  "gFEX MET_{y} (NoiseCut)", "gFEX MET_{y} (NoiseCut) [GeV]", fDir + "gFEX_METY_NoiseCut.pdf");
-        drawComponentOverlay(sig_h_gMETX_Rms, back_h_gMETX_Rms, "gFEX MET_{x} (Rms)",      "gFEX MET_{x} (rms) [GeV]", fDir + "gFEX_METX_Rms.pdf");
-        drawComponentOverlay(sig_h_gMETY_Rms, back_h_gMETY_Rms, "gFEX MET_{y} (Rms)",      "gFEX MET_{y} (rms) [GeV]", fDir + "gFEX_METY_Rms.pdf");
+        //drawComponentOverlay(sig_h_gMETX_Rms, back_h_gMETX_Rms, "gFEX MET_{x} (Rms)",      "gFEX MET_{x} (rms) [GeV]", fDir + "gFEX_METX_Rms.pdf");
+        //drawComponentOverlay(sig_h_gMETY_Rms, back_h_gMETY_Rms, "gFEX MET_{y} (Rms)",      "gFEX MET_{y} (rms) [GeV]", fDir + "gFEX_METY_Rms.pdf");
         if (hasTruthNonIntXY) {
             drawComponentOverlay(sig_h_metTruthNonIntX, back_h_metTruthNonIntX, "Truth MET_{x} (NonInt)", "Truth MET_{x} (NonInt) [GeV]", fDir + "TruthMET_NonIntX.pdf");
             drawComponentOverlay(sig_h_metTruthNonIntY, back_h_metTruthNonIntY, "Truth MET_{y} (NonInt)", "Truth MET_{y} (NonInt) [GeV]", fDir + "TruthMET_NonIntY.pdf");
@@ -1955,7 +2252,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // --- Per-file GEP vs gFEX MET comparison ---
         drawAlgoComparison(sig_h_TotalMET, back_h_TotalMET, sig_h_gMET, back_h_gMET,
                            "Jet Tagger (GEP)", "gFEX",
-                           "MET [GeV]", fDir + "GEP_vs_gFEX_MET.pdf", signalName);
+                           "MET [GeV]", fDir + "GEP_vs_gFEX_MET.pdf", "");
 
         // --- Per-file core term sig vs bkg overlays ---
         drawOverlay(sig_h_coreEMTopo_SoftClus_MET,   back_h_coreEMTopo_SoftClus_MET,   "Core EMTopo SoftClus MET",   "Core EMTopo SoftClus MET [GeV]", fDir + "CoreEMTopo_SoftClus_MET.pdf");
@@ -2001,7 +2298,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawMultiDist(toVec(sig_sel_gSumET),         selLegLabels, "gFEX TOB #Sigma E_{T} — signal at 80 kHz sel.",                 "gFEX TOB #Sigma E_{T} [GeV]",                                        selDir + "sig_sel_gSumET.pdf");
             drawMultiDist(toVec(sig_sel_METsig),         selLegLabels, "GEP MET significance — signal at 80 kHz sel.",                  "GEP MET / #sqrt{GEP TOB #Sigma E_{T}} [#sqrt{GeV}]",                 selDir + "sig_sel_METsig.pdf",         true,  "#sqrt{GeV}");
             drawMultiDist(toVec(sig_sel_gMETsig),        selLegLabels, "gFEX MET significance — signal at 80 kHz sel.",                 "gFEX MET / #sqrt{gFEX TOB #Sigma E_{T}} [#sqrt{GeV}]",               selDir + "sig_sel_gMETsig.pdf",        true,  "#sqrt{GeV}");
-            drawMultiDist(toVec(sig_sel_dPhi_GEP_gFEX), selLegLabels, "#Delta#phi(GEP MET, gFEX MET) — signal at 80 kHz sel.",         "|#Delta#phi(GEP MET, gFEX MET)| [rad]",                              selDir + "sig_sel_dPhi_GEP_gFEX.pdf",  false, "rad");
+            //drawMultiDist(toVec(sig_sel_dPhi_GEP_gFEX), selLegLabels, "#Delta#phi(GEP MET, gFEX MET) — signal at 80 kHz sel.",         "|#Delta#phi(GEP MET, gFEX MET)| [rad]",                              selDir + "sig_sel_dPhi_GEP_gFEX.pdf",  false, "rad");
             if (hasTruthNonIntXY) {
                 drawMultiDist(toVec(sig_sel_dPhi_GEP_truth), selLegLabels, "#Delta#phi(GEP MET, truth MET) — signal at 80 kHz sel.",    "|#Delta#phi(GEP MET, truth MET)| [rad]",                             selDir + "sig_sel_dPhi_GEP_truth.pdf",  false, "rad");
                 drawMultiDist(toVec(sig_sel_dPhi_truth_TOB), selLegLabels, "#Delta#phi(truth MET, TOB MET) — signal at 80 kHz sel.",    "|#Delta#phi(truth MET, TOB MET)| [rad]",                             selDir + "sig_sel_dPhi_truth_TOB.pdf",  false, "rad");
@@ -2011,7 +2308,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     sig_sel_phi2D_TOB_truth[iSel]->SetTitle(Form("Signal — %s;Truth MET #phi [rad];TOB MET #phi [rad]", selLegLabels[iSel].c_str()));
                     sig_sel_phi2D_TOB_truth[iSel]->Draw("COLZ");
                     gPad->SetLogz(sig_sel_phi2D_TOB_truth[iSel]->GetMaximum() > 0);
-                    c2D.SaveAs((selDir + "sig_sel_phi2D_TOB_truth_" + selShortNames[iSel] + ".pdf").c_str());
+                    c2D.cd(); DrawATLASLabel(); c2D.SaveAs((selDir + "sig_sel_phi2D_TOB_truth_" + selShortNames[iSel] + ".pdf").c_str());
                 }
             }
             if (hasTruthAntiKt4WZDressed)
@@ -2031,7 +2328,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawMultiDist(toVec(back_sel_gSumET),        selLegLabels, "gFEX TOB #Sigma E_{T} — bkg at 80 kHz sel.",                    "gFEX TOB #Sigma E_{T} [GeV]",                                        selDir + "back_sel_gSumET.pdf");
             drawMultiDist(toVec(back_sel_METsig),        selLegLabels, "GEP MET significance — bkg at 80 kHz sel.",                     "GEP MET / #sqrt{GEP TOB #Sigma E_{T}} [#sqrt{GeV}]",                 selDir + "back_sel_METsig.pdf",        true,  "#sqrt{GeV}");
             drawMultiDist(toVec(back_sel_gMETsig),       selLegLabels, "gFEX MET significance — bkg at 80 kHz sel.",                    "gFEX MET / #sqrt{gFEX TOB #Sigma E_{T}} [#sqrt{GeV}]",               selDir + "back_sel_gMETsig.pdf",       true,  "#sqrt{GeV}");
-            drawMultiDist(toVec(back_sel_dPhi_GEP_gFEX),selLegLabels, "#Delta#phi(GEP MET, gFEX MET) — bkg at 80 kHz sel.",            "|#Delta#phi(GEP MET, gFEX MET)| [rad]",                              selDir + "back_sel_dPhi_GEP_gFEX.pdf", false, "rad");
+            //drawMultiDist(toVec(back_sel_dPhi_GEP_gFEX),selLegLabels, "#Delta#phi(GEP MET, gFEX MET) — bkg at 80 kHz sel.",            "|#Delta#phi(GEP MET, gFEX MET)| [rad]",                              selDir + "back_sel_dPhi_GEP_gFEX.pdf", false, "rad");
             if (hasTruthNonIntXY) {
                 drawMultiDist(toVec(back_sel_dPhi_GEP_truth), selLegLabels, "#Delta#phi(GEP MET, truth MET) — bkg at 80 kHz sel.",      "|#Delta#phi(GEP MET, truth MET)| [rad]",                             selDir + "back_sel_dPhi_GEP_truth.pdf", false, "rad");
                 drawMultiDist(toVec(back_sel_dPhi_truth_TOB), selLegLabels, "#Delta#phi(truth MET, TOB MET) — bkg at 80 kHz sel.",      "|#Delta#phi(truth MET, TOB MET)| [rad]",                             selDir + "back_sel_dPhi_truth_TOB.pdf", false, "rad");
@@ -2041,7 +2338,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     back_sel_phi2D_TOB_truth[iSel]->SetTitle(Form("Background — %s;Truth MET #phi [rad];TOB MET #phi [rad]", selLegLabels[iSel].c_str()));
                     back_sel_phi2D_TOB_truth[iSel]->Draw("COLZ");
                     gPad->SetLogz(back_sel_phi2D_TOB_truth[iSel]->GetMaximum() > 0);
-                    c2D.SaveAs((selDir + "back_sel_phi2D_TOB_truth_" + selShortNames[iSel] + ".pdf").c_str());
+                    c2D.cd(); DrawATLASLabel(); c2D.SaveAs((selDir + "back_sel_phi2D_TOB_truth_" + selShortNames[iSel] + ".pdf").c_str());
                 }
             }
             if (hasTruthAntiKt4WZDressed)
@@ -2086,13 +2383,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
             drawEffVsThresholdMulti(effHists, effLabels,
                                     "Signal Efficiency vs MET Threshold", "MET threshold [GeV]",
-                                    fDir + "SigEff_vs_Threshold_AlgoComparison.pdf", signalName);
+                                    fDir + "SigEff_vs_Threshold_AlgoComparison.pdf", "");
             // gFEX-only version
             std::vector<TH1F*> gfexHists  = {sig_h_gMET, sig_h_gMET_NC, sig_h_gMET_Rms};
             std::vector<std::string> gfexL = {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms"};
             drawEffVsThresholdMulti(gfexHists, gfexL,
                                     "Signal Efficiency vs gFEX MET Threshold", "MET threshold [GeV]",
-                                    fDir + "SigEff_vs_Threshold_gFEX_AlgoComparison.pdf", signalName);
+                                    fDir + "SigEff_vs_Threshold_gFEX_AlgoComparison.pdf", "");
             // GEP-only version
             std::vector<TH1F*> gepHists = hasOverlapRemoval
                 ? std::vector<TH1F*>{sig_h_JetMet, sig_h_TotalMET}
@@ -2102,7 +2399,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 : std::vector<std::string>{"GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
             drawEffVsThresholdMulti(gepHists, gepL,
                                     "Signal Efficiency vs GEP MET Threshold", "MET threshold [GeV]",
-                                    fDir + "SigEff_vs_Threshold_GEP_AlgoComparison.pdf", signalName);
+                                    fDir + "SigEff_vs_Threshold_GEP_AlgoComparison.pdf", "");
         }
 
         // --- TOB MET vs truth NonInt MET calibration and resolution (signal and background) ---
@@ -2134,11 +2431,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 TF1* fitFn = new TF1((std::string("lf_")+h->GetName()).c_str(), "pol1", 0, xmax);
                 prof->Fit(fitFn, "QN");
                 double slope = fitFn->GetParameter(1), intercept = fitFn->GetParameter(0);
-                fitFn->SetLineColor(kBlue); fitFn->SetLineWidth(2);
+                fitFn->SetLineColor(kP10Blue); fitFn->SetLineWidth(2);
                 fitFn->Draw("SAME"); prof->Draw("SAME");
                 double rng = std::min(xmax, ymax);
                 TLine* diag = new TLine(0, 0, rng, rng);
-                diag->SetLineColor(kRed); diag->SetLineStyle(2); diag->SetLineWidth(2);
+                diag->SetLineColor(kP10Red); diag->SetLineStyle(2); diag->SetLineWidth(2);
                 diag->Draw("SAME");
                 TLegend leg(0.16, 0.62, 0.61, 0.88);
                 leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
@@ -2146,7 +2443,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 leg.AddEntry(fitFn, Form("Fit: y = %.3f x + %.1f GeV", slope, intercept), "l");
                 leg.AddEntry((TObject*)nullptr, Form("r = %.4f", r), "");
                 leg.Draw();
-                cTmp.SaveAs(path.c_str());
+                cTmp.cd(); DrawATLASLabel(); cTmp.SaveAs(path.c_str());
                 delete prof; delete fitFn;
             };
             // Signal
@@ -2172,22 +2469,22 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 TCanvas cTmp(("cRes1D_"+std::string(h->GetName())).c_str(), "", 700, 600);
                 cTmp.SetLeftMargin(0.14); cTmp.SetBottomMargin(0.14); cTmp.SetTicks(1, 1);
                 cTmp.SetLogy();
-                h->SetLineColor(kBlue); h->SetLineWidth(2);
+                h->SetLineColor(kP10Blue); h->SetLineWidth(2);
                 std::string yT = Form("Fraction of Events / %.4g", h->GetBinWidth(1));
                 if (!yUnit.empty()) yT += " " + yUnit;
                 h->SetTitle((tobLabel + ";" + xLbl + ";" + yT).c_str());
                 h->SetMinimum(1e-5);
                 h->Draw("HIST");
                 TLine* zero = new TLine(0, h->GetMinimum(), 0, h->GetMaximum() * 1.5);
-                zero->SetLineColor(kRed); zero->SetLineStyle(2); zero->SetLineWidth(2);
+                zero->SetLineColor(kP10Red); zero->SetLineStyle(2); zero->SetLineWidth(2);
                 zero->Draw("SAME");
-                cTmp.SaveAs(path.c_str());
+                cTmp.cd(); DrawATLASLabel(); cTmp.SaveAs(path.c_str());
             };
             // Helper to draw the 5-algorithm overlay for a given set of residual histograms
             auto drawRelResidualOverlay = [&](std::vector<TH1F*> resH, const std::string& path,
                                               const std::string& xLbl = "(Truth - TOB) / Truth MET_{NonInt}",
                                               const std::string& yUnit = "") {
-                const Color_t rcols[] = {kBlack, kRed, kOrange+1, kBlue, kGreen+2};
+                int rcols[] = {kBlack, kP10Red, kP10Orange, kP10Blue, kP10Green};
                 std::vector<std::string> resL = {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms",
                                                  "GEP Jet MET", "GEP Tower MET"};
                 double ymaxR = 0;
@@ -2212,7 +2509,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 zeroR->SetLineColor(kGray+2); zeroR->SetLineStyle(2); zeroR->SetLineWidth(2);
                 zeroR->Draw("SAME");
                 legR.Draw();
-                cOvl.SaveAs(path.c_str());
+                cOvl.cd(); DrawATLASLabel(); cOvl.SaveAs(path.c_str());
             };
             // Signal relative residuals
             drawRelResidual1D(sig_h1_gJwoJ_relResidual,    calDir + "sig_gFEX_JwoJ_relResidual.pdf",    "gFEX JwoJ");
@@ -2279,14 +2576,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 double xlo = h->GetXaxis()->GetXmin();
                 double xhi = (xmax_cap > 0) ? xmax_cap : h->GetXaxis()->GetXmax();
                 TLine* zero = new TLine(xlo, 0, xhi, 0);
-                zero->SetLineColor(kRed); zero->SetLineStyle(2); zero->SetLineWidth(2);
+                zero->SetLineColor(kP10Red); zero->SetLineStyle(2); zero->SetLineWidth(2);
                 zero->Draw("SAME");
                 TLegend leg(0.20, 0.85, 0.58, 0.93);
                 leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
                 leg.AddEntry(zero, "Perfect resolution", "l");
                 leg.AddEntry(prof, "Mean profile", "lp");
                 leg.Draw();
-                cTmp.SaveAs(path.c_str());
+                cTmp.cd(); DrawATLASLabel(); cTmp.SaveAs(path.c_str());
                 delete prof;
             };
             const std::string absYLbl = "Truth - TOB MET [GeV]";
@@ -2353,6 +2650,20 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                                      fDir + "Rate_AlgoComparison.pdf", "",
                                      "Estimated Background Rate [Hz]");
         }
+
+        // --- gFEX algorithm comparison (JwoJ vs NoiseCut vs Rms), jFEX, and GEP types overlaid in kHz, up to 200 GeV threshold
+        {
+            std::vector<TH1F*> rateHists = hasOverlapRemoval
+                ? std::vector<TH1F*>{back_hw_gMET, back_hw_gMET_NC, back_hw_gMET_Rms, back_hw_jMET, back_hw_JetMET, back_hw_TotalMET}
+                : std::vector<TH1F*>{back_hw_gMET, back_hw_gMET_NC, back_hw_gMET_Rms, back_hw_jMET, back_hw_JetMET, back_hw_TowerMET, back_hw_TotalMET};
+            std::vector<std::string> rateLabels = hasOverlapRemoval
+                ? std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Total MET"}
+                : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
+            drawRateVsThresholdMulti(rateHists, rateLabels,
+                                     "Rate vs MET threshold", "MET threshold [GeV]",
+                                     fDir + "Rate_AlgoComparison_kHz_200GeV.pdf", "",
+                                     "Estimated Background Rate [kHz]", 200.0, 1e-3, 1e-3);
+        }
         // --- gFEX algorithm-only comparison ---
         {
             std::vector<TH1F*> rateHists = {back_hw_gMET, back_hw_gMET_NC, back_hw_gMET_Rms};
@@ -2407,7 +2718,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             allTOLabels,
             "Turn-on at 80 kHz", fDir + "TurnOn_80kHz.pdf",
             allTOThrs(thr_gMET_80kHz, thr_gMET_NC_80kHz, thr_gMET_Rms_80kHz, thr_jMET_80kHz, thr_JetMET_80kHz, thr_TowerMET_80kHz, thr_TotalMET_80kHz),
-            "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+            "Rate = 80 kHz", sig_h_metTruthNonInt_coarse, 0.52);
+        drawTurnOnOverlay(
+            allTOEffs(eff_gMET_60kHz, eff_gMET_NC_60kHz, eff_gMET_Rms_60kHz, eff_jMET_60kHz, eff_JetMET_60kHz, eff_TowerMET_60kHz, eff_TotalMET_60kHz),
+            allTOLabels,
+            "Turn-on at 60 kHz", fDir + "TurnOn_60kHz.pdf",
+            allTOThrs(thr_gMET_60kHz, thr_gMET_NC_60kHz, thr_gMET_Rms_60kHz, thr_jMET_60kHz, thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz),
+            "Rate = 60 kHz", sig_h_metTruthNonInt_coarse, 0.52);
         // gFEX-only algorithm comparison turn-ons
         drawTurnOnOverlay(
             {eff_gMET_20kHz, eff_gMET_NC_20kHz, eff_gMET_Rms_20kHz},
@@ -2426,6 +2743,12 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms"},
             "gFEX algorithm comparison — Turn-on at 80 kHz", fDir + "TurnOn_gFEX_AlgoComparison_80kHz.pdf",
             {thr_gMET_80kHz, thr_gMET_NC_80kHz, thr_gMET_Rms_80kHz}, "Rate = 80 kHz",
+            sig_h_metTruthNonInt_coarse);
+        drawTurnOnOverlay(
+            {eff_gMET_60kHz, eff_gMET_NC_60kHz, eff_gMET_Rms_60kHz},
+            {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms"},
+            "gFEX algorithm comparison — Turn-on at 60 kHz", fDir + "TurnOn_gFEX_AlgoComparison_60kHz.pdf",
+            {thr_gMET_60kHz, thr_gMET_NC_60kHz, thr_gMET_Rms_60kHz}, "Rate = 60 kHz",
             sig_h_metTruthNonInt_coarse);
         // GEP-only algorithm comparison turn-ons
         std::vector<std::string> gepTOLabels = hasOverlapRemoval
@@ -2458,6 +2781,12 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 80 kHz", fDir + "TurnOn_GEP_AlgoComparison_80kHz.pdf",
             gepTOThrs(thr_JetMET_80kHz, thr_TowerMET_80kHz, thr_TotalMET_80kHz), "Rate = 80 kHz",
+            sig_h_metTruthNonInt_coarse);
+        drawTurnOnOverlay(
+            gepTOEffs(eff_JetMET_60kHz, eff_TowerMET_60kHz, eff_TotalMET_60kHz),
+            gepTOLabels,
+            "GEP algorithm comparison — Turn-on at 60 kHz", fDir + "TurnOn_GEP_AlgoComparison_60kHz.pdf",
+            gepTOThrs(thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz), "Rate = 60 kHz",
             sig_h_metTruthNonInt_coarse);
 
         // --- Combined gFEX+GEP turn-on curves at best thresholds ---
@@ -2516,6 +2845,15 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             "GEP Jet MET + Combined Turn-on at 80 kHz", comboDir + "TurnOn_combined_Jet_80kHz.pdf",
             {}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
         drawTurnOnOverlay(
+            {eff_JetMET_60kHz,
+             eff_combo_JwoJ_Jet_60kHz, eff_combo_NC_Jet_60kHz, eff_combo_Rms_Jet_60kHz},
+            {"GEP Jet MET",
+             std::string("JwoJ+Jet (")+comboThrLabel(best_JwoJ_Jet_60)+")",
+             std::string("NC+Jet (")  +comboThrLabel(best_NC_Jet_60)+")",
+             std::string("Rms+Jet (") +comboThrLabel(best_Rms_Jet_60)+")"},
+            "GEP Jet MET + Combined Turn-on at 60 kHz", comboDir + "TurnOn_combined_Jet_60kHz.pdf",
+            {}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+        drawTurnOnOverlay(
             {eff_TowerMET_80kHz,
              eff_combo_JwoJ_Tower_80kHz, eff_combo_NC_Tower_80kHz, eff_combo_Rms_Tower_80kHz},
             {"GEP Tower MET",
@@ -2524,6 +2862,15 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("Rms+Tower (") +comboThrLabel(best_Rms_Tower_80)+")"},
             "GEP Tower MET + Combined Turn-on at 80 kHz", comboDir + "TurnOn_combined_Tower_80kHz.pdf",
             {}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+        drawTurnOnOverlay(
+            {eff_TowerMET_60kHz,
+             eff_combo_JwoJ_Tower_60kHz, eff_combo_NC_Tower_60kHz, eff_combo_Rms_Tower_60kHz},
+            {"GEP Tower MET",
+             std::string("JwoJ+Tower (")+comboThrLabel(best_JwoJ_Tower_60)+")",
+             std::string("NC+Tower (")  +comboThrLabel(best_NC_Tower_60)+")",
+             std::string("Rms+Tower (") +comboThrLabel(best_Rms_Tower_60)+")"},
+            "GEP Tower MET + Combined Turn-on at 60 kHz", comboDir + "TurnOn_combined_Tower_60kHz.pdf",
+            {}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
 
         // --- Rate vs Efficiency curves (background rate vs signal efficiency) ---
         auto out_RateVsEff_gMET     = MakeRateVsEff(sig_h_gMET,     back_hw_gMET);
@@ -2542,12 +2889,12 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             g->GetYaxis()->SetTitle("Estimated Background Rate [Hz]");
         };
         styleRVE(out_RateVsEff_gMET.gRate_vsEff,     kBlack);
-        styleRVE(out_RateVsEff_gMET_NC.gRate_vsEff,  kRed);
-        styleRVE(out_RateVsEff_gMET_Rms.gRate_vsEff, kOrange+1);
-        styleRVE(out_RateVsEff_jMET.gRate_vsEff,     kCyan+2);
-        styleRVE(out_RateVsEff_JetMET.gRate_vsEff,   kBlue);
-        styleRVE(out_RateVsEff_TowerMET.gRate_vsEff, kGreen+2);
-        styleRVE(out_RateVsEff_TotalMET.gRate_vsEff, kMagenta+1);
+        styleRVE(out_RateVsEff_gMET_NC.gRate_vsEff,  kP10Red);
+        styleRVE(out_RateVsEff_gMET_Rms.gRate_vsEff, kP10Orange);
+        styleRVE(out_RateVsEff_jMET.gRate_vsEff,     kP10Cyan);
+        styleRVE(out_RateVsEff_JetMET.gRate_vsEff,   kP10Blue);
+        styleRVE(out_RateVsEff_TowerMET.gRate_vsEff, kP10Green);
+        styleRVE(out_RateVsEff_TotalMET.gRate_vsEff, kP10Violet);
 
         // Individual PDFs
         auto drawRVEsingle = [&](TGraph* g, const std::string& title, const std::string& path) {
@@ -2556,7 +2903,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             gPad->SetLogy();
             g->SetTitle((title+";Signal Efficiency;Estimated Background Rate [Hz]").c_str());
             g->Draw("AP");
-            c.SaveAs(path.c_str());
+            c.cd(); DrawATLASLabel(); c.SaveAs(path.c_str());
         };
         drawRVEsingle(out_RateVsEff_gMET.gRate_vsEff,     "gFEX MET (JwoJ)",    fDir + "RateVsEff_gFEX_MET_JwoJ.pdf");
         drawRVEsingle(out_RateVsEff_gMET_NC.gRate_vsEff,  "gFEX MET (NoiseCut)",fDir + "RateVsEff_gFEX_MET_NoiseCut.pdf");
@@ -2576,13 +2923,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> allRVELabels = hasOverlapRemoval
                 ? std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
-            drawRateVsEffOverlay(allRVE, allRVELabels, (fDir + "RateVsEff_overlay.pdf"), signalName);
+            drawRateVsEffOverlay(allRVE, allRVELabels, (fDir + "RateVsEff_overlay.pdf"), "");
         }
         // gFEX-only algorithm comparison
         drawRateVsEffOverlay(
             {out_RateVsEff_gMET.gRate_vsEff, out_RateVsEff_gMET_NC.gRate_vsEff, out_RateVsEff_gMET_Rms.gRate_vsEff},
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms"},
-            (fDir + "RateVsEff_gFEX_AlgoComparison.pdf"), signalName);
+            (fDir + "RateVsEff_gFEX_AlgoComparison.pdf"), "");
         // GEP-only algorithm comparison
         {
             std::vector<TGraph*> gepRVE = hasOverlapRemoval
@@ -2591,7 +2938,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> gepRVELabels = hasOverlapRemoval
                 ? std::vector<std::string>{"GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
-            drawRateVsEffOverlay(gepRVE, gepRVELabels, (fDir + "RateVsEff_GEP_AlgoComparison.pdf"), signalName);
+            drawRateVsEffOverlay(gepRVE, gepRVELabels, (fDir + "RateVsEff_GEP_AlgoComparison.pdf"), "");
         }
 
         // --- Combined gFEX+GEP rate-vs-eff frontiers ---
@@ -2606,7 +2953,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              frontier_NC_Tower, frontier_Rms_Jet, frontier_Rms_Tower},
             {"JwoJ + GEP Jet", "JwoJ + GEP Tower", "NoiseCut + GEP Jet",
              "NoiseCut + GEP Tower", "Rms + GEP Jet", "Rms + GEP Tower"},
-            (comboDir + "RateVsEff_combined_frontiers.pdf"), signalName);
+            (comboDir + "RateVsEff_combined_frontiers.pdf"), "");
         // Combined vs individual overlay (best combined per gFEX type vs each individual)
         {
             std::vector<TGraph*> cviRVE = hasOverlapRemoval
@@ -2623,75 +2970,90 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms",
                                            "GEP Jet MET", "GEP Tower MET", "GEP Total MET",
                                            "JwoJ + GEP Jet (combined)", "NC + GEP Jet (combined)", "Rms + GEP Jet (combined)"};
-            drawRateVsEffOverlay(cviRVE, cviLabels, (comboDir + "RateVsEff_combined_vs_individual.pdf"), signalName);
+            drawRateVsEffOverlay(cviRVE, cviLabels, (comboDir + "RateVsEff_combined_vs_individual.pdf"), "");
         }
 
         // --- AOD vs Sim gFEX MET comparison (only for resim ntuples) ---
         if (hasGFexSimMET) {
             // Distribution overlays: AOD vs Sim
-            drawAlgoComparison(sig_h_gMET, back_h_gMET, sig_h_gMET_JwoJSim, back_h_gMET_JwoJSim,
-                               "gFEX JwoJ (AOD)", "gFEX JwoJ (Sim)",
-                               "MET [GeV]", fDir + "gFEX_JwoJ_AOD_vs_Sim.pdf", signalName);
-            drawAlgoComparison(sig_h_gMET_NC, back_h_gMET_NC, sig_h_gMET_NCSim, back_h_gMET_NCSim,
-                               "gFEX NoiseCut (AOD)", "gFEX NoiseCut (Sim)",
-                               "MET [GeV]", fDir + "gFEX_NC_AOD_vs_Sim.pdf", signalName);
-            drawAlgoComparison(sig_h_gMET_Rms, back_h_gMET_Rms, sig_h_gMET_RmsSim, back_h_gMET_RmsSim,
-                               "gFEX Rms (AOD)", "gFEX Rms (Sim)",
-                               "MET [GeV]", fDir + "gFEX_Rms_AOD_vs_Sim.pdf", signalName);
+            drawAlgoComparison(sig_h_gMET, back_h_gMET, sig_h_gMET_JwoJAOD, back_h_gMET_JwoJAOD,
+                               "gFEX JwoJ (Sim)", "gFEX JwoJ (AOD)",
+                               "MET [GeV]", fDir + "gFEX_JwoJ_AOD_vs_Sim.pdf", "");
+            drawAlgoComparison(sig_h_gMET_NC, back_h_gMET_NC, sig_h_gMET_NCAOD, back_h_gMET_NCAOD,
+                               "gFEX NoiseCut (Sim)", "gFEX NoiseCut (AOD)",
+                               "MET [GeV]", fDir + "gFEX_NC_AOD_vs_Sim.pdf", "");
+            drawAlgoComparison(sig_h_gMET_Rms, back_h_gMET_Rms, sig_h_gMET_RmsAOD, back_h_gMET_RmsAOD,
+                               "gFEX Rms (Sim)", "gFEX Rms (AOD)",
+                               "MET [GeV]", fDir + "gFEX_Rms_AOD_vs_Sim.pdf", "");
             // Rate vs threshold: AOD vs Sim
-            drawRateVsThresholdMulti({back_hw_gMET,     back_hw_gMET_JwoJSim},
-                                     {"gFEX JwoJ (AOD)", "gFEX JwoJ (Sim)"},
+            drawRateVsThresholdMulti({back_hw_gMET,     back_hw_gMET_JwoJAOD},
+                                     {"gFEX JwoJ (Sim)", "gFEX JwoJ (AOD)"},
                                      "Rate vs gFEX JwoJ MET (AOD vs Sim)", "MET threshold [GeV]",
                                      fDir + "Rate_gFEX_JwoJ_AOD_vs_Sim.pdf", "", "Estimated Background Rate [Hz]");
-            drawRateVsThresholdMulti({back_hw_gMET_NC,   back_hw_gMET_NCSim},
-                                     {"gFEX NoiseCut (AOD)", "gFEX NoiseCut (Sim)"},
+            drawRateVsThresholdMulti({back_hw_gMET_NC,   back_hw_gMET_NCAOD},
+                                     {"gFEX NoiseCut (Sim)", "gFEX NoiseCut (AOD)"},
                                      "Rate vs gFEX NoiseCut MET (AOD vs Sim)", "MET threshold [GeV]",
                                      fDir + "Rate_gFEX_NC_AOD_vs_Sim.pdf", "", "Estimated Background Rate [Hz]");
-            drawRateVsThresholdMulti({back_hw_gMET_Rms,  back_hw_gMET_RmsSim},
-                                     {"gFEX Rms (AOD)", "gFEX Rms (Sim)"},
+            drawRateVsThresholdMulti({back_hw_gMET_Rms,  back_hw_gMET_RmsAOD},
+                                     {"gFEX Rms (Sim)", "gFEX Rms (AOD)"},
                                      "Rate vs gFEX Rms MET (AOD vs Sim)", "MET threshold [GeV]",
                                      fDir + "Rate_gFEX_Rms_AOD_vs_Sim.pdf", "", "Estimated Background Rate [Hz]");
             // Turn-on curves: AOD vs Sim at 20/40/80 kHz
             drawTurnOnOverlay(
-                {eff_gMET_80kHz, eff_gMET_JwoJSim_80kHz},
-                {"gFEX JwoJ (AOD)", "gFEX JwoJ (Sim)"},
+                {eff_gMET_80kHz, eff_gMET_JwoJAOD_80kHz},
+                {"gFEX JwoJ (Sim)", "gFEX JwoJ (AOD)"},
                 "gFEX JwoJ Turn-on at 80 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_JwoJ_AOD_vs_Sim_80kHz.pdf",
-                {thr_gMET_80kHz, thr_gMET_JwoJSim_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_80kHz, thr_gMET_JwoJAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
             drawTurnOnOverlay(
-                {eff_gMET_NC_80kHz, eff_gMET_NCSim_80kHz},
-                {"gFEX NoiseCut (AOD)", "gFEX NoiseCut (Sim)"},
+                {eff_gMET_60kHz, eff_gMET_JwoJAOD_60kHz},
+                {"gFEX JwoJ (Sim)", "gFEX JwoJ (AOD)"},
+                "gFEX JwoJ Turn-on at 60 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_JwoJ_AOD_vs_Sim_60kHz.pdf",
+                {thr_gMET_60kHz, thr_gMET_JwoJAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse);
+            drawTurnOnOverlay(
+                {eff_gMET_NC_80kHz, eff_gMET_NCAOD_80kHz},
+                {"gFEX NoiseCut (Sim)", "gFEX NoiseCut (AOD)"},
                 "gFEX NoiseCut Turn-on at 80 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_NC_AOD_vs_Sim_80kHz.pdf",
-                {thr_gMET_NC_80kHz, thr_gMET_NCSim_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_NC_80kHz, thr_gMET_NCAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
             drawTurnOnOverlay(
-                {eff_gMET_Rms_80kHz, eff_gMET_RmsSim_80kHz},
-                {"gFEX Rms (AOD)", "gFEX Rms (Sim)"},
+                {eff_gMET_NC_60kHz, eff_gMET_NCAOD_60kHz},
+                {"gFEX NoiseCut (Sim)", "gFEX NoiseCut (AOD)"},
+                "gFEX NoiseCut Turn-on at 60 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_NC_AOD_vs_Sim_60kHz.pdf",
+                {thr_gMET_NC_60kHz, thr_gMET_NCAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse);
+            drawTurnOnOverlay(
+                {eff_gMET_Rms_80kHz, eff_gMET_RmsAOD_80kHz},
+                {"gFEX Rms (Sim)", "gFEX Rms (AOD)"},
                 "gFEX Rms Turn-on at 80 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_Rms_AOD_vs_Sim_80kHz.pdf",
-                {thr_gMET_Rms_80kHz, thr_gMET_RmsSim_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_Rms_80kHz, thr_gMET_RmsAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+            drawTurnOnOverlay(
+                {eff_gMET_Rms_60kHz, eff_gMET_RmsAOD_60kHz},
+                {"gFEX Rms (Sim)", "gFEX Rms (AOD)"},
+                "gFEX Rms Turn-on at 60 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_Rms_AOD_vs_Sim_60kHz.pdf",
+                {thr_gMET_Rms_60kHz, thr_gMET_RmsAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse);
             // Rate vs efficiency: AOD vs Sim
-            auto out_RVE_JwoJSim = MakeRateVsEff(sig_h_gMET_JwoJSim, back_hw_gMET_JwoJSim);
-            auto out_RVE_NCSim   = MakeRateVsEff(sig_h_gMET_NCSim,   back_hw_gMET_NCSim);
-            auto out_RVE_RmsSim  = MakeRateVsEff(sig_h_gMET_RmsSim,  back_hw_gMET_RmsSim);
-            styleRVE(out_RVE_JwoJSim.gRate_vsEff, kBlack);
-            styleRVE(out_RVE_NCSim.gRate_vsEff,   kRed);
-            styleRVE(out_RVE_RmsSim.gRate_vsEff,  kOrange+1);
+            auto out_RVE_JwoJAOD = MakeRateVsEff(sig_h_gMET_JwoJAOD, back_hw_gMET_JwoJAOD);
+            auto out_RVE_NCAOD   = MakeRateVsEff(sig_h_gMET_NCAOD,   back_hw_gMET_NCAOD);
+            auto out_RVE_RmsAOD  = MakeRateVsEff(sig_h_gMET_RmsAOD,  back_hw_gMET_RmsAOD);
+            styleRVE(out_RVE_JwoJAOD.gRate_vsEff, kBlack);
+            styleRVE(out_RVE_NCAOD.gRate_vsEff,   kP10Red);
+            styleRVE(out_RVE_RmsAOD.gRate_vsEff,  kP10Orange);
             drawRateVsEffOverlay(
-                {out_RateVsEff_gMET.gRate_vsEff,    out_RVE_JwoJSim.gRate_vsEff},
-                {"gFEX JwoJ (AOD)", "gFEX JwoJ (Sim)"},
-                (fDir + "RateVsEff_gFEX_JwoJ_AOD_vs_Sim.pdf"), signalName);
+                {out_RateVsEff_gMET.gRate_vsEff,    out_RVE_JwoJAOD.gRate_vsEff},
+                {"gFEX JwoJ (Sim)", "gFEX JwoJ (AOD)"},
+                (fDir + "RateVsEff_gFEX_JwoJ_AOD_vs_Sim.pdf"), "");
             drawRateVsEffOverlay(
-                {out_RateVsEff_gMET_NC.gRate_vsEff, out_RVE_NCSim.gRate_vsEff},
-                {"gFEX NoiseCut (AOD)", "gFEX NoiseCut (Sim)"},
-                (fDir + "RateVsEff_gFEX_NC_AOD_vs_Sim.pdf"), signalName);
+                {out_RateVsEff_gMET_NC.gRate_vsEff, out_RVE_NCAOD.gRate_vsEff},
+                {"gFEX NoiseCut (Sim)", "gFEX NoiseCut (AOD)"},
+                (fDir + "RateVsEff_gFEX_NC_AOD_vs_Sim.pdf"), "");
             drawRateVsEffOverlay(
-                {out_RateVsEff_gMET_Rms.gRate_vsEff, out_RVE_RmsSim.gRate_vsEff},
-                {"gFEX Rms (AOD)", "gFEX Rms (Sim)"},
-                (fDir + "RateVsEff_gFEX_Rms_AOD_vs_Sim.pdf"), signalName);
+                {out_RateVsEff_gMET_Rms.gRate_vsEff, out_RVE_RmsAOD.gRate_vsEff},
+                {"gFEX Rms (Sim)", "gFEX Rms (AOD)"},
+                (fDir + "RateVsEff_gFEX_Rms_AOD_vs_Sim.pdf"), "");
             drawRateVsEffOverlay(
                 {out_RateVsEff_gMET.gRate_vsEff,    out_RateVsEff_gMET_NC.gRate_vsEff,  out_RateVsEff_gMET_Rms.gRate_vsEff,
-                 out_RVE_JwoJSim.gRate_vsEff,        out_RVE_NCSim.gRate_vsEff,           out_RVE_RmsSim.gRate_vsEff},
-                {"gFEX JwoJ (AOD)", "gFEX NoiseCut (AOD)", "gFEX Rms (AOD)",
-                 "gFEX JwoJ (Sim)", "gFEX NoiseCut (Sim)", "gFEX Rms (Sim)"},
-                (fDir + "RateVsEff_gFEX_AOD_vs_Sim_all.pdf"), signalName);
+                 out_RVE_JwoJAOD.gRate_vsEff,        out_RVE_NCAOD.gRate_vsEff,           out_RVE_RmsAOD.gRate_vsEff},
+                {"gFEX JwoJ (Sim)", "gFEX NoiseCut (Sim)", "gFEX Rms (Sim)",
+                 "gFEX JwoJ (AOD)", "gFEX NoiseCut (AOD)", "gFEX Rms (AOD)"},
+                (fDir + "RateVsEff_gFEX_AOD_vs_Sim_all.pdf"), "");
         }
 
         // Store clones for multi-file overlay — SetDirectory(0) detaches from
@@ -2735,44 +3097,67 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_hw_JetMET_vec.push_back(cloneDetached(back_hw_JetMET));
         back_hw_TowerMET_vec.push_back(cloneDetached(back_hw_TowerMET));
         eff_gMET_80kHz_vec.push_back(cloneDetached(eff_gMET_80kHz));
+        eff_gMET_60kHz_vec.push_back(cloneDetached(eff_gMET_60kHz));
         eff_gMET_NC_80kHz_vec.push_back(cloneDetached(eff_gMET_NC_80kHz));
+        eff_gMET_NC_60kHz_vec.push_back(cloneDetached(eff_gMET_NC_60kHz));
         eff_gMET_Rms_80kHz_vec.push_back(cloneDetached(eff_gMET_Rms_80kHz));
+        eff_gMET_Rms_60kHz_vec.push_back(cloneDetached(eff_gMET_Rms_60kHz));
         eff_jMET_80kHz_vec.push_back(cloneDetached(eff_jMET_80kHz));
+        eff_jMET_60kHz_vec.push_back(cloneDetached(eff_jMET_60kHz));
         eff_JetMET_80kHz_vec.push_back(cloneDetached(eff_JetMET_80kHz));
+        eff_JetMET_60kHz_vec.push_back(cloneDetached(eff_JetMET_60kHz));
         eff_TowerMET_80kHz_vec.push_back(cloneDetached(eff_TowerMET_80kHz));
+        eff_TowerMET_60kHz_vec.push_back(cloneDetached(eff_TowerMET_60kHz));
         eff_TotalMET_80kHz_vec.push_back(cloneDetached(eff_TotalMET_80kHz));
+        eff_TotalMET_60kHz_vec.push_back(cloneDetached(eff_TotalMET_60kHz));
         thr_gMET_80kHz_vec.push_back(thr_gMET_80kHz);
+        thr_gMET_60kHz_vec.push_back(thr_gMET_60kHz);
         thr_gMET_NC_80kHz_vec.push_back(thr_gMET_NC_80kHz);
+        thr_gMET_NC_60kHz_vec.push_back(thr_gMET_NC_60kHz);
         thr_gMET_Rms_80kHz_vec.push_back(thr_gMET_Rms_80kHz);
+        thr_gMET_Rms_60kHz_vec.push_back(thr_gMET_Rms_60kHz);
         thr_jMET_80kHz_vec.push_back(thr_jMET_80kHz);
+        thr_jMET_60kHz_vec.push_back(thr_jMET_60kHz);
         thr_JetMET_80kHz_vec.push_back(thr_JetMET_80kHz);
+        thr_JetMET_60kHz_vec.push_back(thr_JetMET_60kHz);
         thr_TowerMET_80kHz_vec.push_back(thr_TowerMET_80kHz);
+        thr_TowerMET_60kHz_vec.push_back(thr_TowerMET_60kHz);
         thr_TotalMET_80kHz_vec.push_back(thr_TotalMET_80kHz);
+        thr_TotalMET_60kHz_vec.push_back(thr_TotalMET_60kHz);
         sig_h_metTruthNonInt_unscaled_vec.push_back(cloneDetached(sig_h_metTruthNonInt_coarse));
         if (hasGFexSimMET) {
-            sig_h_gMET_JwoJSim_vec.push_back(cloneDetached(sig_h_gMET_JwoJSim));
-            back_h_gMET_JwoJSim_vec.push_back(cloneDetached(back_h_gMET_JwoJSim));
-            sig_h_gMET_NCSim_vec.push_back(cloneDetached(sig_h_gMET_NCSim));
-            back_h_gMET_NCSim_vec.push_back(cloneDetached(back_h_gMET_NCSim));
-            sig_h_gMET_RmsSim_vec.push_back(cloneDetached(sig_h_gMET_RmsSim));
-            back_h_gMET_RmsSim_vec.push_back(cloneDetached(back_h_gMET_RmsSim));
-            back_hw_gMET_JwoJSim_vec.push_back(cloneDetached(back_hw_gMET_JwoJSim));
-            back_hw_gMET_NCSim_vec.push_back(cloneDetached(back_hw_gMET_NCSim));
-            back_hw_gMET_RmsSim_vec.push_back(cloneDetached(back_hw_gMET_RmsSim));
-            eff_gMET_JwoJSim_80kHz_vec.push_back(cloneDetached(eff_gMET_JwoJSim_80kHz));
-            eff_gMET_NCSim_80kHz_vec.push_back(cloneDetached(eff_gMET_NCSim_80kHz));
-            eff_gMET_RmsSim_80kHz_vec.push_back(cloneDetached(eff_gMET_RmsSim_80kHz));
-            thr_gMET_JwoJSim_80kHz_vec.push_back(thr_gMET_JwoJSim_80kHz);
-            thr_gMET_NCSim_80kHz_vec.push_back(thr_gMET_NCSim_80kHz);
-            thr_gMET_RmsSim_80kHz_vec.push_back(thr_gMET_RmsSim_80kHz);
+            sig_h_gMET_JwoJAOD_vec.push_back(cloneDetached(sig_h_gMET_JwoJAOD));
+            back_h_gMET_JwoJAOD_vec.push_back(cloneDetached(back_h_gMET_JwoJAOD));
+            sig_h_gMET_NCAOD_vec.push_back(cloneDetached(sig_h_gMET_NCAOD));
+            back_h_gMET_NCAOD_vec.push_back(cloneDetached(back_h_gMET_NCAOD));
+            sig_h_gMET_RmsAOD_vec.push_back(cloneDetached(sig_h_gMET_RmsAOD));
+            back_h_gMET_RmsAOD_vec.push_back(cloneDetached(back_h_gMET_RmsAOD));
+            back_hw_gMET_JwoJAOD_vec.push_back(cloneDetached(back_hw_gMET_JwoJAOD));
+            back_hw_gMET_NCAOD_vec.push_back(cloneDetached(back_hw_gMET_NCAOD));
+            back_hw_gMET_RmsAOD_vec.push_back(cloneDetached(back_hw_gMET_RmsAOD));
+            eff_gMET_JwoJAOD_80kHz_vec.push_back(cloneDetached(eff_gMET_JwoJAOD_80kHz));
+            eff_gMET_JwoJAOD_60kHz_vec.push_back(cloneDetached(eff_gMET_JwoJAOD_60kHz));
+            eff_gMET_NCAOD_80kHz_vec.push_back(cloneDetached(eff_gMET_NCAOD_80kHz));
+            eff_gMET_NCAOD_60kHz_vec.push_back(cloneDetached(eff_gMET_NCAOD_60kHz));
+            eff_gMET_RmsAOD_80kHz_vec.push_back(cloneDetached(eff_gMET_RmsAOD_80kHz));
+            eff_gMET_RmsAOD_60kHz_vec.push_back(cloneDetached(eff_gMET_RmsAOD_60kHz));
+            thr_gMET_JwoJAOD_80kHz_vec.push_back(thr_gMET_JwoJAOD_80kHz);
+            thr_gMET_JwoJAOD_60kHz_vec.push_back(thr_gMET_JwoJAOD_60kHz);
+            thr_gMET_NCAOD_80kHz_vec.push_back(thr_gMET_NCAOD_80kHz);
+            thr_gMET_NCAOD_60kHz_vec.push_back(thr_gMET_NCAOD_60kHz);
+            thr_gMET_RmsAOD_80kHz_vec.push_back(thr_gMET_RmsAOD_80kHz);
+            thr_gMET_RmsAOD_60kHz_vec.push_back(thr_gMET_RmsAOD_60kHz);
         }
         sigF->Close();
         backF->Close();
     } // file loop
 
     // --- Multi-file overlays (sig + bkg overlaid, dashed=bkg) ---
+    // Multi-file overlays keep the process name in the legend header (via signalName), so clear
+    // the top-right per-file process label.
+    gProcLabel = "";
     if (signalFiles.size() > 1) {
-        std::string mDir = "multiFileOverlay_MET/";
+        std::string mDir = overlayDir;
         gSystem->mkdir(mDir.c_str(), true);
         drawOverlayMulti(sig_h_TotalMET_vec,      back_h_TotalMET_vec,      labels, "Total MET (GEP)",     "MET [GeV]",          mDir + "TotalMET.pdf",        signalName);
         drawOverlayMulti(sig_h_TowerMet_vec,      back_h_TowerMet_vec,      labels, "Tower MET (GEP)",     "MET [GeV]",          mDir + "TowerMET.pdf",        signalName);
@@ -2843,57 +3228,107 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                           "gFEX JwoJ Turn-on at 80 kHz",
                           mDir + "TurnOn_80kHz_gFEX_JwoJ_multi.pdf",
                           thr_gMET_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+        drawTurnOnOverlay(eff_gMET_60kHz_vec,
+                          makeConfigLabels("gFEX JwoJ"),
+                          "gFEX JwoJ Turn-on at 60 kHz",
+                          mDir + "TurnOn_60kHz_gFEX_JwoJ_multi.pdf",
+                          thr_gMET_60kHz_vec, "Rate = 60 kHz", truthOverlay);
         drawTurnOnOverlay(eff_gMET_NC_80kHz_vec,
                           makeConfigLabels("gFEX NoiseCut"),
                           "gFEX NoiseCut Turn-on at 80 kHz",
                           mDir + "TurnOn_80kHz_gFEX_NoiseCut_multi.pdf",
                           thr_gMET_NC_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+        drawTurnOnOverlay(eff_gMET_NC_60kHz_vec,
+                          makeConfigLabels("gFEX NoiseCut"),
+                          "gFEX NoiseCut Turn-on at 60 kHz",
+                          mDir + "TurnOn_60kHz_gFEX_NoiseCut_multi.pdf",
+                          thr_gMET_NC_60kHz_vec, "Rate = 60 kHz", truthOverlay);
         drawTurnOnOverlay(eff_gMET_Rms_80kHz_vec,
                           makeConfigLabels("gFEX Rms"),
                           "gFEX Rms Turn-on at 80 kHz",
                           mDir + "TurnOn_80kHz_gFEX_Rms_multi.pdf",
                           thr_gMET_Rms_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+        drawTurnOnOverlay(eff_gMET_Rms_60kHz_vec,
+                          makeConfigLabels("gFEX Rms"),
+                          "gFEX Rms Turn-on at 60 kHz",
+                          mDir + "TurnOn_60kHz_gFEX_Rms_multi.pdf",
+                          thr_gMET_Rms_60kHz_vec, "Rate = 60 kHz", truthOverlay);
         drawTurnOnOverlay(eff_jMET_80kHz_vec,
                           makeConfigLabels("jFEX"),
                           "jFEX MET Turn-on at 80 kHz",
                           mDir + "TurnOn_80kHz_jFEX_MET_multi.pdf",
                           thr_jMET_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+        drawTurnOnOverlay(eff_jMET_60kHz_vec,
+                          makeConfigLabels("jFEX"),
+                          "jFEX MET Turn-on at 60 kHz",
+                          mDir + "TurnOn_60kHz_jFEX_MET_multi.pdf",
+                          thr_jMET_60kHz_vec, "Rate = 60 kHz", truthOverlay);
         drawTurnOnOverlay(eff_JetMET_80kHz_vec,
                           makeConfigLabels("GEP Jet MET"),
                           "GEP Jet MET Turn-on at 80 kHz",
                           mDir + "TurnOn_80kHz_JetMET_multi.pdf",
                           thr_JetMET_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+        drawTurnOnOverlay(eff_JetMET_60kHz_vec,
+                          makeConfigLabels("GEP Jet MET"),
+                          "GEP Jet MET Turn-on at 60 kHz",
+                          mDir + "TurnOn_60kHz_JetMET_multi.pdf",
+                          thr_JetMET_60kHz_vec, "Rate = 60 kHz", truthOverlay);
         drawTurnOnOverlay(eff_TowerMET_80kHz_vec,
                           makeConfigLabels("GEP Tower MET"),
                           "GEP Tower MET Turn-on at 80 kHz",
                           mDir + "TurnOn_80kHz_TowerMET_multi.pdf",
                           thr_TowerMET_80kHz_vec, "Rate = 80 kHz", truthOverlay,
                           0.45, 0.20);
+        drawTurnOnOverlay(eff_TowerMET_60kHz_vec,
+                          makeConfigLabels("GEP Tower MET"),
+                          "GEP Tower MET Turn-on at 60 kHz",
+                          mDir + "TurnOn_60kHz_TowerMET_multi.pdf",
+                          thr_TowerMET_60kHz_vec, "Rate = 60 kHz", truthOverlay,
+                          0.45, 0.20);
         drawTurnOnOverlay(eff_TotalMET_80kHz_vec,
                           makeConfigLabels("GEP Total MET"),
                           "GEP Total MET Turn-on at 80 kHz",
                           mDir + "TurnOn_80kHz_TotalMET_multi.pdf",
-                          thr_TotalMET_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+                          thr_TotalMET_80kHz_vec, "Rate = 80 kHz", truthOverlay, 0.38, 0.18);
+        drawTurnOnOverlay(eff_TotalMET_60kHz_vec,
+                          makeConfigLabels("GEP Total MET"),
+                          "GEP Total MET Turn-on at 60 kHz",
+                          mDir + "TurnOn_60kHz_TotalMET_multi.pdf",
+                          thr_TotalMET_60kHz_vec, "Rate = 60 kHz", truthOverlay, 0.38, 0.18);
 
-        if (!sig_h_gMET_JwoJSim_vec.empty()) {
-            drawOverlayMulti(sig_h_gMET_JwoJSim_vec, back_h_gMET_JwoJSim_vec, labels, "gFEX MET (JwoJ Sim)",    "MET [GeV]", mDir + "gFEX_MET_JwoJSim.pdf",   signalName);
-            drawOverlayMulti(sig_h_gMET_NCSim_vec,   back_h_gMET_NCSim_vec,   labels, "gFEX MET (NoiseCut Sim)","MET [GeV]", mDir + "gFEX_MET_NCSim.pdf",     signalName);
-            drawOverlayMulti(sig_h_gMET_RmsSim_vec,  back_h_gMET_RmsSim_vec,  labels, "gFEX MET (Rms Sim)",     "MET [GeV]", mDir + "gFEX_MET_RmsSim.pdf",    signalName);
-            drawRateVsThresholdMulti(back_hw_gMET_JwoJSim_vec, labels, "Rate vs gFEX MET (JwoJ Sim)",    "MET threshold [GeV]", mDir + "Rate_gFEX_MET_JwoJSim.pdf", signalName);
-            drawRateVsThresholdMulti(back_hw_gMET_NCSim_vec,   labels, "Rate vs gFEX MET (NoiseCut Sim)","MET threshold [GeV]", mDir + "Rate_gFEX_MET_NCSim.pdf",   signalName);
-            drawRateVsThresholdMulti(back_hw_gMET_RmsSim_vec,  labels, "Rate vs gFEX MET (Rms Sim)",     "MET threshold [GeV]", mDir + "Rate_gFEX_MET_RmsSim.pdf",  signalName);
-            drawTurnOnOverlay(eff_gMET_JwoJSim_80kHz_vec, makeConfigLabels("gFEX JwoJ Sim"),
-                              "gFEX JwoJ Sim Turn-on at 80 kHz",
-                              mDir + "TurnOn_80kHz_gFEX_JwoJSim_multi.pdf",
-                              thr_gMET_JwoJSim_80kHz_vec, "Rate = 80 kHz", truthOverlay);
-            drawTurnOnOverlay(eff_gMET_NCSim_80kHz_vec, makeConfigLabels("gFEX NoiseCut Sim"),
-                              "gFEX NoiseCut Sim Turn-on at 80 kHz",
-                              mDir + "TurnOn_80kHz_gFEX_NCSim_multi.pdf",
-                              thr_gMET_NCSim_80kHz_vec, "Rate = 80 kHz", truthOverlay);
-            drawTurnOnOverlay(eff_gMET_RmsSim_80kHz_vec, makeConfigLabels("gFEX Rms Sim"),
-                              "gFEX Rms Sim Turn-on at 80 kHz",
-                              mDir + "TurnOn_80kHz_gFEX_RmsSim_multi.pdf",
-                              thr_gMET_RmsSim_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+        // Standalone multi-file overlays of the AOD gFEX (the *_*Sim histograms now hold AOD,
+        // since nominal gFEX was promoted to resim above). Labelled AOD accordingly.
+        if (!sig_h_gMET_JwoJAOD_vec.empty()) {
+            drawOverlayMulti(sig_h_gMET_JwoJAOD_vec, back_h_gMET_JwoJAOD_vec, labels, "gFEX MET (JwoJ AOD)",    "MET [GeV]", mDir + "gFEX_MET_JwoJAOD.pdf",   signalName);
+            drawOverlayMulti(sig_h_gMET_NCAOD_vec,   back_h_gMET_NCAOD_vec,   labels, "gFEX MET (NoiseCut AOD)","MET [GeV]", mDir + "gFEX_MET_NCAOD.pdf",     signalName);
+            drawOverlayMulti(sig_h_gMET_RmsAOD_vec,  back_h_gMET_RmsAOD_vec,  labels, "gFEX MET (Rms AOD)",     "MET [GeV]", mDir + "gFEX_MET_RmsAOD.pdf",    signalName);
+            drawRateVsThresholdMulti(back_hw_gMET_JwoJAOD_vec, labels, "Rate vs gFEX MET (JwoJ AOD)",    "MET threshold [GeV]", mDir + "Rate_gFEX_MET_JwoJAOD.pdf", signalName);
+            drawRateVsThresholdMulti(back_hw_gMET_NCAOD_vec,   labels, "Rate vs gFEX MET (NoiseCut AOD)","MET threshold [GeV]", mDir + "Rate_gFEX_MET_NCAOD.pdf",   signalName);
+            drawRateVsThresholdMulti(back_hw_gMET_RmsAOD_vec,  labels, "Rate vs gFEX MET (Rms AOD)",     "MET threshold [GeV]", mDir + "Rate_gFEX_MET_RmsAOD.pdf",  signalName);
+            drawTurnOnOverlay(eff_gMET_JwoJAOD_80kHz_vec, makeConfigLabels("gFEX JwoJ AOD"),
+                              "gFEX JwoJ AOD Turn-on at 80 kHz",
+                              mDir + "TurnOn_80kHz_gFEX_JwoJAOD_multi.pdf",
+                              thr_gMET_JwoJAOD_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+            drawTurnOnOverlay(eff_gMET_JwoJAOD_60kHz_vec, makeConfigLabels("gFEX JwoJ AOD"),
+                              "gFEX JwoJ AOD Turn-on at 60 kHz",
+                              mDir + "TurnOn_60kHz_gFEX_JwoJAOD_multi.pdf",
+                              thr_gMET_JwoJAOD_60kHz_vec, "Rate = 60 kHz", truthOverlay);
+            drawTurnOnOverlay(eff_gMET_NCAOD_80kHz_vec, makeConfigLabels("gFEX NoiseCut AOD"),
+                              "gFEX NoiseCut AOD Turn-on at 80 kHz",
+                              mDir + "TurnOn_80kHz_gFEX_NCAOD_multi.pdf",
+                              thr_gMET_NCAOD_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+            drawTurnOnOverlay(eff_gMET_NCAOD_60kHz_vec, makeConfigLabels("gFEX NoiseCut AOD"),
+                              "gFEX NoiseCut AOD Turn-on at 60 kHz",
+                              mDir + "TurnOn_60kHz_gFEX_NCAOD_multi.pdf",
+                              thr_gMET_NCAOD_60kHz_vec, "Rate = 60 kHz", truthOverlay);
+            drawTurnOnOverlay(eff_gMET_RmsAOD_80kHz_vec, makeConfigLabels("gFEX Rms AOD"),
+                              "gFEX Rms AOD Turn-on at 80 kHz",
+                              mDir + "TurnOn_80kHz_gFEX_RmsAOD_multi.pdf",
+                              thr_gMET_RmsAOD_80kHz_vec, "Rate = 80 kHz", truthOverlay);
+            drawTurnOnOverlay(eff_gMET_RmsAOD_60kHz_vec, makeConfigLabels("gFEX Rms AOD"),
+                              "gFEX Rms AOD Turn-on at 60 kHz",
+                              mDir + "TurnOn_60kHz_gFEX_RmsAOD_multi.pdf",
+                              thr_gMET_RmsAOD_60kHz_vec, "Rate = 60 kHz", truthOverlay);
         }
     }
 
@@ -2906,7 +3341,11 @@ void metAnalysisAndRates() {
     SetPlotStyle();
 
     // Each entry: { HERNTupler input ntuple, MET emulator output }
-    const std::string sigInput  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ZvvHbb_v3/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_resim_DAOD_NTUPLE_GEP.root";
+    // The input ntuple is per-process; set the .first of each signalFiles entry to the
+    // matching process input below so multiple signal processes can be analysed together.
+    const std::string sigInput  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ZvvHbb_v4/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    const std::string sigInputTtbarSemilep = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_semilep_v4/mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    const std::string sigInputTtbarDilep   = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     const std::string backInput = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     const std::string emuDir    = "/data/larsonma/GEPMET/outputNTuplesDev_METv2/";
 
@@ -2914,36 +3353,145 @@ void metAnalysisAndRates() {
     // applied in the totalMET sum (see makeOutputMETFileName). Compare 1,1 vs 1,0p4
     // to see the effect of down-weighting the jet contribution. Future: per-eta calibrated SFs.
     std::vector<std::pair<std::string, std::string>> signalFiles = {
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },*/
+
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   }
+
+       // { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+
+
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
+
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+
+
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_OR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_OR_twrSF1_jetSF1.root"   },
+        ///{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_OR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_OR_twrSF1_jetSF1.root"   },
+
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF0p4_jetSF1.root"   },
+       //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF1_jetSF1.root"   },
     };
 
     std::vector<std::pair<std::string, std::string>> backgroundFiles = {
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },*/
+
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
+
+       // { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        // ttbar semileptonic — same dijet background (process-independent), matching emu config
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        // ttbar dileptonic — same dijet background (process-independent), matching emu config
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        // ttbar semileptonic — same dijet background (process-independent), matching emu config
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        // ttbar dileptonic — same dijet background (process-independent), matching emu config
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+
+
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_OR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_OR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_OR_twrSF1_jetSF1.root"   },
+
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF0p4_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF1_jetSF1.root"   },
     };
 
     // Label for each file pair — shown in legend for multi-file overlays - NEEDS TO BE UPDATED AND THE SAME SIZE AS THE FILES BEING PROCESSED!
     std::vector<std::string> labels = {
-        "J10_T2_EtaSK_OR_TC1_JC1",
+        /*"J10_T2_EtaSK_OR_TC1_JC1",
         "J10_T2_EtaSK_OR_TC0.4_JC1",
         "J15_T2_EtaSK_OR_TC1_JC1",
         "J15_T2_EtaSK_OR_TC0.4_JC1",
         "J20_T2_EtaSK_OR_TC1_JC1",
-        "J20_T2_EtaSK_OR_TC0.4_JC1",
+        "J20_T2_EtaSK_OR_TC0.4_JC1",*/
+
+        "J15_T2_EtaSK_NoOR_TC1_JC1",
+
+        //"J10_EtaSK",
+        //"J15_EtaSK",
+        //"J20_EtaSK",
+
+        //"J15_T2_EtaSK_OR_0.4S_1H",
+        //"J15_T2_EtaSK_OR_1S_1H",
+
+        //"ZvvHbb_J15_T2_OR_0.4S_1H",
+        //"ZvvHbb_J15_T2_NoOR_0.4S_1H",
+        //"tt_1lep_J15_T2_OR_0.4S_1H",
+        //"tt_1lep_J15_T2_NoOR_0.4S_1H",
+        //"tt_2lep_J15_T2_OR_0.4S_1H",
+        //"tt_2lep_J15_T2_NoOR_0.4S_1H",
+
+        //"ZvvHbb_J15_T2_EtaSK_OR_0.4S_1H",
+        //"tt_1lep_J15_T2_EtaSK_OR_0.4S_1H",
+        //"tt_2lep_J15_T2_EtaSK_OR_0.4S_1H",
+
+        //"J15_T2_SK_OR",
+        //"J15_T2_NoSK_OR",
+        //"J15_T0_EtaSK_OR",
+        //"J15_T0_SK_OR",
+        //"J15_T0_NoSK_OR",
+
+        //"J15_T2_SK_OR_TC0.4_JC1",
+        //"J15_T2_SK_OR_TC1_JC1",
     };
 
     std::string signalName = "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}";
+    // Per-file legend header (parallel to signalFiles/labels) so each signal process gets
+    // its own label on per-file plots. Falls back to signalName for any unset entry.
+    std::vector<std::string> signalNames = {
+        "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+        //"t#bar{t} semileptonic decay",
+        //"t#bar{t} dileptonic decay",
+    };
     std::string outputDir  = "metAnalysisPlots/";
+    std::string overlayDir = "multiFileOverlay_MET_gFEX_1File_OR_NoORComparison/";
     gSystem->mkdir(outputDir.c_str(), true);
 
-    analyze_files(signalFiles, backgroundFiles, labels, outputDir, signalName);
+    analyze_files(signalFiles, backgroundFiles, labels, outputDir, signalName, overlayDir, signalNames);
 }

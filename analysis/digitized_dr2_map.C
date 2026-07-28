@@ -21,8 +21,8 @@ void digitized_dr2_map(double R2cut = 1.21, const char* outPdf = "digitized_dr2_
     // -----------------------------
     // Digitization formats (from your table)
     // -----------------------------
-    const double etaMin = -4.9;
-    const double etaMax =  4.9;
+    const double etaMin = -4.85;
+    const double etaMax =  4.95;
     const int    etaBits = 7;                 // 1<<8 = 256 codes
     const int    nEta    = 98;//(1 << etaBits);    // 256
     const double etaStep = 0.1;//(etaMax - etaMin) / nEta; // 10/256 = 0.0390625

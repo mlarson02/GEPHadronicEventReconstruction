@@ -28,7 +28,7 @@ int main() {
     std::vector<unsigned int > algoVersions = {2, 3};
     std::vector<double > rSquaredCuts = {1.0, 1.21, 1.44};
     //std::vector<double > rSquaredCuts = {1.21};
-    std::vector<unsigned int > nIOs = {8, 32, 64, 128, 256};
+    std::vector<unsigned int > nIOs = {8, 32, 64, 128, 256, 512};  // 512 = raised LRJ maxObjectsConsidered (E_T>2 GeV cut bounds input; 128 kept for latency)
     std::vector<unsigned int > nSeeds = {2};
     std::vector<unsigned int > nSeedsInput = {10};
     std::vector<unsigned int > nProtoSeeds = {6};

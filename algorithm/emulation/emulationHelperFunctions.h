@@ -159,7 +159,10 @@ std::string makeInputFileName(bool signalBool, std::string signalString,
         else if (signalString == "ggF_hh_bbbb") ss << inputRootFilePath << "mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ZvvHbb") ss << inputRootFilePath << "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ttbar_had") ss << inputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
-        else if (signalString == "Zprime_ttbar") ss << inputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";       
+        else if (signalString == "Zprime_ttbar") ss << inputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "VBF_HHbbbb") ss << inputRootFilePath << "VBF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_VBF_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "Zprime_ttbar_allhad_flatpT") ss << inputRootFilePath << "Zprime_ttbar_allhad_flatpT_v4/mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "ttbar_allhad") ss << inputRootFilePath << "ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     } else {
         ss << inputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     }
@@ -201,11 +204,14 @@ std::string makeOutputFileName(double rMergeCut,
         else if (signalString == "ggF_hh_bbbb") ss << outputRootFilePath << "mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_";
         else if (signalString == "ZvvHbb") ss << outputRootFilePath << "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_";
         else if (signalString == "ttbar_had") ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_";
-        else if (signalString == "Zprime_ttbar") ss << outputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_";   
+        else if (signalString == "Zprime_ttbar") ss << outputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_";
+        else if (signalString == "VBF_HHbbbb") ss << outputRootFilePath << "mc21_14TeV_HHbbbb_HLLHC_VBF_e8557_s4422_r16130_";
+        else if (signalString == "Zprime_ttbar_allhad_flatpT") ss << outputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_";
+        else if (signalString == "ttbar_allhad") ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_";
     } else {
         ss << outputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_";
     }
-    
+
     ss << "rMerge_" << std::setprecision(3) << rMergeCut << "_"
        << "IOs_" << NIOs << "_"
        << "Seeds_" << nSeeds << "_"
@@ -248,7 +254,10 @@ std::string makeOutputTextFileName(double rMergeCut,
         else if (signalString == "ggF_hh_bbbb") ss << outputTextFilePath << "mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_";
         else if (signalString == "ZvvHbb") ss << outputTextFilePath << "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_";
         else if (signalString == "ttbar_had") ss << outputTextFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_";
-        else if (signalString == "Zprime_ttbar") ss << outputTextFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_"; 
+        else if (signalString == "Zprime_ttbar") ss << outputTextFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_";
+        else if (signalString == "VBF_HHbbbb") ss << outputTextFilePath << "mc21_14TeV_HHbbbb_HLLHC_VBF_e8557_s4422_r16130_";
+        else if (signalString == "Zprime_ttbar_allhad_flatpT") ss << outputTextFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_";
+        else if (signalString == "ttbar_allhad") ss << outputTextFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_";
     } else {
         ss << outputTextFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_";
     }
@@ -349,8 +358,8 @@ void write_constants_header(const std::string& header_path,
     out << "constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + num_subjets_length_ + et_bit_length_ + eta_bit_length_ + phi_bit_length_;\n";
     out << "constexpr double phi_min_ = -3.2;\n";
     out << "constexpr double phi_max_ = 3.2;\n";
-    out << "constexpr double eta_min_ = -4.9;\n";
-    out << "constexpr double eta_max_ = 4.9;\n";
+    out << "constexpr double eta_min_ = -4.85;\n";
+    out << "constexpr double eta_max_ = 4.95;\n";
     out << "constexpr unsigned int et_min_ = 0;\n";
     out << "constexpr unsigned int et_max_ = 1024;\n";
     out << "constexpr double phi_granularity_ = (phi_max_ - phi_min_) / (1 << (phi_bit_length_));\n";

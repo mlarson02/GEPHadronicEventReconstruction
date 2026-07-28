@@ -583,14 +583,14 @@ void makeMETEventDisplays() {
     gErrorIgnoreLevel = kWarning;
 
     // Same input paths used by metAnalysisAndRates.C
-    const std::string sigHER  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ZvvHbb_v3/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_resim_DAOD_NTUPLE_GEP.root";
+    const std::string sigHER  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ZvvHbb_v4/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     const std::string backHER = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     const std::string emuDir  = "/data/larsonma/GEPMET/outputNTuplesDev_METv2/";
 
     // Default signal call: ZvvHbb with the (jetEt=20, towerEt=2, EtaSK_OR, twrSF=1, jetSF=1) config
     callMakeMETEventDisplays(
         sigHER,
-        emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root",
+        emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root",
         -1, true, "ZvvHbb");
 
     // Background: JZ1 only. Default filter accepts events where EITHER GEP Jet MET or gFEX JwoJ MET
@@ -598,7 +598,7 @@ void makeMETEventDisplays() {
     // To override, append e.g. /*backMinJetMETOverTruth=*/30.0, /*backMinGFexMETOverTruth=*/100.0
     callMakeMETEventDisplays(
         backHER,
-        emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root",
+        emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root",
         1, false, "jj_1");
 
     gSystem->Exit(0);

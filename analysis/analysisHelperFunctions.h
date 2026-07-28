@@ -37,6 +37,7 @@
 #include <utility>
 //#include "../algorithm/constants.h"
 
+#include <TColor.h>
 
 struct FileInfo {
     std::string inputObjectType;
@@ -212,7 +213,9 @@ FileInfo ParseFileName(const std::string& path)
 }
 
 
-
+double clamp200(double input){
+  return std::min(input, 199.9);
+}
 
 
 
@@ -4119,8 +4122,8 @@ constexpr unsigned int phi_bit_length_ = 6;
 constexpr unsigned int padded_zeroes_length_ = 64 - eta_bit_length_ - et_bit_length_ - phi_bit_length_;
 constexpr double phi_min_ = -3.2;
 constexpr double phi_max_ = 3.2;
-constexpr double eta_min_ = -4.9;
-constexpr double eta_max_ = 4.9;
+constexpr double eta_min_ = -4.85;
+constexpr double eta_max_ = 4.95;
 constexpr double eta_granularity_ = 0.1;
 //constexpr double eta_granularity_ = 0.0125;
 constexpr double phi_granularity_ = 0.1;

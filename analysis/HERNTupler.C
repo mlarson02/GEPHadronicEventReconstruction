@@ -92,6 +92,13 @@ inline OutputFiles makeMemPrintFilenames(std::string signalString, bool signalBo
         else if (signalString == "ZvvHbb") tag = "mc21_14TeV_ZvvH125_bb";
         else if (signalString == "ttbar_had") tag = "mc21_14TeV_ttbar_hdamp258p75_allhad";
         else if (signalString == "Zprime_ttbar") tag = "mc21_14TeV_flatpT_Zprime_tthad";
+        else if (signalString == "VBF_HHbbbb") tag = "mc21_14TeV_HHbbbb_HLLHC_VBF";
+        else if (signalString == "Zprime_ttbar_allhad_flatpT") tag = "mc21_14TeV_flatpT_Zprime_tthad";
+        else if (signalString == "ttbar_allhad") tag = "mc21_14TeV_ttbar_hdamp258p75_allhad";
+        else if (signalString == "ttbar_semilep") tag = "mc21_14TeV_ttbar_hdamp258p75_semilep";
+        else if (signalString == "ttbar_dilep") tag = "mc21_14TeV_ttbar_hdamp258p75_dilep";
+        else if (signalString == "displaced_dark_photon") tag = "mc21_14TeV_HAHM_ZdZd4e_110_30_10ns";
+        else if (signalString == "emerging_jets") tag = "mc21_14TeV_Zprime2EJs_Ld20_rho40_pi10_Zp1500_l50";
     } else {
         // generic: works for all slices 0..9 etc
         tag = "mc21_14TeV_jj_JZ" + std::to_string(jzSlice);
@@ -126,6 +133,13 @@ std::string makeFileDir(std::string signalString, bool signalBool, int jzSlice) 
         else if (signalString == "ZvvHbb_resim") return "/data/larsonma/GEPHadronicEventReconstruction/DAOD_TrigGepPerf/ZvvHbb";
         else if (signalString == "ttbar_had") return kRoot + "/DAOD_TrigGepPerf/Signal_ttbar_fullhad";
         else if (signalString == "Zprime_ttbar") return kRoot + "/DAOD_TrigGepPerf/Signal_Zprime_ttbar_flatpT";
+        else if (signalString == "VBF_HHbbbb") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/VBF_HHbbbb";
+        else if (signalString == "Zprime_ttbar_allhad_flatpT") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/Zprime_ttbar_allhad_flatpT";
+        else if (signalString == "ttbar_allhad") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/ttbar_allhad";
+        else if (signalString == "ttbar_semilep") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/ttbar_semilep";
+        else if (signalString == "ttbar_dilep") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/ttbar_dilep";
+        else if (signalString == "displaced_dark_photon") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/displaced_dark_photon";
+        else if (signalString == "emerging_jets") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/emerging_jets";
     }
 
     // background path
@@ -153,6 +167,13 @@ TString makeOutputFileName(std::string signalString, bool signalBool, int jzSlic
         else if (signalString == "ZvvHbb_resim") return outDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_resim_DAOD_NTUPLE_GEP" + suffix + ".root";
         else if (signalString == "ttbar_had") return outDir + "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
         else if (signalString == "Zprime_ttbar") return outDir + "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "VBF_HHbbbb") return outDir + "mc21_14TeV_HHbbbb_HLLHC_VBF_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "Zprime_ttbar_allhad_flatpT") return outDir + "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "ttbar_allhad") return outDir + "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "ttbar_semilep") return outDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "ttbar_dilep") return outDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "displaced_dark_photon") return outDir + "mc21_14TeV_HAHM_ZdZd4e_110_30_10ns_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "emerging_jets") return outDir + "mc21_14TeV_Zprime2EJs_Ld20_rho40_pi10_Zp1500_l50_e8532_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
         else return "";
     }
     else {
@@ -168,9 +189,17 @@ TString makeOutputFileName(std::string signalString, bool signalBool, int jzSlic
 
 }
 
-unsigned int digitize(double value, int bit_length, double min_val, double max_val, unsigned int altRange = 0) {
+unsigned int digitize(double value, int bit_length, double min_val, double max_val, unsigned int altRange = 0, bool verbose = true) {
     unsigned int range = (altRange == 0) ? (1u << bit_length) : altRange;
     double scale = double(range) / (max_val - min_val);
+    if (verbose) {
+        std::cout << "scale: " << scale << "\n";
+        std::cout << "value: " << value << "\n";
+        std::cout << "value - min_val: " << value - min_val << "\n";
+        std::cout << "(value - min_val) * scale : " << (value - min_val) * scale << "\n";
+        std::cout << "std::round((value - min_val) * scale) : " << std::round((value - min_val) * scale) << "\n";
+    }
+
     //std::cout << "max_val - scale; " << max_val - (1/scale) << "\n";
     // Check if value is in range
     if (value < min_val) {
@@ -182,7 +211,7 @@ unsigned int digitize(double value, int bit_length, double min_val, double max_v
     if (value >= max_val){
         return range - 1;
     }
-
+    if (verbose) std::cout << "returning: " << static_cast<unsigned int>(std::round((value - min_val) * scale)) << "\n";
     return static_cast<unsigned int>(std::round((value - min_val) * scale));
 }
 
@@ -220,13 +249,35 @@ void find_non_higgs_daughters(const xAOD::TruthParticle* particle,
 
 
 // Main function
-void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange, unsigned int algoVersion, unsigned int jzSlice = 3, bool specialJZ0Bool = false, std::string outputDirOverride = "", bool writeDatFiles = true, std::string specificDaodFile = "", std::string specificGepFile = "", std::string fileSuffix = "") {
+void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange, unsigned int algoVersion, unsigned int jzSlice = 3, bool specialJZ0Bool = false, std::string outputDirOverride = "", bool writeDatFiles = true, std::string specificDaodFile = "", std::string specificGepFile = "", std::string fileSuffix = "", bool trigGepPerfValidation = false) {
     //ServiceHandle<StoreGateSvc> inputMetaStore("StoreGateSvc/InputMetaDataStore","");
     // Setup file paths based on whether processing signal or background, and vbf production or ggF production
-    
+
     std::string fileDir =  makeFileDir(signalString, signalBool, jzSlice);
     std::cout << "fileDir: " << fileDir << "\n";
     //xAOD::Init().ignore();
+
+    // ------------------------------------------------------------------
+    // TrigGepPerf validation override.
+    // When enabled, all input/output paths are forced to a fixed set so that
+    // this ntupler runs on the Athena TrigGepPerf output ntuple (paired with
+    // the same input AOD). Its output is then fed to jetTaggerEmulation and
+    // compared branch-by-branch against the Athena JetTaggerLRJ output.
+    // Adjust these three paths when validating a different Athena run.
+    // ------------------------------------------------------------------
+    if (trigGepPerfValidation) {
+        const std::string runDir = "/home/larsonma/DevelopingTriggerSimulation/run/";
+        // Athena TrigGepPerf output ntuple, one per algorithm version (v2 = basic, v3 = advanced).
+        specificGepFile  = runDir + (algoVersion == 2
+            ? "outputGEPNtuple_WithJetTagger_v2Algo_Samplev1.root"
+            : "outputGEPNtuple_WithJetTagger_v3Algo_Samplev2.root");
+        // DAOD_JETM42 paired with the same sample.
+        specificDaodFile = "/data/larsonma/TrigGepPerfValidation/mc21_14TeV.603277.PhPy8EG_PDF4LHC21_HHbbbb_HLLHC_chhh1p0.recon.AOD.e8564_s4422_r16130/DAOD_JETM42.merged_HHbbbb_1kEvent_TrigGepPerf_Validation_DAOD.root";
+        writeDatFiles    = false;
+        std::cout << "[trigGepPerfValidation] v" << algoVersion
+                  << "  DAOD=" << specificDaodFile
+                  << "  GEP="  << specificGepFile << "\n";
+    }
 
     // Max number of events to write test vectors for
     const unsigned int maxDatEvents = 1000;
@@ -259,9 +310,49 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     }
 
     TString outputFileName = makeOutputFileName(signalString, signalBool, jzSlice, algoVersion, specialJZ0Bool, outputDirOverride, fileSuffix);
-    
+    if (trigGepPerfValidation) {
+        // Fixed output consumed by jetTaggerEmulation's trigGepPerfValidation mode (one per version).
+        outputFileName = TString::Format(
+            "/home/larsonma/DevelopingTriggerSimulation/run/HERNTupler_trigGepPerfValidation_v%u.root", algoVersion);
+    }
+
     // Create ROOT output file
     TFile* outputFile = new TFile(outputFileName, "RECREATE");
+
+    // ------------------------------------------------------------------
+    // Pass through the Athena JetTaggerLRJ output branches from the GEP ntuple,
+    // event-aligned with the emulation input. Uses the const=Towers,
+    // seed=WTACone, EtaSK collection (JetTaggerLRJGEPCellsTowerEtaSKJets). Vectors
+    // are pre-allocated so a missing branch leaves an empty (not null) vector.
+    // Always written; the tree is simply empty if the GEP file has no JetTagger.
+    // ------------------------------------------------------------------
+    std::vector<float>* athLRJ_Et   = new std::vector<float>();
+    std::vector<float>* athLRJ_eta  = new std::vector<float>();
+    std::vector<float>* athLRJ_phi  = new std::vector<float>();
+    std::vector<float>* athLRJ_m    = new std::vector<float>();
+    std::vector<int>*   athLRJ_nSubjets   = new std::vector<int>();
+    std::vector<float>* athLRJ_psi_R      = new std::vector<float>();
+    std::vector<float>* athLRJ_tau_1      = new std::vector<float>();
+    std::vector<float>* athLRJ_tau_2      = new std::vector<float>();
+    std::vector<float>* athLRJ_tau_21     = new std::vector<float>();
+    std::vector<float>* athLRJ_massApprox = new std::vector<float>();
+    std::vector<float>* athLRJ_subjet_Et  = new std::vector<float>();
+    std::vector<float>* athLRJ_subjet_eta = new std::vector<float>();
+    std::vector<float>* athLRJ_subjet_phi = new std::vector<float>();
+    TTree* athenaJetTaggerLRJTree = new TTree("athenaJetTaggerLRJTree", "Athena JetTaggerLRJ output passthrough");
+    athenaJetTaggerLRJTree->Branch("Et",         &athLRJ_Et);
+    athenaJetTaggerLRJTree->Branch("Eta",        &athLRJ_eta);
+    athenaJetTaggerLRJTree->Branch("Phi",        &athLRJ_phi);
+    athenaJetTaggerLRJTree->Branch("M",          &athLRJ_m);
+    athenaJetTaggerLRJTree->Branch("NSubjets",   &athLRJ_nSubjets);
+    athenaJetTaggerLRJTree->Branch("Psi_R",      &athLRJ_psi_R);
+    athenaJetTaggerLRJTree->Branch("Tau_1",      &athLRJ_tau_1);
+    athenaJetTaggerLRJTree->Branch("Tau_2",      &athLRJ_tau_2);
+    athenaJetTaggerLRJTree->Branch("Tau_21",     &athLRJ_tau_21);
+    athenaJetTaggerLRJTree->Branch("MassApprox", &athLRJ_massApprox);
+    athenaJetTaggerLRJTree->Branch("SubjetEt",   &athLRJ_subjet_Et);
+    athenaJetTaggerLRJTree->Branch("SubjetEta",  &athLRJ_subjet_eta);
+    athenaJetTaggerLRJTree->Branch("SubjetPhi",  &athLRJ_subjet_phi);
 
     // Create TTrees - commented out trees that cannot be filled with DAOD information.
     //TTree* truthParticleTree = new TTree("truthParticleTree", "Tree storing event-wise information about truth particles");
@@ -306,6 +397,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     TTree* jFexLRJTree = new TTree("jFexLRJTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* jFexLeadingLRJTree = new TTree("jFexLeadingLRJTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* jFexSubleadingLRJTree = new TTree("jFexSubleadingLRJTree", "Tree storing event-wise Et, Eta, Phi");
+    TTree* gFexEmulatedTowersTree = new TTree("gFexEmulatedTowersTree", "Tree storing event-wise Et, Eta, Phi (gFEX emulated towers)");
+    TTree* jFexEmulatedTowersTree = new TTree("jFexEmulatedTowersTree", "Tree storing event-wise Et, Eta, Phi (jFEX emulated towers)");
     TTree* hltAntiKt4EMTopoJetsTree = new TTree("hltAntiKt4EMTopoJetsTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* leadingHltAntiKt4EMTopoJetsTree = new TTree("leadingHltAntiKt4EMTopoJetsTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* subleadingHltAntiKt4EMTopoJetsTree = new TTree("subleadingHltAntiKt4EMTopoJetsTree", "Tree storing event-wise Et, Eta, Phi");
@@ -342,10 +435,9 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     TTree* gFexMETNoiseCutSimTree  = new TTree("gFexMETNoiseCutSimTree",  "Tree storing event-wise sim gFEX MET quantities (NoiseCut)");
     TTree* gFexMETRmsSimTree       = new TTree("gFexMETRmsSimTree",       "Tree storing event-wise sim gFEX MET quantities (Rms)");
     TTree* jFexMETTree             = new TTree("jFexMETTree",             "Tree storing event-wise jFEX MET quantities");
-    // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-    // TTree* gFexSRJSimTree = new TTree("gFexSRJSimTree", "Tree storing event-wise Et, Eta, Phi (sim gFEX SR jets)");
-    // TTree* gFexLeadingSRJSimTree = new TTree("gFexLeadingSRJSimTree", "Tree storing event-wise Et, Eta, Phi (sim gFEX SR jets)");
-    // TTree* gFexSubleadingSRJSimTree = new TTree("gFexSubleadingSRJSimTree", "Tree storing event-wise Et, Eta, Phi (sim gFEX SR jets)");
+    TTree* gFexSRJSimTree = new TTree("gFexSRJSimTree", "Tree storing event-wise Et, Eta, Phi (sim gFEX SR jets)");
+    TTree* gFexLeadingSRJSimTree = new TTree("gFexLeadingSRJSimTree", "Tree storing event-wise Et, Eta, Phi (sim gFEX SR jets)");
+    TTree* gFexSubleadingSRJSimTree = new TTree("gFexSubleadingSRJSimTree", "Tree storing event-wise Et, Eta, Phi (sim gFEX SR jets)");
     // EtaSK tower/cluster trees
     TTree* gepCellsTowersEtaSKTree = new TTree("gepCellsTowersEtaSKTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* gepBasicClustersEtaSKTree = new TTree("gepBasicClustersEtaSKTree", "Tree storing event-wise Et, Eta, Phi");
@@ -372,6 +464,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     std::vector<double> eventWeights;
     bool passHSTP = true;
 
+    // Bunch-train position (distance in BCID from the front/tail of the train),
+    // read from the paired GEP file where it is computed from the BunchCrossing
+    // conditions data. -1 when unavailable.
+    int distFrontBunchTrain = -1, distTailBunchTrain = -1;
+
     // Truth Particle vectors
     //std::vector<int> truthParticlePDGId, truthParticleStatus; 
     //std::vector<double> truthParticleEtValues, truthParticleEnergyValues, truthParticlepTValues, truthParticlepxValues, truthParticlepyValues, truthParticlepzValues, truthParticleEtaValues, truthParticlePhiValues;
@@ -384,11 +481,17 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     std::vector<double> truthTopEtValues, truthTopEnergyValues, truthToppTValues, truthTopEtaValues, truthTopPhiValues;
     // Tower / cluster vectors
     std::vector<double> caloTopoTowerEtValues, caloTopoTowerEtaValues, caloTopoTowerPhiValues;
+    std::vector<double> gFexEmulatedTowersEtValues, gFexEmulatedTowersEtaValues, gFexEmulatedTowersPhiValues;
+    std::vector<double> jFexEmulatedTowersEtValues, jFexEmulatedTowersEtaValues, jFexEmulatedTowersPhiValues;
     std::vector<double> gepBasicClustersEtValues, gepBasicClustersEtaValues, gepBasicClustersPhiValues;
     std::vector<double> gepBasicClustersSKEtValues, gepBasicClustersSKEtaValues, gepBasicClustersSKPhiValues;
     std::vector<double> gepCellsTowersEtValues, gepCellsTowersEtaValues, gepCellsTowersPhiValues;
     std::vector<double> gepCellsTowersSKEtValues, gepCellsTowersSKEtaValues, gepCellsTowersSKPhiValues;
     std::vector<double> gepCellsTowersEtaSKEtValues, gepCellsTowersEtaSKEtaValues, gepCellsTowersEtaSKPhiValues;
+    // Per-layer E_T (l0..l6) output vectors, filled in the same Et-sorted order as the Et/Eta/Phi vectors above
+    std::vector<double> gepCellsTowersEt_lValues[7];
+    std::vector<double> gepCellsTowersSKEt_lValues[7];
+    std::vector<double> gepCellsTowersEtaSKEt_lValues[7];
     std::vector<double> gepBasicClustersEtaSKEtValues, gepBasicClustersEtaSKEtaValues, gepBasicClustersEtaSKPhiValues;
     std::vector<double> topo422EtValues, topo422EtaValues, topo422PhiValues;
 
@@ -512,12 +615,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     std::vector<double> gFexLRJSimEtValues, gFexLRJSimEtaValues, gFexLRJSimPhiValues;
     std::vector<double> gFexLRJSimLeadingEtValues, gFexLRJSimLeadingEtaValues, gFexLRJSimLeadingPhiValues;
     std::vector<double> gFexLRJSimSubleadingEtValues, gFexLRJSimSubleadingEtaValues, gFexLRJSimSubleadingPhiValues;
-    // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-    // // Sim gFEX SR jets (from TrigGepPerf ntuple)
-    // std::vector<unsigned int> gFexSRJSimEtIndexValues;
-    // std::vector<double> gFexSRJSimEtValues, gFexSRJSimEtaValues, gFexSRJSimPhiValues;
-    // std::vector<double> gFexSRJSimLeadingEtValues, gFexSRJSimLeadingEtaValues, gFexSRJSimLeadingPhiValues;
-    // std::vector<double> gFexSRJSimSubleadingEtValues, gFexSRJSimSubleadingEtaValues, gFexSRJSimSubleadingPhiValues;
+    // Sim gFEX SR jets (from TrigGepPerf ntuple)
+    std::vector<unsigned int> gFexSRJSimEtIndexValues;
+    std::vector<double> gFexSRJSimEtValues, gFexSRJSimEtaValues, gFexSRJSimPhiValues;
+    std::vector<double> gFexSRJSimLeadingEtValues, gFexSRJSimLeadingEtaValues, gFexSRJSimLeadingPhiValues;
+    std::vector<double> gFexSRJSimSubleadingEtValues, gFexSRJSimSubleadingEtaValues, gFexSRJSimSubleadingPhiValues;
     //std::vector<double> gFexRhoRoIEtValues, gFexRhoRoIEtaValues, gFexRhoRoIPhiValues; // skip adding these for now.
 
     // HLT jets vectors
@@ -619,6 +721,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     eventInfoTree->Branch("gepRunNumberOut", &gepRunNumberOut);
     eventInfoTree->Branch("gepEventNumberOut", &gepEventNumberOut);
     eventInfoTree->Branch("passHSTP", &passHSTP);
+    eventInfoTree->Branch("distFrontBunchTrain", &distFrontBunchTrain);
+    eventInfoTree->Branch("distTailBunchTrain", &distTailBunchTrain);
 
     // truthbTree
     truthbTree->Branch("higgsIndex", &higgsIndexValues);
@@ -666,6 +770,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     caloTopoTowerTree->Branch("Eta", &caloTopoTowerEtaValues);
     caloTopoTowerTree->Branch("Phi", &caloTopoTowerPhiValues);
 
+    // gFex / jFex emulated towers
+    gFexEmulatedTowersTree->Branch("Et",  &gFexEmulatedTowersEtValues);
+    gFexEmulatedTowersTree->Branch("Eta", &gFexEmulatedTowersEtaValues);
+    gFexEmulatedTowersTree->Branch("Phi", &gFexEmulatedTowersPhiValues);
+    jFexEmulatedTowersTree->Branch("Et",  &jFexEmulatedTowersEtValues);
+    jFexEmulatedTowersTree->Branch("Eta", &jFexEmulatedTowersEtaValues);
+    jFexEmulatedTowersTree->Branch("Phi", &jFexEmulatedTowersPhiValues);
+
     // gepBasicClustersTree
     gepBasicClustersTree->Branch("Et", &gepBasicClustersEtValues);
     gepBasicClustersTree->Branch("Eta", &gepBasicClustersEtaValues);
@@ -680,16 +792,22 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     gepCellsTowersTree->Branch("Et", &gepCellsTowersEtValues);
     gepCellsTowersTree->Branch("Eta", &gepCellsTowersEtaValues);
     gepCellsTowersTree->Branch("Phi", &gepCellsTowersPhiValues);
+    for (int l = 0; l < 7; ++l)
+        gepCellsTowersTree->Branch(Form("Et_l%d", l), &gepCellsTowersEt_lValues[l]);
 
     // gepCellsTowersSKTree
     gepCellsTowersSKTree->Branch("Et", &gepCellsTowersSKEtValues);
     gepCellsTowersSKTree->Branch("Eta", &gepCellsTowersSKEtaValues);
     gepCellsTowersSKTree->Branch("Phi", &gepCellsTowersSKPhiValues);
+    for (int l = 0; l < 7; ++l)
+        gepCellsTowersSKTree->Branch(Form("Et_l%d", l), &gepCellsTowersSKEt_lValues[l]);
 
     // gepCellsTowersEtaSKTree
     gepCellsTowersEtaSKTree->Branch("Et", &gepCellsTowersEtaSKEtValues);
     gepCellsTowersEtaSKTree->Branch("Eta", &gepCellsTowersEtaSKEtaValues);
     gepCellsTowersEtaSKTree->Branch("Phi", &gepCellsTowersEtaSKPhiValues);
+    for (int l = 0; l < 7; ++l)
+        gepCellsTowersEtaSKTree->Branch(Form("Et_l%d", l), &gepCellsTowersEtaSKEt_lValues[l]);
 
     // gepBasicClustersEtaSKTree
     gepBasicClustersEtaSKTree->Branch("Et", &gepBasicClustersEtaSKEtValues);
@@ -1135,22 +1253,21 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     gFexSubleadingLRJSimTree->Branch("Eta", &gFexLRJSimSubleadingEtaValues);
     gFexSubleadingLRJSimTree->Branch("Phi", &gFexLRJSimSubleadingPhiValues);
 
-    // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-    // // gFexSRJSimTree
-    // gFexSRJSimTree->Branch("EtIndex", &gFexSRJSimEtIndexValues);
-    // gFexSRJSimTree->Branch("Et", &gFexSRJSimEtValues);
-    // gFexSRJSimTree->Branch("Eta", &gFexSRJSimEtaValues);
-    // gFexSRJSimTree->Branch("Phi", &gFexSRJSimPhiValues);
+    // gFexSRJSimTree
+    gFexSRJSimTree->Branch("EtIndex", &gFexSRJSimEtIndexValues);
+    gFexSRJSimTree->Branch("Et", &gFexSRJSimEtValues);
+    gFexSRJSimTree->Branch("Eta", &gFexSRJSimEtaValues);
+    gFexSRJSimTree->Branch("Phi", &gFexSRJSimPhiValues);
 
-    // // gFexLeadingSRJSimTree
-    // gFexLeadingSRJSimTree->Branch("Et", &gFexSRJSimLeadingEtValues);
-    // gFexLeadingSRJSimTree->Branch("Eta", &gFexSRJSimLeadingEtaValues);
-    // gFexLeadingSRJSimTree->Branch("Phi", &gFexSRJSimLeadingPhiValues);
+    // gFexLeadingSRJSimTree
+    gFexLeadingSRJSimTree->Branch("Et", &gFexSRJSimLeadingEtValues);
+    gFexLeadingSRJSimTree->Branch("Eta", &gFexSRJSimLeadingEtaValues);
+    gFexLeadingSRJSimTree->Branch("Phi", &gFexSRJSimLeadingPhiValues);
 
-    // // gFexSubleadingSRJSimTree
-    // gFexSubleadingSRJSimTree->Branch("Et", &gFexSRJSimSubleadingEtValues);
-    // gFexSubleadingSRJSimTree->Branch("Eta", &gFexSRJSimSubleadingEtaValues);
-    // gFexSubleadingSRJSimTree->Branch("Phi", &gFexSRJSimSubleadingPhiValues);
+    // gFexSubleadingSRJSimTree
+    gFexSubleadingSRJSimTree->Branch("Et", &gFexSRJSimSubleadingEtValues);
+    gFexSubleadingSRJSimTree->Branch("Eta", &gFexSRJSimSubleadingEtaValues);
+    gFexSubleadingSRJSimTree->Branch("Phi", &gFexSRJSimSubleadingPhiValues);
 
     // hltAntiKt4EMTopoJetsTreehltAntiKt4SRJEtIndexValues
     hltAntiKt4EMTopoJetsTree->Branch("EtIndex", &recoAntiKt10LRJEtIndexValues);
@@ -1454,10 +1571,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         gt->SetBranchStatus("GEPCellsTower_et",  1);
         gt->SetBranchStatus("GEPCellsTower_eta", 1);
         gt->SetBranchStatus("GEPCellsTower_phi", 1);
+        for (int l = 0; l < 7; ++l)
+            gt->SetBranchStatus(Form("GEPCellsTower_et_l%d", l), 1);
 
         gt->SetBranchStatus("GEPCellsTowerSK_et",  1);
         gt->SetBranchStatus("GEPCellsTowerSK_eta", 1);
         gt->SetBranchStatus("GEPCellsTowerSK_phi", 1);
+        for (int l = 0; l < 7; ++l)
+            gt->SetBranchStatus(Form("GEPCellsTowerSK_et_l%d", l), 1);
 
         gt->SetBranchStatus("WTAConeGEPCellsTowerJets_pt",  1);
         gt->SetBranchStatus("WTAConeGEPCellsTowerJets_eta", 1);
@@ -1481,11 +1602,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
         gt->SetBranchStatus("eventNumber", 1);
         gt->SetBranchStatus("runNumber",   1);
+        gt->SetBranchStatus("distFrontBunchTrain", 1);
+        gt->SetBranchStatus("distTailBunchTrain",  1);
         if(!signalBool) gt->SetBranchStatus("filterHSTP", 1);
 
         gt->SetBranchStatus("GEPCellsTowerEtaSK_et",  1);
         gt->SetBranchStatus("GEPCellsTowerEtaSK_eta", 1);
         gt->SetBranchStatus("GEPCellsTowerEtaSK_phi", 1);
+        for (int l = 0; l < 7; ++l)
+            gt->SetBranchStatus(Form("GEPCellsTowerEtaSK_et_l%d", l), 1);
 
         gt->SetBranchStatus("GEPBasicClustersEtaSK_et",  1);
         gt->SetBranchStatus("GEPBasicClustersEtaSK_eta", 1);
@@ -1589,10 +1714,21 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         gt->SetBranchStatus("gFex_RhoRMS_metPhi", 1);
         gt->SetBranchStatus("gFex_RhoRMS_sumEt",  1);
         gt->SetBranchStatus("jFex_met", 1);
-        // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-        // gt->SetBranchStatus("L1_gFexSRJetRoISim_et",  1);
-        // gt->SetBranchStatus("L1_gFexSRJetRoISim_eta", 1);
-        // gt->SetBranchStatus("L1_gFexSRJetRoISim_phi", 1);
+        gt->SetBranchStatus("L1_gFexSRJetRoISim_et",  1);
+        gt->SetBranchStatus("L1_gFexSRJetRoISim_eta", 1);
+        gt->SetBranchStatus("L1_gFexSRJetRoISim_phi", 1);
+
+        // gFEX / jFEX emulated towers (present only in newer GEP ntuples)
+        if (gt->GetBranch("L1_gFexEmulatedTowers_et")) {
+            gt->SetBranchStatus("L1_gFexEmulatedTowers_et",  1);
+            gt->SetBranchStatus("L1_gFexEmulatedTowers_eta", 1);
+            gt->SetBranchStatus("L1_gFexEmulatedTowers_phi", 1);
+        }
+        if (gt->GetBranch("L1_jFexEmulatedTowers_et")) {
+            gt->SetBranchStatus("L1_jFexEmulatedTowers_et",  1);
+            gt->SetBranchStatus("L1_jFexEmulatedTowers_eta", 1);
+            gt->SetBranchStatus("L1_jFexEmulatedTowers_phi", 1);
+        }
 
         // Local pointers for new GEP branches
         std::vector<float>* gepIn_BasicClustersEt  = nullptr;
@@ -1607,9 +1743,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         std::vector<float>* gepIn_CellsTowersEta = nullptr;
         std::vector<float>* gepIn_CellsTowersPhi = nullptr;
 
+        // Per-layer E_T (l0..l6) for the non-SK cells-tower collection
+        std::vector<float>* gepIn_CellsTowersEt_l[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+
         std::vector<float>* gepIn_CellsTowersSKEt  = nullptr;
         std::vector<float>* gepIn_CellsTowersSKEta = nullptr;
         std::vector<float>* gepIn_CellsTowersSKPhi = nullptr;
+
+        // Per-layer E_T (l0..l6) for the SK cells-tower collection
+        std::vector<float>* gepIn_CellsTowersSKEt_l[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
 
         std::vector<float>* gepIn_WTAConeCellsTowersJetsPt  = nullptr;
         std::vector<float>* gepIn_WTAConeCellsTowersJetsEta = nullptr;
@@ -1642,15 +1784,35 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         gt->SetBranchAddress("GEPCellsTower_et",  &gepIn_CellsTowersEt);
         gt->SetBranchAddress("GEPCellsTower_eta", &gepIn_CellsTowersEta);
         gt->SetBranchAddress("GEPCellsTower_phi", &gepIn_CellsTowersPhi);
+        for (int l = 0; l < 7; ++l)
+            gt->SetBranchAddress(Form("GEPCellsTower_et_l%d", l), &gepIn_CellsTowersEt_l[l]);
 
         gt->SetBranchAddress("GEPCellsTowerSK_et",  &gepIn_CellsTowersSKEt);
         gt->SetBranchAddress("GEPCellsTowerSK_eta", &gepIn_CellsTowersSKEta);
         gt->SetBranchAddress("GEPCellsTowerSK_phi", &gepIn_CellsTowersSKPhi);
+        for (int l = 0; l < 7; ++l)
+            gt->SetBranchAddress(Form("GEPCellsTowerSK_et_l%d", l), &gepIn_CellsTowersSKEt_l[l]);
 
         gt->SetBranchAddress("WTAConeGEPCellsTowerJets_pt",  &gepIn_WTAConeCellsTowersJetsPt);
         gt->SetBranchAddress("WTAConeGEPCellsTowerJets_eta", &gepIn_WTAConeCellsTowersJetsEta);
-        gt->SetBranchAddress("WTAConeGEPCellsTowerJets_phi", &gepIn_WTAConeCellsTowersJetsPhi); 
-        gt->SetBranchAddress("WTAConeGEPCellsTowerJets_nConstituents", &gepIn_WTAConeCellsTowersJetsNConstituents); 
+        gt->SetBranchAddress("WTAConeGEPCellsTowerJets_phi", &gepIn_WTAConeCellsTowersJetsPhi);
+        gt->SetBranchAddress("WTAConeGEPCellsTowerJets_nConstituents", &gepIn_WTAConeCellsTowersJetsNConstituents);
+
+        // Athena JetTaggerLRJ output branches (const=Towers, seed=WTACone, EtaSK).
+        // Harmless no-ops if the GEP file has no JetTagger branches.
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_Et",         1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_Et",         &athLRJ_Et);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_eta",        1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_eta",        &athLRJ_eta);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_phi",        1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_phi",        &athLRJ_phi);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_m",          1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_m",          &athLRJ_m);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_nSubjets",   1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_nSubjets",   &athLRJ_nSubjets);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_psi_R",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_psi_R",      &athLRJ_psi_R);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_1",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_1",      &athLRJ_tau_1);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_2",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_2",      &athLRJ_tau_2);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_21",     1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_21",     &athLRJ_tau_21);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_massApprox", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_massApprox", &athLRJ_massApprox);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_Et",  1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_Et",  &athLRJ_subjet_Et);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_eta", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_eta", &athLRJ_subjet_eta);
+        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_phi", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_phi", &athLRJ_subjet_phi);
 
         gt->SetBranchAddress("WTAConeGEPCellsTowerSKJets_pt",  &gepIn_WTAConeCellsTowersSKJetsPt);
         gt->SetBranchAddress("WTAConeGEPCellsTowerSKJets_eta", &gepIn_WTAConeCellsTowersSKJetsEta);
@@ -1670,6 +1832,9 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         std::vector<float>* gepIn_CellsTowersEtaSKEt  = nullptr;
         std::vector<float>* gepIn_CellsTowersEtaSKEta = nullptr;
         std::vector<float>* gepIn_CellsTowersEtaSKPhi = nullptr;
+
+        // Per-layer E_T (l0..l6) for the EtaSK cells-tower collection
+        std::vector<float>* gepIn_CellsTowersEtaSKEt_l[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
 
         std::vector<float>* gepIn_BasicClustersEtaSKEt  = nullptr;
         std::vector<float>* gepIn_BasicClustersEtaSKEta = nullptr;
@@ -1767,20 +1932,23 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         float gepIn_gFexNCMet = 0.0f,      gepIn_gFexNCMetPhi = 0.0f,      gepIn_gFexNCSumEt = 0.0f;
         float gepIn_gFexRhoRMSMet = 0.0f,  gepIn_gFexRhoRMSMetPhi = 0.0f,  gepIn_gFexRhoRMSSumEt = 0.0f;
         float gepIn_jFexMet = 0.0f;
-        // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-        // std::vector<float>* gFexSRJSimEt  = nullptr;
-        // std::vector<float>* gFexSRJSimEta = nullptr;
-        // std::vector<float>* gFexSRJSimPhi = nullptr;
+        std::vector<float>* gFexSRJSimEt  = nullptr;
+        std::vector<float>* gFexSRJSimEta = nullptr;
+        std::vector<float>* gFexSRJSimPhi = nullptr;
 
         bool filterHSTP;
 
         gt->SetBranchAddress("eventNumber", &gepEventNumberIn);
         if(!signalBool) gt->SetBranchAddress("filterHSTP", &filterHSTP);
         gt->SetBranchAddress("runNumber",   &gepRunNumberIn);
+        gt->SetBranchAddress("distFrontBunchTrain", &distFrontBunchTrain);
+        gt->SetBranchAddress("distTailBunchTrain",  &distTailBunchTrain);
 
         gt->SetBranchAddress("GEPCellsTowerEtaSK_et",  &gepIn_CellsTowersEtaSKEt);
         gt->SetBranchAddress("GEPCellsTowerEtaSK_eta", &gepIn_CellsTowersEtaSKEta);
         gt->SetBranchAddress("GEPCellsTowerEtaSK_phi", &gepIn_CellsTowersEtaSKPhi);
+        for (int l = 0; l < 7; ++l)
+            gt->SetBranchAddress(Form("GEPCellsTowerEtaSK_et_l%d", l), &gepIn_CellsTowersEtaSKEt_l[l]);
 
         gt->SetBranchAddress("GEPBasicClustersEtaSK_et",  &gepIn_BasicClustersEtaSKEt);
         gt->SetBranchAddress("GEPBasicClustersEtaSK_eta", &gepIn_BasicClustersEtaSKEta);
@@ -1884,15 +2052,41 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         gt->SetBranchAddress("gFex_RhoRMS_metPhi", &gepIn_gFexRhoRMSMetPhi);
         gt->SetBranchAddress("gFex_RhoRMS_sumEt",  &gepIn_gFexRhoRMSSumEt);
         gt->SetBranchAddress("jFex_met", &gepIn_jFexMet);
-        // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-        // gt->SetBranchAddress("L1_gFexSRJetRoISim_et",  &gFexSRJSimEt);
-        // gt->SetBranchAddress("L1_gFexSRJetRoISim_eta", &gFexSRJSimEta);
-        // gt->SetBranchAddress("L1_gFexSRJetRoISim_phi", &gFexSRJSimPhi);
+
+        // gFEX / jFEX emulated towers — pass-through to output ntuple.
+        // Guarded so older GEP ntuples that lack these branches leave the
+        // pointers null (the output trees are then written empty for the event).
+        std::vector<float>* gepIn_gFexEmulatedTowersEt  = nullptr;
+        std::vector<float>* gepIn_gFexEmulatedTowersEta = nullptr;
+        std::vector<float>* gepIn_gFexEmulatedTowersPhi = nullptr;
+        std::vector<float>* gepIn_jFexEmulatedTowersEt  = nullptr;
+        std::vector<float>* gepIn_jFexEmulatedTowersEta = nullptr;
+        std::vector<float>* gepIn_jFexEmulatedTowersPhi = nullptr;
+        if (gt->GetBranch("L1_gFexEmulatedTowers_et")) {
+            gt->SetBranchAddress("L1_gFexEmulatedTowers_et",  &gepIn_gFexEmulatedTowersEt);
+            gt->SetBranchAddress("L1_gFexEmulatedTowers_eta", &gepIn_gFexEmulatedTowersEta);
+            gt->SetBranchAddress("L1_gFexEmulatedTowers_phi", &gepIn_gFexEmulatedTowersPhi);
+        }
+        if (gt->GetBranch("L1_jFexEmulatedTowers_et")) {
+            gt->SetBranchAddress("L1_jFexEmulatedTowers_et",  &gepIn_jFexEmulatedTowersEt);
+            gt->SetBranchAddress("L1_jFexEmulatedTowers_eta", &gepIn_jFexEmulatedTowersEta);
+            gt->SetBranchAddress("L1_jFexEmulatedTowers_phi", &gepIn_jFexEmulatedTowersPhi);
+        }
+
+        // Resimulated gFEX SRJ — guard against older GEP ntuples that lack this branch.
+        // When absent, the gFexSRJSim* pointers stay null and the Sim SRJ trees are written empty.
+        if(gt->GetBranch("L1_gFexSRJetRoISim_et")){
+            gt->SetBranchAddress("L1_gFexSRJetRoISim_et",  &gFexSRJSimEt);
+            gt->SetBranchAddress("L1_gFexSRJetRoISim_eta", &gFexSRJSimEta);
+            gt->SetBranchAddress("L1_gFexSRJetRoISim_phi", &gFexSRJSimPhi);
+        }
 
         std::cout << "  Number of events: " << event.getEntries() << endl;
 
         unsigned int passedEventsCounter = 0;
-        for (Long64_t iEvt = 0; iEvt < event.getEntries(); ++iEvt) { // NOTE assume that # of events for GEP and DAOD files is the same, else will get a seg fault.
+        Long64_t nEventsToProcess = event.getEntries();
+        if (trigGepPerfValidation) nEventsToProcess = std::min(nEventsToProcess, (Long64_t)gt->GetEntries()); // GEP file has only the events the Athena job produced
+        for (Long64_t iEvt = 0; iEvt < nEventsToProcess; ++iEvt) { // NOTE assume that # of events for GEP and DAOD files is the same, else will get a seg fault.
             //std::cout << "iEvt: " << iEvt << "\n";
             // Retrieve truth and in time pileup jets first to apply hard-scatter-softer-than-PU (HSTP) filter (described here: https://twiki.cern.ch/twiki/bin/viewauth/AtlasProtected/JetEtMissMCSamples#Dijet_normalization_procedure_HS)
             // Also require that truth jet collection is not empty
@@ -2227,18 +2421,26 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             caloTopoTowerEtValues.clear();
             caloTopoTowerEtaValues.clear();
             caloTopoTowerPhiValues.clear();
+            gFexEmulatedTowersEtValues.clear();
+            gFexEmulatedTowersEtaValues.clear();
+            gFexEmulatedTowersPhiValues.clear();
+            jFexEmulatedTowersEtValues.clear();
+            jFexEmulatedTowersEtaValues.clear();
+            jFexEmulatedTowersPhiValues.clear();
             gepBasicClustersEtValues.clear();
             gepBasicClustersEtaValues.clear();
             gepBasicClustersPhiValues.clear();
             gepCellsTowersEtValues.clear();
             gepCellsTowersEtaValues.clear();
             gepCellsTowersPhiValues.clear();
+            for (int l = 0; l < 7; ++l) gepCellsTowersEt_lValues[l].clear();
             gepBasicClustersSKEtValues.clear();
             gepBasicClustersSKEtaValues.clear();
             gepBasicClustersSKPhiValues.clear();
             gepCellsTowersSKEtValues.clear();
             gepCellsTowersSKEtaValues.clear();
             gepCellsTowersSKPhiValues.clear();
+            for (int l = 0; l < 7; ++l) gepCellsTowersSKEt_lValues[l].clear();
             gepWTAConeCellsTowersJetspTValues.clear();
             gepWTAConeCellsTowersJetsEtaValues.clear();
             gepWTAConeCellsTowersJetsPhiValues.clear();
@@ -2290,6 +2492,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             gepCellsTowersEtaSKEtValues.clear();
             gepCellsTowersEtaSKEtaValues.clear();
             gepCellsTowersEtaSKPhiValues.clear();
+            for (int l = 0; l < 7; ++l) gepCellsTowersEtaSKEt_lValues[l].clear();
             gepBasicClustersEtaSKEtValues.clear();
             gepBasicClustersEtaSKEtaValues.clear();
             gepBasicClustersEtaSKPhiValues.clear();
@@ -2359,10 +2562,10 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             gFexLRJSimEtValues.clear(); gFexLRJSimEtaValues.clear(); gFexLRJSimPhiValues.clear();
             gFexLRJSimLeadingEtValues.clear(); gFexLRJSimLeadingEtaValues.clear(); gFexLRJSimLeadingPhiValues.clear();
             gFexLRJSimSubleadingEtValues.clear(); gFexLRJSimSubleadingEtaValues.clear(); gFexLRJSimSubleadingPhiValues.clear();
-            // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-            // gFexSRJSimEtValues.clear(); gFexSRJSimEtaValues.clear(); gFexSRJSimPhiValues.clear();
-            // gFexSRJSimLeadingEtValues.clear(); gFexSRJSimLeadingEtaValues.clear(); gFexSRJSimLeadingPhiValues.clear();
-            // gFexSRJSimSubleadingEtValues.clear(); gFexSRJSimSubleadingEtaValues.clear(); gFexSRJSimSubleadingPhiValues.clear();
+            gFexSRJSimEtValues.clear(); gFexSRJSimEtaValues.clear(); gFexSRJSimPhiValues.clear();
+            gFexSRJSimEtIndexValues.clear();
+            gFexSRJSimLeadingEtValues.clear(); gFexSRJSimLeadingEtaValues.clear(); gFexSRJSimLeadingPhiValues.clear();
+            gFexSRJSimSubleadingEtValues.clear(); gFexSRJSimSubleadingEtaValues.clear(); gFexSRJSimSubleadingPhiValues.clear();
             // gepRunNumber / gepEventNumber are NOT cleared here — they are set each event by gt->GetEntry(iEvt)
             truthHiggsInvMassValues.clear();
             truthHiggsEtValues.clear();
@@ -2536,6 +2739,24 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 } // if higgs truth particle of interest
             } // loop through truth bosons with decay particles
 
+            // gFEX / jFEX emulated towers: pass GEP input through to the output ntuple.
+            // Et stored in GeV (/1000) to match the other Et branches; eta/phi are
+            // already physical. Guarded so a missing input branch leaves empty vectors.
+            if (gepIn_gFexEmulatedTowersEt) {
+                for (unsigned int i = 0; i < gepIn_gFexEmulatedTowersEt->size(); ++i) {
+                    gFexEmulatedTowersEtValues.push_back((*gepIn_gFexEmulatedTowersEt)[i] / 1000.0);
+                    gFexEmulatedTowersEtaValues.push_back((*gepIn_gFexEmulatedTowersEta)[i]);
+                    gFexEmulatedTowersPhiValues.push_back((*gepIn_gFexEmulatedTowersPhi)[i]);
+                }
+            }
+            if (gepIn_jFexEmulatedTowersEt) {
+                for (unsigned int i = 0; i < gepIn_jFexEmulatedTowersEt->size(); ++i) {
+                    jFexEmulatedTowersEtValues.push_back((*gepIn_jFexEmulatedTowersEt)[i] / 1000.0);
+                    jFexEmulatedTowersEtaValues.push_back((*gepIn_jFexEmulatedTowersEta)[i]);
+                    jFexEmulatedTowersPhiValues.push_back((*gepIn_jFexEmulatedTowersPhi)[i]);
+                }
+            }
+
             unsigned int gepbasicclusters_it = 0;
             for (unsigned int i = 0; i < gepIn_BasicClustersEt->size(); ++i) {
                 float gepBasicClusterEt  = (*gepIn_BasicClustersEt)[i] / 1000.0;
@@ -2556,15 +2777,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         
                 // 2. Build binary string (for debug or text output)
                 std::stringstream binary_ss;
-                binary_ss << std::bitset<et_bit_length_>(et_bin) << "|"
+                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
                         << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<phi_bit_length_>(phi_bin);
+                        << std::bitset<et_bit_length_>(et_bin);
                 std::string binary_word = binary_ss.str();
 
                 // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (et_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                    (eta_bin << phi_bit_length_) |
-                                    (phi_bin);
+                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                    (eta_bin << et_bit_length_) |
+                                    (et_bin);
                                     
                 if (iEvt < maxDatEvents) {
                     if (gepbasicclusters_it == 0) {
@@ -2600,15 +2821,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         
                 // 2. Build binary string (for debug or text output)
                 std::stringstream binary_ss;
-                binary_ss << std::bitset<et_bit_length_>(et_bin) << "|"
+                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
                         << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<phi_bit_length_>(phi_bin);
+                        << std::bitset<et_bit_length_>(et_bin);
                 std::string binary_word = binary_ss.str();
 
                 // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (et_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                    (eta_bin << phi_bit_length_) |
-                                    (phi_bin);
+                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                    (eta_bin << et_bit_length_) |
+                                    (et_bin);
                                     
                 if (iEvt < maxDatEvents) {
                     if (gepbasicclusterssk_it == 0) {
@@ -2624,7 +2845,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
             // ---------- gepCellsTowers ----------
             {
-                // Build index order sorted by Et (descending)
+                // Sort input towers by E_T descending only (no eta/phi tie-break).
                 std::vector<unsigned int> order(gepIn_CellsTowersEt->size());
                 std::iota(order.begin(), order.end(), 0u);
                 std::sort(order.begin(), order.end(),
@@ -2642,6 +2863,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepCellsTowersEtValues.push_back(gepCellsTowersEtValue);
                     gepCellsTowersEtaValues.push_back(gepCellsTowersEtaValue);
                     gepCellsTowersPhiValues.push_back(gepCellsTowersPhiValue);
+                    for (int l = 0; l < 7; ++l)
+                        gepCellsTowersEt_lValues[l].push_back((*gepIn_CellsTowersEt_l[l])[i] / 1000.0);
 
                     if (gepCellsTowersEtValue <= 0) continue; // keep your existing rule
 
@@ -2684,15 +2907,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                     // Build binary string
                     std::stringstream binary_ss;
-                    binary_ss << std::bitset<et_bit_length_>(et_bin)  << "|"
+                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
                             << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<phi_bit_length_>(phi_bin);
+                            << std::bitset<et_bit_length_>(et_bin);
                     std::string binary_word = binary_ss.str();
 
                     // Pack into 27-bit word
-                    uint32_t packed_word = (et_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                        (eta_bin <<  phi_bit_length_) |
-                                        (phi_bin);
+                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                        (eta_bin << et_bit_length_) |
+                                        (et_bin);
 
                     if (iEvt < maxDatEvents) {
                         if (gepcellstowers_it == 0) {
@@ -2709,7 +2932,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
             // ---------- gepCellsTowers SK PU Suppression applied ----------
             {
-                // Build index order sorted by Et (descending)
+                // Sort input towers by E_T descending only (no eta/phi tie-break).
                 std::vector<unsigned int> order(gepIn_CellsTowersSKEt->size());
                 std::iota(order.begin(), order.end(), 0u);
                 std::sort(order.begin(), order.end(),
@@ -2727,6 +2950,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepCellsTowersSKEtValues.push_back(gepCellsTowersSKEtValue);
                     gepCellsTowersSKEtaValues.push_back(gepCellsTowersSKEtaValue);
                     gepCellsTowersSKPhiValues.push_back(gepCellsTowersSKPhiValue);
+                    for (int l = 0; l < 7; ++l)
+                        gepCellsTowersSKEt_lValues[l].push_back((*gepIn_CellsTowersSKEt_l[l])[i] / 1000.0);
 
                     if (gepCellsTowersSKEtValue <= 0) continue; // keep your existing rule
 
@@ -2739,15 +2964,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                     // Build binary string
                     std::stringstream binary_ss;
-                    binary_ss << std::bitset<et_bit_length_>(et_bin)  << "|"
+                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
                             << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<phi_bit_length_>(phi_bin);
+                            << std::bitset<et_bit_length_>(et_bin);
                     std::string binary_word = binary_ss.str();
 
                     // Pack into 27-bit word
-                    uint32_t packed_word = (et_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                        (eta_bin <<  phi_bit_length_) |
-                                        (phi_bin);
+                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                        (eta_bin << et_bit_length_) |
+                                        (et_bin);
 
                     if (iEvt < maxDatEvents) {
                         if (gepcellstowerssk_it == 0) {
@@ -2782,15 +3007,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         
                 // 2. Build binary string (for debug or text output)
                 std::stringstream binary_ss;
-                binary_ss << std::bitset<et_bit_length_>(et_bin) << "|"
+                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
                         << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<phi_bit_length_>(phi_bin);
+                        << std::bitset<et_bit_length_>(et_bin);
                 std::string binary_word = binary_ss.str();
 
                 // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (et_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                    (eta_bin << phi_bit_length_) |
-                                    (phi_bin);
+                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                    (eta_bin << et_bit_length_) |
+                                    (et_bin);
                                     
                 if (iEvt < maxDatEvents) {
                     if (topotower_it == 0) {
@@ -2825,15 +3050,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         
                 // 2. Build binary string (for debug or text output)
                 std::stringstream binary_ss;
-                binary_ss << std::bitset<et_bit_length_>(et_bin) << "|"
+                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
                         << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<phi_bit_length_>(phi_bin);
+                        << std::bitset<et_bit_length_>(et_bin);
                 std::string binary_word = binary_ss.str();
 
                 // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (et_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                    (eta_bin << phi_bit_length_) |
-                                    (phi_bin);
+                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                    (eta_bin << et_bit_length_) |
+                                    (et_bin);
 
                 //std::cout << "binary: " << binary_word << "\n";
 
@@ -2909,14 +3134,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     //std::cout << "WTA pT bin: " << pt_bin << "\n";
                     //std::cout << "et bit length: " << et_bit_length_ << " , et min: " << et_min_ << " , et max: " << et_max_ << "\n"; 
                     std::stringstream binary_ss;
-                    binary_ss << std::bitset<et_bit_length_>(pt_bin)  << "|"
+                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
                             << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<phi_bit_length_>(phi_bin);
+                            << std::bitset<et_bit_length_>(pt_bin);
                     std::string binary_word = binary_ss.str();
 
-                    uint32_t packed_word = (pt_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                        (eta_bin <<  phi_bit_length_) |
-                                        (phi_bin);
+                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                        (eta_bin << et_bit_length_) |
+                                        (pt_bin);
 
                     if (iEvt < maxDatEvents) {
                         if (gepwtaconecellstowers_it == 0) {
@@ -2996,14 +3221,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
 
                     std::stringstream binary_ss;
-                    binary_ss << std::bitset<et_bit_length_>(pt_bin)  << "|"
+                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
                             << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<phi_bit_length_>(phi_bin);
+                            << std::bitset<et_bit_length_>(pt_bin);
                     std::string binary_word = binary_ss.str();
 
-                    uint32_t packed_word = (pt_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                        (eta_bin <<  phi_bit_length_) |
-                                        (phi_bin);
+                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                        (eta_bin << et_bit_length_) |
+                                        (pt_bin);
 
 
                     if (iEvt < maxDatEvents) {
@@ -3078,14 +3303,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
 
                     std::stringstream binary_ss;
-                    binary_ss << std::bitset<et_bit_length_>(pt_bin)  << "|"
+                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
                             << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<phi_bit_length_>(phi_bin);
+                            << std::bitset<et_bit_length_>(pt_bin);
                     std::string binary_word = binary_ss.str();
 
-                    uint32_t packed_word = (pt_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                        (eta_bin <<  phi_bit_length_) |
-                                        (phi_bin);
+                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                        (eta_bin << et_bit_length_) |
+                                        (pt_bin);
 
 
                     if (iEvt < maxDatEvents) {
@@ -3160,14 +3385,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
 
                     std::stringstream binary_ss;
-                    binary_ss << std::bitset<et_bit_length_>(pt_bin)  << "|"
+                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
                             << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<phi_bit_length_>(phi_bin);
+                            << std::bitset<et_bit_length_>(pt_bin);
                     std::string binary_word = binary_ss.str();
 
-                    uint32_t packed_word = (pt_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                        (eta_bin <<  phi_bit_length_) |
-                                        (phi_bin);
+                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                        (eta_bin << et_bit_length_) |
+                                        (pt_bin);
 
                     if (iEvt < maxDatEvents) {
                         if (gepwtaconebasicclusterssk_it == 0) {
@@ -3220,15 +3445,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         
                 // 2. Build binary string (for debug or text output)
                 std::stringstream binary_ss;
-                binary_ss << std::bitset<et_bit_length_>(et_bin) << "|"
+                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
                         << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<phi_bit_length_>(phi_bin);
+                        << std::bitset<et_bit_length_>(et_bin);
                 std::string binary_word = binary_ss.str();
 
                 // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (et_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                    (eta_bin << phi_bit_length_) |
-                                    (phi_bin);
+                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                    (eta_bin << et_bit_length_) |
+                                    (et_bin);
 
                 // 4. Write to output file
                 if (iEvt < maxDatEvents) {
@@ -3336,15 +3561,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                                         
                 // 2. Build binary string (for debug or text output)
                 std::stringstream binary_ss;
-                binary_ss << std::bitset<et_bit_length_>(et_bin) << "|"
+                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
                         << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<phi_bit_length_>(phi_bin);
+                        << std::bitset<et_bit_length_>(et_bin);
                 std::string binary_word = binary_ss.str();
 
                 // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (et_bin  << (eta_bit_length_ + phi_bit_length_)) |
-                                    (eta_bin << phi_bit_length_) |
-                                    (phi_bin);
+                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                    (eta_bin << et_bit_length_) |
+                                    (et_bin);
 
                 // 4. Write to output file
                 if (iEvt < maxDatEvents) {
@@ -3416,11 +3641,23 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 gFexLRJSubleadingPhiValues.push_back(subleading->phi());
             }
 
-            // GEP EtaSK tower collection
-            for (size_t i = 0; i < gepIn_CellsTowersEtaSKEt->size(); ++i) {
-                gepCellsTowersEtaSKEtValues.push_back((*gepIn_CellsTowersEtaSKEt)[i] / 1000.0);
-                gepCellsTowersEtaSKEtaValues.push_back((*gepIn_CellsTowersEtaSKEta)[i]);
-                gepCellsTowersEtaSKPhiValues.push_back((*gepIn_CellsTowersEtaSKPhi)[i]);
+            // GEP EtaSK tower collection -- THE main LRJ constituent input.
+            // Sort input towers by E_T descending only (no eta/phi tie-break); the
+            // >2 GeV cut is applied downstream in the emulation reader.
+            {
+                std::vector<unsigned int> order(gepIn_CellsTowersEtaSKEt->size());
+                std::iota(order.begin(), order.end(), 0u);
+                std::sort(order.begin(), order.end(),
+                        [&](unsigned int a, unsigned int b){
+                            return (*gepIn_CellsTowersEtaSKEt)[a] > (*gepIn_CellsTowersEtaSKEt)[b];
+                        });
+                for (unsigned int i : order) {
+                    gepCellsTowersEtaSKEtValues.push_back((*gepIn_CellsTowersEtaSKEt)[i] / 1000.0);
+                    gepCellsTowersEtaSKEtaValues.push_back((*gepIn_CellsTowersEtaSKEta)[i]);
+                    gepCellsTowersEtaSKPhiValues.push_back((*gepIn_CellsTowersEtaSKPhi)[i]);
+                    for (int l = 0; l < 7; ++l)
+                        gepCellsTowersEtaSKEt_lValues[l].push_back((*gepIn_CellsTowersEtaSKEt_l[l])[i] / 1000.0);
+                }
             }
 
             // GEP EtaSK cluster collection
@@ -3580,31 +3817,31 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 }
             }
 
-            // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-            // // Sim gFEX SR jets (from TrigGepPerf ntuple)
-            // {
-            //     std::vector<std::pair<size_t, double>> gFexSRJSimEtWithIndex;
-            //     for (size_t i = 0; i < gFexSRJSimEt->size(); ++i)
-            //         gFexSRJSimEtWithIndex.emplace_back(i, (*gFexSRJSimEt)[i] / 1000.0);
-            //     std::sort(gFexSRJSimEtWithIndex.begin(), gFexSRJSimEtWithIndex.end(),
-            //         [](const std::pair<size_t,double>& a, const std::pair<size_t,double>& b){ return a.second > b.second; });
-            //     for (const auto& [index, et] : gFexSRJSimEtWithIndex) {
-            //         gFexSRJSimEtIndexValues.push_back(static_cast<unsigned int>(index));
-            //         gFexSRJSimEtValues.push_back(et);
-            //         gFexSRJSimEtaValues.push_back((*gFexSRJSimEta)[index]);
-            //         gFexSRJSimPhiValues.push_back((*gFexSRJSimPhi)[index]);
-            //     }
-            //     if (!gFexSRJSimEtWithIndex.empty()) {
-            //         gFexSRJSimLeadingEtValues.push_back(gFexSRJSimEtWithIndex[0].second);
-            //         gFexSRJSimLeadingEtaValues.push_back((*gFexSRJSimEta)[gFexSRJSimEtWithIndex[0].first]);
-            //         gFexSRJSimLeadingPhiValues.push_back((*gFexSRJSimPhi)[gFexSRJSimEtWithIndex[0].first]);
-            //     }
-            //     if (gFexSRJSimEtWithIndex.size() > 1) {
-            //         gFexSRJSimSubleadingEtValues.push_back(gFexSRJSimEtWithIndex[1].second);
-            //         gFexSRJSimSubleadingEtaValues.push_back((*gFexSRJSimEta)[gFexSRJSimEtWithIndex[1].first]);
-            //         gFexSRJSimSubleadingPhiValues.push_back((*gFexSRJSimPhi)[gFexSRJSimEtWithIndex[1].first]);
-            //     }
-            // }
+            // Sim gFEX SR jets (from TrigGepPerf ntuple)
+            // Guarded: gFexSRJSimEt is null when L1_gFexSRJetRoISim is absent (older ntuples) -> trees written empty.
+            if (gFexSRJSimEt) {
+                std::vector<std::pair<size_t, double>> gFexSRJSimEtWithIndex;
+                for (size_t i = 0; i < gFexSRJSimEt->size(); ++i)
+                    gFexSRJSimEtWithIndex.emplace_back(i, (*gFexSRJSimEt)[i] / 1000.0);
+                std::sort(gFexSRJSimEtWithIndex.begin(), gFexSRJSimEtWithIndex.end(),
+                    [](const std::pair<size_t,double>& a, const std::pair<size_t,double>& b){ return a.second > b.second; });
+                for (const auto& [index, et] : gFexSRJSimEtWithIndex) {
+                    gFexSRJSimEtIndexValues.push_back(static_cast<unsigned int>(index));
+                    gFexSRJSimEtValues.push_back(et);
+                    gFexSRJSimEtaValues.push_back((*gFexSRJSimEta)[index]);
+                    gFexSRJSimPhiValues.push_back((*gFexSRJSimPhi)[index]);
+                }
+                if (!gFexSRJSimEtWithIndex.empty()) {
+                    gFexSRJSimLeadingEtValues.push_back(gFexSRJSimEtWithIndex[0].second);
+                    gFexSRJSimLeadingEtaValues.push_back((*gFexSRJSimEta)[gFexSRJSimEtWithIndex[0].first]);
+                    gFexSRJSimLeadingPhiValues.push_back((*gFexSRJSimPhi)[gFexSRJSimEtWithIndex[0].first]);
+                }
+                if (gFexSRJSimEtWithIndex.size() > 1) {
+                    gFexSRJSimSubleadingEtValues.push_back(gFexSRJSimEtWithIndex[1].second);
+                    gFexSRJSimSubleadingEtaValues.push_back((*gFexSRJSimEta)[gFexSRJSimEtWithIndex[1].first]);
+                    gFexSRJSimSubleadingPhiValues.push_back((*gFexSRJSimPhi)[gFexSRJSimEtWithIndex[1].first]);
+                }
+            }
 
             // Sim gFEX/jFEX MET (from TrigGepPerf ntuple — scalar per event, already in GeV)
             gFexMETJwoJSim       = gepIn_gFexJwoJMet    / 1000.0;
@@ -4058,11 +4295,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             truthHiggsTree->Fill();
             // truthVBFQuark->Fill();  // commented out as in your declaration
             caloTopoTowerTree->Fill();
+            gFexEmulatedTowersTree->Fill();
+            jFexEmulatedTowersTree->Fill();
             gepBasicClustersTree->Fill();
             gepCellsTowersTree->Fill();
             gepBasicClustersSKTree->Fill();
             gepCellsTowersSKTree->Fill();
             gepWTAConeCellsTowersJetsTree->Fill();
+            athenaJetTaggerLRJTree->Fill();
             gepWTAConeBasicClustersJetsTree->Fill();
             gepLeadingWTAConeCellsTowersJetsTree->Fill();
             gepLeadingWTAConeBasicClustersJetsTree->Fill();
@@ -4099,10 +4339,9 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             gFexLRJSimTree->Fill();
             gFexLeadingLRJSimTree->Fill();
             gFexSubleadingLRJSimTree->Fill();
-            // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-            // gFexSRJSimTree->Fill();
-            // gFexLeadingSRJSimTree->Fill();
-            // gFexSubleadingSRJSimTree->Fill();
+            gFexSRJSimTree->Fill();
+            gFexLeadingSRJSimTree->Fill();
+            gFexSubleadingSRJSimTree->Fill();
             gepCellsTowersEtaSKTree->Fill();
             gepBasicClustersEtaSKTree->Fill();
             gepWTAConeCellsTowersEtaSKJetsTree->Fill();
@@ -4153,11 +4392,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     truthHiggsTree->Write("", TObject::kOverwrite);
     // truthVBFQuark->Write();  // Optional, if used
     caloTopoTowerTree->Write("", TObject::kOverwrite);
+    gFexEmulatedTowersTree->Write("", TObject::kOverwrite);
+    jFexEmulatedTowersTree->Write("", TObject::kOverwrite);
     gepBasicClustersTree->Write("", TObject::kOverwrite);
     gepBasicClustersSKTree->Write("", TObject::kOverwrite);
     gepCellsTowersTree->Write("", TObject::kOverwrite);
     gepCellsTowersSKTree->Write("", TObject::kOverwrite);
     gepWTAConeCellsTowersJetsTree->Write("", TObject::kOverwrite);
+    athenaJetTaggerLRJTree->Write("", TObject::kOverwrite);
     gepWTAConeBasicClustersJetsTree->Write("", TObject::kOverwrite);
     gepWTAConeCellsTowersSKJetsTree->Write("", TObject::kOverwrite);
     gepWTAConeBasicClustersSKJetsTree->Write("", TObject::kOverwrite);
@@ -4198,10 +4440,9 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     gFexMETNoiseCutSimTree->Write("", TObject::kOverwrite);
     gFexMETRmsSimTree->Write("", TObject::kOverwrite);
     jFexMETTree->Write("", TObject::kOverwrite);
-    // TODO: uncomment once L1_gFexSRJetRoISim branch exists in GEP ntuples
-    // gFexSRJSimTree->Write("", TObject::kOverwrite);
-    // gFexLeadingSRJSimTree->Write("", TObject::kOverwrite);
-    // gFexSubleadingSRJSimTree->Write("", TObject::kOverwrite);
+    gFexSRJSimTree->Write("", TObject::kOverwrite);
+    gFexLeadingSRJSimTree->Write("", TObject::kOverwrite);
+    gFexSubleadingSRJSimTree->Write("", TObject::kOverwrite);
     gepCellsTowersEtaSKTree->Write("", TObject::kOverwrite);
     gepBasicClustersEtaSKTree->Write("", TObject::kOverwrite);
     gepWTAConeCellsTowersEtaSKJetsTree->Write("", TObject::kOverwrite);
@@ -4243,9 +4484,25 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 void HERNTupler(){
     //gSystem->Load("libxAODRootAccess");
     //xAOD::Init().ignore();
-    
+
 
     gSystem->RedirectOutput("HERNTupler.log", "w");
+
+    // Set true to validate the Athena TrigGepPerf JetTaggerLRJ output against
+    // jetTaggerEmulation: reruns this ntupler on the Athena output ntuple
+    // (paths overridden inside nTupler), then feed its output to the emulation
+    // (jetTaggerConfigLocal.sh with trigGepPerfValidation=true).
+    const bool trigGepPerfValidation = true;
+    const unsigned int trigGepPerfValidationAlgoVersion = 3; // 2 = basic sample, 3 = advanced sample
+    if (trigGepPerfValidation) {
+        const unsigned int etaAltRange = (trigGepPerfValidationAlgoVersion == 2) ? 784 : 98;
+        nTupler(/*signalBool=*/true, /*signalString=*/"ggF_hh_bbbb", etaAltRange, trigGepPerfValidationAlgoVersion,
+                /*jzSlice=*/0, /*specialJZ0Bool=*/false, /*outputDirOverride=*/"", /*writeDatFiles=*/false,
+                /*specificDaodFile=*/"", /*specificGepFile=*/"", /*fileSuffix=*/"",
+                /*trigGepPerfValidation=*/true);
+        gSystem->Exit(0);
+        return;
+    }
     //std::vector<unsigned int > jzSlices = {3};
     std::vector<unsigned int > jzSlices = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     std::vector<unsigned int > algoVersions = {3}; // FIXME algo version needs to control eta, phi bit widths too! otherwise can't loop through them and do this all in one run

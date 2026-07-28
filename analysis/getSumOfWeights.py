@@ -5,7 +5,7 @@ baseDir = "/data/larsonma/GEPHadronicEventReconstruction/GEPOutputReaderNTuples/
 
 with open("sumOfWeights.txt", "w") as out:
     for jz in range(10):
-        pattern = f"{baseDir}/JZ{jz}/user.mlarson.GEPNtupleJETM42.QCD_Dijet_JZ{jz}.v2_TGP_JETM42_dijet_ZvvHbb_EXT0/*.root"
+        pattern = f"{baseDir}/JZ{jz}/user.mlarson.GEPNtupleJETM42.QCD_Dijet_JZ{jz}.v11_GEPHadronicReconstruction_EXT0/*.root"
         files = sorted(glob.glob(pattern))
 
         if not files:
