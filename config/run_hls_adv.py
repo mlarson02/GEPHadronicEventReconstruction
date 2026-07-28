@@ -1,11 +1,14 @@
 from pathlib import Path
 #import vitis
 import os
+import re
 import shutil
 import math
-import ROOT
 import xml.etree.ElementTree as ET
 import subprocess
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+EOS_DATA_ROOT = Path("/eos/user/m/mlarson/TransferMemPrintsLUTs/data")
 
 # Base/default constants
 base_constants = {
@@ -27,8 +30,8 @@ base_constants = {
     "phi_min_": -3.2,
     "phi_max_": 3.2,
     "pi_digitized_in_phi_": 31,
-    "eta_min_": -4.9,
-    "eta_max_": 4.9,
+    "eta_min_": -4.85,
+    "eta_max_": 4.95,
     "eta_granularity_": 0.1,
     "phi_granularity_": 0.1,
     "et_min_": 0,
@@ -46,7 +49,7 @@ def write_file_read_header(file_path, file_suffix, signal_bool, jzSlice):
     if os.path.exists(file_path):
         os.remove(file_path)
     # Base content up to lutPath_
-    header_content = """#ifndef FILE_READ_H  // Check if the macro is defined
+    header_content = f"""#ifndef FILE_READ_H  // Check if the macro is defined
 #define FILE_READ_H  // Define the macro
 #include <iostream>
 #include <fstream>
@@ -60,8 +63,8 @@ def write_file_read_header(file_path, file_suffix, signal_bool, jzSlice):
 #include <cmath>
 
 // Define constants used by testbench
-const std::string memPrintsPath_ = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints_v3/";
-static inline uint32_t maskN(unsigned n) { return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }
+const std::string memPrintsPath_ = "{EOS_DATA_ROOT}/MemPrints_v3/";
+static inline uint32_t maskN(unsigned n) {{ return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }}
 """
 
     # Add your file suffix line *after* lutPath_
@@ -149,8 +152,8 @@ inline void extract_values_from_file(const std::string& fileName, input (&values
             // Prepend 5 zero bits (as MSB) to represent num_io = 0
             std::string num_io_bin = "00000";
 
-            // Final bitstring in MSB to LSB order: num_io | et | eta | phi
-            std::string full_bin = num_io_bin + et_bin + eta_bin + phi_bin;
+            // Final bitstring in MSB to LSB order: num_io | phi | eta | et
+            std::string full_bin = num_io_bin + phi_bin + eta_bin + et_bin;
 
             //std::cout << "full_bin: " << full_bin << std::endl;
 
@@ -188,10 +191,58 @@ inline void extract_values_from_file(const std::string& fileName, input (&values
 
 
 
-def write_constants_h(constants: dict, output_file: str, unroll: int, ii: int):
+LUT_V3_DIR = REPO_ROOT / "algorithm" / "emulation" / "LUT_Constants_Generation" / "LUTs" / "v3"
+
+
+def find_lut_file(lut_type: str, r2cut: float, rmergecut: float, tol: float = 1e-6) -> Path:
+    # Match by parsed numeric value rather than reconstructing the filename, since C++'s default
+    # ostream float formatting (e.g. "2" not "2.0") is finicky to replicate exactly in Python.
+    pattern = re.compile(rf"^LUT_{re.escape(lut_type)}_rMerge_(?P<rmerge>[0-9.]+)_R2_(?P<r2>[0-9.]+)\.h$")
+    for path in LUT_V3_DIR.glob(f"LUT_{lut_type}_rMerge_*_R2_*.h"):
+        m = pattern.match(path.name)
+        if not m:
+            continue
+        if abs(float(m.group("r2")) - r2cut) < tol and abs(float(m.group("rmerge")) - rmergecut) < tol:
+            return path
+    raise FileNotFoundError(
+        f"No {lut_type} LUT found in {LUT_V3_DIR} for r2Cut_={r2cut}, rMergeCut_={rmergecut}. "
+        f"Regenerate via writeLUTsConstantsEmulation.cc first."
+    )
+
+
+def count_lut_entries(path: Path) -> int:
+    body = path.read_text().strip()
+    body = body[body.index("{") + 1 : body.rindex("}")].strip().rstrip(",")
+    return len([v for v in body.split(",") if v.strip() != ""])
+
+
+def write_constants_h(constants: dict, output_file: str, unroll: int, ii: int, use_dsps: bool = True):
     # Remove existing constants.h if it exists
     if os.path.exists(output_file):
         os.remove(output_file)
+
+    deltaR2_bits = 10
+    r2cut = constants["r2Cut_"]
+    rmergecut = constants["rMergeCut_"]
+
+    deltaR2Cut_lut_path = find_lut_file("deltaR2Cut", r2cut, rmergecut)
+    deltaR_lut_path = find_lut_file("deltaR", r2cut, rmergecut)
+    max_R2lut_size = count_lut_entries(deltaR2Cut_lut_path)
+    max_Rlut_size = count_lut_entries(deltaR_lut_path)
+
+    # Mirrors the generator's own deltaR_max/deltaR_granularity computation exactly, so digitized
+    # linear thresholds compared against lutR_ entries line up with how that table was digitized.
+    eta_range = constants["eta_range_"]
+    eta_granularity = constants["eta_granularity_"]
+    phi_bit_length = constants["phi_bit_length_"]
+    phi_granularity = constants["phi_granularity_"]
+    deltaR_max = math.sqrt(
+        ((eta_range - 1) * eta_granularity) ** 2
+        + (((1 << (phi_bit_length - 1)) - 1) * phi_granularity) ** 2
+    )
+    deltaR_granularity = deltaR_max / 255.0
+    digitized_two_rCut = round(2 * constants["rCut_"] / deltaR_granularity)
+    digitized_rMergeCut = round(rmergecut / deltaR_granularity)
 
     with open(output_file, "w") as f:
         f.write("#ifndef CONSTANTS_ADV_H\n")
@@ -215,7 +266,7 @@ def write_constants_h(constants: dict, output_file: str, unroll: int, ii: int):
                 f.write(f"constexpr auto {key} = {value};\n")
 
         # Write the extra constants, LUT include, and struct
-        f.write('''
+        f.write(f'''
 
 constexpr unsigned int padded_zeroes_length_ = 64 - et_bit_length_ - eta_bit_length_ - phi_bit_length_ - num_subjets_length_ - num_subjets_length_;
 constexpr unsigned int padded_zeroes_length_32b_ = 32 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;
@@ -224,16 +275,17 @@ constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + num_subjets_
 typedef ap_uint<total_bits_input_> input; // need 32b input, 64b output!
 typedef ap_uint<total_bits_output_> output;
 
-constexpr unsigned int phi_low_  = 0;
-constexpr unsigned int phi_high_ = phi_low_ + phi_bit_length_ - 1;
-
-constexpr unsigned int eta_low_  = phi_high_ + 1;
-constexpr unsigned int eta_high_ = eta_low_ + eta_bit_length_ - 1;
-
-constexpr unsigned int et_low_   = eta_high_ + 1;
+// MSB -> LSB word order is phi | eta | et, i.e. et occupies the LSBs and phi the MSBs
+constexpr unsigned int et_low_   = 0;
 constexpr unsigned int et_high_  = et_low_ + et_bit_length_ - 1;
 
-constexpr unsigned int num_subjets_low_  = et_high_ + 1;
+constexpr unsigned int eta_low_  = et_high_ + 1;
+constexpr unsigned int eta_high_ = eta_low_ + eta_bit_length_ - 1;
+
+constexpr unsigned int phi_low_  = eta_high_ + 1;
+constexpr unsigned int phi_high_ = phi_low_ + phi_bit_length_ - 1;
+
+constexpr unsigned int num_subjets_low_  = phi_high_ + 1;
 constexpr unsigned int num_subjets_high_ = num_subjets_low_ + num_subjets_length_ - 1;
 
 constexpr unsigned int padded_zeroes_low_  = num_subjets_high_ + 1;
@@ -241,12 +293,35 @@ constexpr unsigned int padded_zeroes_high_ = padded_zeroes_low_ + padded_zeroes_
 
 constexpr unsigned int nSeedsDeltaR_ = nSeedsInput_ - nSeedsOutput_;
 
-constexpr unsigned int deltaR2_bits_  = 10; // bit width of the saturated deltaR2 result (values > 1023 clamp to 1023)
+constexpr unsigned int deltaR2_bits_  = {deltaR2_bits}; // bit width of the saturated deltaR2 result (values > {(1 << deltaR2_bits) - 1} clamp to {(1 << deltaR2_bits) - 1})
 constexpr double deltaR2_granularity_ = eta_granularity_ * eta_granularity_; // FIXME THIS SHOULD BE EQUIVALENT TO SQUARING PHI_GRANULARITY_ - maybe add an exception if they are not the same
 
 constexpr unsigned int digitized_delta_R2Cut_ = static_cast<unsigned int>(r2Cut_/deltaR2_granularity_ + 0.5); //+ 0.5 for correct rounding
 
 constexpr unsigned int digitized_d_search_squared_ = static_cast<unsigned int>(((rMergeCut_) * (rMergeCut_)/(deltaR2_granularity_)) + 0.5);
+
+// Controls whether calcDeltaR2 (helperFunctions_adv.h) computes deltaR^2 via DSP multipliers (baseline)
+// or via a precomputed LUT indexed by (deltaEta, deltaPhi). Set to 0 to use the LUT path instead.
+#define USE_DSPS_ {1 if use_dsps else 0}
+
+#if !USE_DSPS_
+// Boolean pass/fail against r2Cut_, indexed by (deltaEta, deltaPhi). Used by passesRCut().
+constexpr unsigned int max_R2lut_size_ = {max_R2lut_size};
+static const bool lut_[max_R2lut_size_] =
+#include "{deltaR2Cut_lut_path}"
+;
+
+// Digitized deltaR (8-bit, full grid coverage, cut-independent) indexed by (deltaEta, deltaPhi).
+// Used by passesTwoRCut() and passesSearchRadius() against the digitized thresholds below.
+constexpr unsigned int max_Rlut_size_ = {max_Rlut_size};
+static const ap_uint<deltaRBits_> lutR_[max_Rlut_size_] =
+#include "{deltaR_lut_path}"
+;
+
+constexpr double deltaR_granularity_ = {deltaR_granularity!r};
+constexpr unsigned int digitized_two_rCut_ = {digitized_two_rCut};
+constexpr unsigned int digitized_rMergeCut_ = {digitized_rMergeCut};
+#endif
 
         ''')
 
@@ -268,6 +343,8 @@ if __name__ == "__main__":
     rMergeCut_options = [2.0]
     #rMergeCut_options = [3.5]
     signalBool_options = [True]
+
+    use_dsps = True # baseline is DSP-based calcDeltaR2; set False to use the LUT path instead
 
     jzSlices = [3]
 
@@ -313,7 +390,7 @@ if __name__ == "__main__":
 
                             # Bool formatting for sortSeeds and inputEnergyCut
                             if signalBool:
-                                signal_str = 'sig'  
+                                signal_str = 'sig'
                             else:
                                 if (jzSlice == 2):
                                     signal_str = 'back_JZ2'
@@ -331,7 +408,7 @@ if __name__ == "__main__":
                                 f"maxObj{maxObjectsConsidered}_"
                                 f"rMerge{rMergeCut_str}_"
                                 f"{signal_str}"
-                                "_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL"
+                                "_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL_MODIFICATIONS_DETERMINISTIC_TREEFIX"
                             )
                             print(f"Launching HLS with project name: {file_suffix}")
 
@@ -340,16 +417,16 @@ if __name__ == "__main__":
                             ii = 3
 
                             # Write to file
-                            write_constants_h(constants, constsFilename, unroll, ii)
-                            fileReadPath = "/home/larsonma/GEPHadronicEventReconstruction/algorithm/fileRead.h"  # Path to save the file
+                            write_constants_h(constants, constsFilename, unroll, ii, use_dsps)
+                            fileReadPath = str(REPO_ROOT / "algorithm" / "fileRead.h")  # Path to save the file
                             write_file_read_header(fileReadPath, file_suffix, signalBool, jzSlice)
 
                             print(f" Wrote {constsFilename}")
-                            #run_lut_generator_via_root("/home/larsonma/GEPHadronicEventReconstruction/algorithm/writeDeltaR2LUT_adv.cc")
+                            #run_lut_generator_via_root(str(REPO_ROOT / "algorithm" / "writeDeltaR2LUT_adv.cc"))
 
                             subprocess.run(["vitis", "-s", "jet_tagger_hls_adv.py", file_suffix, "1"], check=True)
                             xml_report_path = os.path.join('w', file_suffix, file_suffix, 'syn', 'report', 'jet_tagger_top_csynth.xml')
                             print("xml_report_path,", xml_report_path)
-                            #resources, latency = extract_hls_report(xml_report_path)
-                            #print(f"Run {file_suffix}: Resources {resources}, Latency {latency}")
-                            
+                                    #resources, latency = extract_hls_report(xml_report_path)
+                                #print(f"Run {file_suffix}: Resources {resources}, Latency {latency}")
+

@@ -65,14 +65,15 @@ int main() {
             //rMergeCuts = { 2.0};
         }
 
+        gSystem->mkdir(("LUTs/v" + std::to_string(algoVersion) + "/").c_str(), kTRUE);
+
         double etaGranularity = 9.8 / double(etaRange);
         double phiGranularity = 6.4 / double((1 << phiBitLength));
 
         for(double rMergeCut : rMergeCuts){ // Loop through algorithm configurations affecting constants.h
             for(double rSquaredCut : rSquaredCuts){ // And generate different constants files
-                //unsigned int max_R2lut_size = calculate_lut_max_size(rSquaredCut, etaBitLength, phiBitLength, etaGranularity, phiGranularity, true); // fixme remove unnecessary _ as no longer global variable
-                //unsigned int max_Rlut_size = calculate_lut_max_size(rMergeCut, etaBitLength, phiBitLength, etaGranularity, phiGranularity, false);
-                double psi_R_granularity = 2 * sqrt(rSquaredCut) / (1 << substruct4BitLength); 
+                unsigned int max_R2lut_size = calculate_lut_max_size(rSquaredCut, etaBitLength, phiBitLength, etaGranularity, phiGranularity, true); // true: compare digitized deltaR^2 against rSquaredCut
+                double psi_R_granularity = 2 * sqrt(rSquaredCut) / (1 << substruct4BitLength);
                 unsigned int max_R_8b_lut_size = calculate_lut_max_size(2 * std::sqrt(rSquaredCut), etaBitLength, phiBitLength, etaGranularity, phiGranularity, false); // NOTE use this now to compute distances not just from jet axis, but between subjets up to the jet diameter distance apart
                 for(unsigned int nIOOption : nIOs){
                     for(unsigned int nSeedOption : nSeeds){
@@ -94,7 +95,72 @@ int main() {
                     } 
                 }
                 
-                std::string lutR_8b_output_path = makeInputLUTFileName(rMergeCut, rSquaredCut, "deltaR_8b"); // Lower precision deltaR calculation
+                // Boolean whether (deltaEta, deltaPhi) passes the deltaR^2 cut -- truncated once no further (eta, phi)
+                // combination can pass, since everything past that point is guaranteed 0.
+                std::string lut_output_path = makeInputLUTFileName(rMergeCut, rSquaredCut, "deltaR2Cut", algoVersion);
+                std::ofstream outfile(lut_output_path);
+                unsigned int idx = 0;
+                outfile << "{\n    ";
+
+                for (unsigned int etaIt = 0; etaIt < etaRange; ++etaIt) {
+                    for (unsigned int phiIt = 0; phiIt < (1 << (phiBitLength - 1)); ++phiIt) { // phi bit length - 1 as max deltaPhi = pi, not 2pi
+                        if (idx >= max_R2lut_size) break; // STOP when you reach max_R2lut_size!
+
+                        float etaSquared = etaIt * etaGranularity * etaIt * etaGranularity;
+                        float phiSquared = phiIt * phiGranularity * phiIt * phiGranularity;
+                        float deltaR2 = etaSquared + phiSquared;
+                        outfile << ((deltaR2 <= rSquaredCut) ? 1 : 0);
+
+                        idx++;
+                        if (idx < max_R2lut_size)
+                            outfile << ", " << ((idx % 16 == 0) ? "\n    " : "");
+                    }
+                    if (idx >= max_R2lut_size) break;
+                }
+
+                outfile << "\n};\n";
+                outfile.close();
+
+                // Full-precision digitized deltaR, used for any linear-distance threshold check (seed-merge
+                // search radius, overlap-removal radius, etc). Digitized against the maximum possible deltaR
+                // over the full (eta, phi) grid, not against any particular cut, so the same 8-bit code means
+                // the same physical distance everywhere. Deliberately NOT truncated by max_Rlut_size (unlike
+                // deltaR2Cut / deltaR_8b, which are boolean/relative to one specific cut) -- this table has to
+                // stay valid for whatever threshold a caller compares it against, which can exceed rMergeCut.
+                double deltaR_max = std::sqrt(
+                    std::pow((etaRange - 1) * etaGranularity, 2) +
+                    std::pow(((1 << (phiBitLength - 1)) - 1) * phiGranularity, 2)
+                );
+                double deltaR_granularity = deltaR_max / 255.0; // 8-bit digitization
+                unsigned int full_Rlut_size = etaRange * (1 << (phiBitLength - 1));
+
+                std::string lutR_output_path = makeInputLUTFileName(rMergeCut, rSquaredCut, "deltaR", algoVersion);
+                std::ofstream outfileR(lutR_output_path);
+                unsigned int i = 0;
+                outfileR << "{\n    ";
+
+                for (unsigned int etaIt = 0; etaIt < etaRange; ++etaIt) {
+                    for (unsigned int phiIt = 0; phiIt < (1 << (phiBitLength - 1)); ++phiIt) { // phi bit length - 1 as max deltaPhi = pi, not 2pi
+                        float deltaEta = etaIt * etaGranularity;
+                        float deltaPhi = phiIt * phiGranularity;
+                        float deltaR2 = deltaEta * deltaEta + deltaPhi * deltaPhi;
+                        float deltaR = std::sqrt(deltaR2);
+
+                        uint8_t digitizedDeltaR = static_cast<uint8_t>(deltaR / deltaR_granularity + 0.5f);
+                        if (digitizedDeltaR > 255) digitizedDeltaR = 255; // Clamp (optional safety)
+
+                        outfileR << static_cast<unsigned int>(digitizedDeltaR);
+
+                        i++;
+                        if (i < full_Rlut_size)
+                            outfileR << ", " << ((i % 16 == 0) ? "\n    " : "");
+                    }
+                }
+
+                outfileR << "\n};\n";
+                outfileR.close();
+
+                std::string lutR_8b_output_path = makeInputLUTFileName(rMergeCut, rSquaredCut, "deltaR_8b", algoVersion); // Lower precision deltaR calculation
                 std::ofstream outfileR8b(lutR_8b_output_path);
                 unsigned int iR = 0;
                 outfileR8b << "{\n    ";

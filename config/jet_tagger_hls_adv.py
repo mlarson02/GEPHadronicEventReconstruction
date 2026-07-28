@@ -1,9 +1,13 @@
 # To run: vitis-run --mode hls --py jet_tagger_hls.py
-# vitis -s jet_tagger_hls.py 
+# vitis -s jet_tagger_hls.py
 import vitis
 import os
 import shutil
 import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+EOS_DATA_ROOT = Path("/eos/user/m/mlarson/TransferMemPrintsLUTs/data")
 
 project_name = sys.argv[1]
 hls_exec = int(sys.argv[2]) if len(sys.argv) > 1 else 1  # default to 1 if not specified
@@ -31,7 +35,7 @@ comp = client.create_hls_component(name=comp_name, cfg_file=['hls_config.cfg'], 
 cfg_path = f'./w/{comp_name}/hls_config.cfg'
 cfg = client.get_config_file(path=cfg_path)
 
-cfg.set_value(key='part', value='xcvp1802-lsvc4072-2MP-e-S') #xcvc1902-vsva2197-2MP-e-S
+cfg.set_value(key='part', value='xcvp1802-vsva5601-2MP-e-S') #xcvc1902-vsva2197-2MP-e-S
 cfg.set_value(section='hls', key='clock', value='4.16666666')  # 240 MHz
 cfg.set_value(section='hls', key='flow_target', value='vivado')
 
@@ -44,21 +48,20 @@ cfg.set_value(section='hls', key='syn.top', value='jet_tag_adv')
 
 # Add design files
 cfg.set_values(section='hls', key='syn.file', values=[
-    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/jet_tag_adv.h',
-    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/jet_tag_adv.cc',
-    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/helperFunctions_adv.h',
-    '/home/larsonma/GEPHadronicEventReconstruction/data/LUTs/deltaR2Cut.h',
-    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/constants_adv.h'
+    str(REPO_ROOT / 'algorithm' / 'jet_tag_adv.h'),
+    str(REPO_ROOT / 'algorithm' / 'jet_tag_adv.cc'),
+    str(REPO_ROOT / 'algorithm' / 'helperFunctions_adv.h'),
+    str(REPO_ROOT / 'algorithm' / 'constants_adv.h'),
 ])
 
 # Add testbench and data files
 cfg.set_values(section='hls', key='tb.file', values=[
-    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/testbench/jet_tagger_testbench_adv.cpp',
-    '/home/larsonma/GEPHadronicEventReconstruction/algorithm/fileRead.h',
-    '/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/gFex/mc21_14TeV_hh_bbbb_vbf_novhh_gfex_smallrj.dat',
-    '/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/gFex/mc21_14TeV_jj_JZ3_gfex_smallrj.dat',
-    '/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/CaloTopo_422/mc21_14TeV_hh_bbbb_vbf_novhh_topo422.dat',
-    '/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints/CaloTopo_422/mc21_14TeV_jj_JZ3_topo422.dat'
+    str(REPO_ROOT / 'algorithm' / 'testbench' / 'jet_tagger_testbench_adv.cpp'),
+    str(REPO_ROOT / 'algorithm' / 'fileRead.h'),
+    str(EOS_DATA_ROOT / 'MemPrints_v2' / 'gFex' / 'mc21_14TeV_hh_bbbb_vbf_novhh_gfex_smallrj.dat'),
+    str(EOS_DATA_ROOT / 'MemPrints_v2' / 'gFex' / 'mc21_14TeV_jj_JZ3_gfex_smallrj.dat'),
+    str(EOS_DATA_ROOT / 'MemPrints_v2' / 'CaloTopo_422' / 'mc21_14TeV_hh_bbbb_vbf_novhh_topo422.dat'),
+    str(EOS_DATA_ROOT / 'MemPrints_v2' / 'CaloTopo_422' / 'mc21_14TeV_jj_JZ3_topo422.dat'),
 ])
 
 # Manually strip unwanted settings and add cosim waveform config
@@ -99,7 +102,7 @@ if hls_exec == 0: # hls_exec determined by function input
     comp.run(operation='C_SIMULATION')
 if hls_exec == 1: # hls_exec determined by function input
     #print("why is this triggered")
-    #comp.run(operation='C_SIMULATION')
+    comp.run(operation='C_SIMULATION')
     comp.run(operation='SYNTHESIS')
 elif hls_exec == 2:
     comp.run(operation='C_SIMULATION')

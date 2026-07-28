@@ -24,8 +24,8 @@ constexpr unsigned int phi_bit_length_ = 9;
 constexpr double phi_min_ = -3.2;
 constexpr double phi_max_ = 3.2;
 constexpr unsigned int pi_digitized_in_phi_ = 251;
-constexpr double eta_min_ = -4.9;
-constexpr double eta_max_ = 4.9;
+constexpr double eta_min_ = -4.85;
+constexpr double eta_max_ = 4.95;
 constexpr double eta_granularity_ = 0.0125;
 constexpr double phi_granularity_ = 0.0125;
 constexpr double deltaR2_granularity_ = 0.00015625;
@@ -50,34 +50,27 @@ constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + et_bit_lengt
 typedef ap_uint<total_bits_input_> input; // need 32b input, 64b output!
 typedef ap_uint<total_bits_output_> output;
 
-constexpr unsigned int phi_low_  = 0;
-constexpr unsigned int phi_high_ = phi_low_ + phi_bit_length_ - 1;
-
-constexpr unsigned int eta_low_  = phi_high_ + 1;
-constexpr unsigned int eta_high_ = eta_low_ + eta_bit_length_ - 1;
-
-constexpr unsigned int et_low_   = eta_high_ + 1;
+// MSB -> LSB word order is phi | eta | et, i.e. et occupies the LSBs and phi the MSBs
+constexpr unsigned int et_low_   = 0;
 constexpr unsigned int et_high_  = et_low_ + et_bit_length_ - 1;
 
-constexpr unsigned int padded_zeroes_low_  = et_high_ + 1;
+constexpr unsigned int eta_low_  = et_high_ + 1;
+constexpr unsigned int eta_high_ = eta_low_ + eta_bit_length_ - 1;
+
+constexpr unsigned int phi_low_  = eta_high_ + 1;
+constexpr unsigned int phi_high_ = phi_low_ + phi_bit_length_ - 1;
+
+constexpr unsigned int padded_zeroes_low_  = phi_high_ + 1;
 constexpr unsigned int padded_zeroes_high_ = padded_zeroes_low_ + padded_zeroes_length_ - 1;
 
 
 constexpr unsigned int nSeedsDeltaR_ = nSeedsInput_ - nSeedsOutput_;
 
-constexpr unsigned int digitized_delta_R2_ = static_cast<unsigned int>(r2Cut_/deltaR2_granularity_);
+constexpr unsigned int digitized_delta_R2_ = static_cast<unsigned int>(r2Cut_/deltaR2_granularity_ + 0.5);
 
-static const bool lut_[max_R2lut_size_] =
-#include "../data/LUTs/deltaR2LUT.h"
-;
-
-static const ap_uint<deltaR_bits_ > lutR_[max_Rlut_size_] = 
-#include "../data/LUTs/deltaRLUT.h"
-;
-
-static const ap_uint<deltaR_bits_ > lutR_8b_[max_R_8b_lut_size_] = 
-#include "../data/LUTs/deltaRLUT_8b.h"
-;
+// NOTE: the basic algorithm computes deltaR^2 directly with DSP multipliers (calcDeltaR2 in
+// helperFunctions.h), so the lut_/lutR_/lutR_8b_ arrays are never read. They were dead code (and
+// caused a size mismatch vs the generated LUT files), so they have been removed.
 
 #endif
 constexpr unsigned int deltaR_levels_ = (1 << deltaR_bits_); // 256

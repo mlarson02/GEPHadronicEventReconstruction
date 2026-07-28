@@ -1,6 +1,6 @@
-#include "/home/larsonma/LargeRadiusJets/algorithm/jet_tag.h"
-#include "/home/larsonma/LargeRadiusJets/algorithm/fileRead.h"
-//#include "/home/larsonma/LargeRadiusJets/algorithm/helperFunctions.h"
+#include "../jet_tag.h"
+#include "../fileRead.h"
+//#include "../helperFunctions.h"
 #include <string>
 #include <iostream>
 #include <array>

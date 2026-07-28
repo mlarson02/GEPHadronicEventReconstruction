@@ -260,13 +260,17 @@ std::string makeOutputTextFileName(double rMergeCut,
     return ss.str();
 }
 
-// Returns LUT file name given parameters
+// Returns LUT file name given parameters. Files are split into a per-algoVersion subdirectory
+// (v2 == basic, v3 == advanced) so the two algorithms' LUTs -- which use different bit widths --
+// can't be mixed up when pointing HLS synthesis at them.
 std::string makeInputLUTFileName(double rMergeCut,
                                  double RSquaredCut,
                                  std::string LUTType,
-                                 std::string inputLUTFilePath = "/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/LUTs/") {
+                                 unsigned int algoVersion,
+                                 std::string inputLUTFilePath = "LUTs/") {
     std::ostringstream ss;
-    ss << inputLUTFilePath << "LUT_" << LUTType << "_rMerge_" << std::setprecision(4) << rMergeCut << "_"
+    ss << inputLUTFilePath << "v" << algoVersion << "/"
+       << "LUT_" << LUTType << "_rMerge_" << std::setprecision(4) << rMergeCut << "_"
        << "R2_" << std::setprecision(3) << RSquaredCut << ".h";
 
     return ss.str();

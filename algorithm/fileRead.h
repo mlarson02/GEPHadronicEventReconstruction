@@ -12,9 +12,9 @@
 #include <cmath>
 
 // Define constants used by testbench
-const std::string memPrintsPath_ = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints_v3/";
+const std::string memPrintsPath_ = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/MemPrints_v3/";
 static inline uint32_t maskN(unsigned n) { return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }
-const std::string kFileSuffix = "nSeeds2_r2Cut1p21_maxObj128_rMerge2p0_sig_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL";
+const std::string kFileSuffix = "nSeeds2_r2Cut1p21_maxObj128_rMerge2p0_sig_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL_MODIFICATIONS_DETERMINISTIC_TREEFIX";
 constexpr bool signalBool_ = true;
 constexpr unsigned int jzSlice_ = 3;
 
@@ -92,8 +92,8 @@ inline void extract_values_from_file(const std::string& fileName, input (&values
             // Prepend 5 zero bits (as MSB) to represent num_io = 0
             std::string num_io_bin = "00000";
 
-            // Final bitstring in MSB to LSB order: num_io | et | eta | phi
-            std::string full_bin = num_io_bin + et_bin + eta_bin + phi_bin;
+            // Final bitstring in MSB to LSB order: num_io | phi | eta | et
+            std::string full_bin = num_io_bin + phi_bin + eta_bin + et_bin;
 
             //std::cout << "full_bin: " << full_bin << std::endl;
 

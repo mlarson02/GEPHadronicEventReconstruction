@@ -3,9 +3,11 @@ from pathlib import Path
 import os
 import shutil
 import math
-import ROOT
 import xml.etree.ElementTree as ET
 import subprocess
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+EOS_DATA_ROOT = Path("/eos/user/m/mlarson/TransferMemPrintsLUTs/data")
 
 def wrapSym(phi):
     if(phi > math.pi):
@@ -35,8 +37,8 @@ base_constants = {
     "phi_min_": -3.2,
     "phi_max_": 3.2,
     "pi_digitized_in_phi_": 251, # rounding 3.1415/0.0125
-    "eta_min_": -4.9,
-    "eta_max_": 4.9,
+    "eta_min_": -4.85,
+    "eta_max_": 4.95,
     "eta_granularity_": 0.0125,
     "phi_granularity_": 0.0125, # fixme these should be calculated from range and bit length not hard-coded!
     "deltaR2_granularity_": 0.00015625,
@@ -103,7 +105,7 @@ def compute_derived(constants):
     constants["phi_range_"] = constants["phi_max_"] - constants["phi_min_"]
     return constants
 
-def run_lut_generator_via_root(source_file: str):
+"""def run_lut_generator_via_root(source_file: str):
     ROOT.gSystem.Load("libCore")  # Make sure libCore is loaded
     ROOT.gROOT.ProcessLine(f'.L {source_file}')
     ROOT.gROOT.ProcessLine('main();')  # Assuming your main is called "main"
@@ -131,7 +133,7 @@ def extract_hls_report(xml_path):
         latency['WorstCaseCycles'] = int(timing.findtext('Worst-case', default='0'))
 
     return resources, latency
-
+"""
 
 import os
 
@@ -140,7 +142,7 @@ def write_file_read_header(file_path, file_suffix, signal_bool, jzSlice):
     if os.path.exists(file_path):
         os.remove(file_path)
     # Base content up to lutPath_
-    header_content = """#ifndef FILE_READ_H  // Check if the macro is defined
+    header_content = f"""#ifndef FILE_READ_H  // Check if the macro is defined
 #define FILE_READ_H  // Define the macro
 #include <iostream>
 #include <fstream>
@@ -154,9 +156,9 @@ def write_file_read_header(file_path, file_suffix, signal_bool, jzSlice):
 #include <cmath>
 
 // Define constants used by testbench
-const std::string memPrintsPath_ = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrints_v2/";
-const std::string lutPath_ = "/home/larsonma/GEPHadronicEventReconstruction/data/LUTs/deltaR2Cut.dat";
-static inline uint32_t maskN(unsigned n) { return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }
+const std::string memPrintsPath_ = "{EOS_DATA_ROOT}/MemPrints_v2/";
+const std::string lutPath_ = "{EOS_DATA_ROOT}/LUTs/deltaR2Cut.dat";
+static inline uint32_t maskN(unsigned n) {{ return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }}
 """
 
     # Add your file suffix line *after* lutPath_
@@ -243,8 +245,8 @@ inline void extract_values_from_file(const std::string& fileName, input (&values
             // Prepend 5 zero bits (as MSB) to represent num_io = 0
             std::string num_io_bin = "00000";
 
-            // Final bitstring in MSB to LSB order: num_io | et | eta | phi
-            std::string full_bin = num_io_bin + et_bin + eta_bin + phi_bin;
+            // Final bitstring in MSB to LSB order: num_io | phi | eta | et
+            std::string full_bin = num_io_bin + phi_bin + eta_bin + et_bin;
 
             //std::cout << "full_bin: " << full_bin << std::endl;
 
@@ -321,16 +323,17 @@ constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + et_bit_lengt
 typedef ap_uint<total_bits_input_> input; // need 32b input, 64b output!
 typedef ap_uint<total_bits_output_> output;
 
-constexpr unsigned int phi_low_  = 0;
-constexpr unsigned int phi_high_ = phi_low_ + phi_bit_length_ - 1;
-
-constexpr unsigned int eta_low_  = phi_high_ + 1;
-constexpr unsigned int eta_high_ = eta_low_ + eta_bit_length_ - 1;
-
-constexpr unsigned int et_low_   = eta_high_ + 1;
+// MSB -> LSB word order is phi | eta | et, i.e. et occupies the LSBs and phi the MSBs
+constexpr unsigned int et_low_   = 0;
 constexpr unsigned int et_high_  = et_low_ + et_bit_length_ - 1;
 
-constexpr unsigned int padded_zeroes_low_  = et_high_ + 1;
+constexpr unsigned int eta_low_  = et_high_ + 1;
+constexpr unsigned int eta_high_ = eta_low_ + eta_bit_length_ - 1;
+
+constexpr unsigned int phi_low_  = eta_high_ + 1;
+constexpr unsigned int phi_high_ = phi_low_ + phi_bit_length_ - 1;
+
+constexpr unsigned int padded_zeroes_low_  = phi_high_ + 1;
 constexpr unsigned int padded_zeroes_high_ = padded_zeroes_low_ + padded_zeroes_length_ - 1;
 
 
@@ -338,17 +341,9 @@ constexpr unsigned int nSeedsDeltaR_ = nSeedsInput_ - nSeedsOutput_;
 
 constexpr unsigned int digitized_delta_R2_ = static_cast<unsigned int>(r2Cut_/deltaR2_granularity_ + 0.5);
 
-static const bool lut_[max_R2lut_size_] =
-#include "../data/LUTs/deltaR2LUT.h"
-;
-
-static const ap_uint<deltaR_bits_ > lutR_[max_Rlut_size_] = 
-#include "../data/LUTs/deltaRLUT.h"
-;
-
-static const ap_uint<deltaR_bits_ > lutR_8b_[max_R_8b_lut_size_] = 
-#include "../data/LUTs/deltaRLUT_8b.h"
-;
+// NOTE: the basic algorithm computes deltaR^2 directly with DSP multipliers (calcDeltaR2 in
+// helperFunctions.h), so the lut_/lutR_/lutR_8b_ arrays are never read. They were dead code (and
+// caused a size mismatch vs the generated LUT files), so they have been removed.
 
 #endif
 constexpr unsigned int deltaR_levels_ = (1 << deltaR_bits_); // 256
@@ -481,7 +476,7 @@ if __name__ == "__main__":
                                             f"maxObj{maxObjectsConsidered}_"
                                             f"{rMergeCut_str}"
                                             f"{signal_str}"
-                                            "_WTAConeJetsCellsTowers_ValidateEmulation_FINAL"
+                                            "_WTAConeJetsCellsTowers_ValidateEmulation_FINAL_MODIFIED"
                                             #f"{energyCutBool_str}_"
                                             #f"ecutVal{energyCut_str}"
                                         )
@@ -493,11 +488,11 @@ if __name__ == "__main__":
 
                                         # Write to file
                                         write_constants_h(constants, constsFilename, unroll, ii)
-                                        fileReadPath = "/home/larsonma/GEPHadronicEventReconstruction/algorithm/fileRead.h"  # Path to save the file
+                                        fileReadPath = str(REPO_ROOT / "algorithm" / "fileRead.h")  # Path to save the file
                                         write_file_read_header(fileReadPath, file_suffix, signalBool, jzSlice)
 
                                         print(f" Wrote {constsFilename}")
-                                        run_lut_generator_via_root("/home/larsonma/GEPHadronicEventReconstruction/algorithm/writeDeltaR2LUT.cc")
+                                        #run_lut_generator_via_root(str(REPO_ROOT / "algorithm" / "writeDeltaR2LUT.cc"))
 
                                         subprocess.run(["vitis", "-s", "jet_tagger_hls.py", file_suffix, "1"], check=True)
                                         xml_report_path = os.path.join('w', file_suffix, file_suffix, 'syn', 'report', 'jet_tagger_top_csynth.xml')

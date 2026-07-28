@@ -1,7 +1,7 @@
 #ifndef _JET_TAG_ADV_H_
 #define _JET_TAG_ADV_H_
-#include "/home/larsonma/GEPHadronicEventReconstruction/algorithm/helperFunctions_adv.h"
-#include "/home/larsonma/GEPHadronicEventReconstruction/algorithm/constants_adv.h"
+#include "helperFunctions_adv.h"
+#include "constants_adv.h"
 #include <iostream>
 #include <array>
 #include <bitset>

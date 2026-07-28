@@ -46,33 +46,43 @@ void jet_tag(input inputObjectValues[maxObjectsConsidered_], output (&outputJetV
         //std::cout << "seed phi: " << seedPhi << "\n";
         //std::cout << "seed et: " << inputObjectValues[iSeed].range(et_high_, et_low_) << "\n";
 
-        for (unsigned int iInput = nSeedsOutput_; iInput < maxObjectsConsidered_; ++iInput){ // loop through input objects to consider merging
+        // EXPLICIT balanced adder tree (same rationale as jet_tag_adv.cc): the serial "outputJetEt +=
+        // inputEt" reduction, even fully unrolled, is a loop-carried dependency that HLS wires as a
+        // depth-N serial adder chain -- the latency bottleneck. Rewriting it as an explicit strided tree
+        // makes it log2(N) deep. Unsigned addition is associative, so this is bit-identical to the serial
+        // saturating sum: both compute min(seedEt + sum of passing inputEt, maxEt).
+        // Stage 1 (all parallel): mask each input's Et by its deltaR^2 cut, promoted to the wide
+        // accumulator. Indices [0, nSeedsOutput_) are the seeds themselves (not merge candidates) -> 0,
+        // matching the original loop that started at iInput = nSeedsOutput_.
+        ap_uint<et_bit_length_ + 11> etTree[maxObjectsConsidered_];
+        #pragma HLS ARRAY_PARTITION variable=etTree complete
+        for (unsigned int iInput = 0; iInput < maxObjectsConsidered_; ++iInput){
             #pragma HLS unroll
-            //std::cout << "iInput: " << iInput << "\n";
-
-            ap_uint<eta_bit_length_ > inputEta = inputObjectValues[iInput].range(eta_high_, eta_low_);
-            ap_uint<phi_bit_length_ > inputPhi = inputObjectValues[iInput].range(phi_high_, phi_low_);
-            ap_uint<et_bit_length_ > inputEt = inputObjectValues[iInput].range(et_high_, et_low_);
-            //std::cout << "inputEta : " << inputEta << "\n";
-            //std::cout << "inputPhi: " << inputPhi << "\n";
-            //std::cout << "inputEt: "  << inputEt << "\n";
-
-            ap_uint<2*(eta_bit_length_ + phi_bit_length_)> deltaR2 = calcDeltaR2(seedEta, seedPhi, inputEta, inputPhi);
-            //std::cout << "deltaR2 : " << deltaR2 << " , digitized_delta_R2_: " << digitized_delta_R2_ << "\n";
-            if(deltaR2 <= digitized_delta_R2_){ // 7688 comes from 62^2 + 62^2 which using granularity of 0.0125 for eta and phi passes R^2 < 1.21 
-                
-                //std::cout << "merge io " << "\n";
-                if(outputJetEt + inputEt >= ((1 << (et_bit_length_)) - 1)){
-                    //std::cout << "clamping to max Et" << "\n";
-                    outputJetEt = ((1 << (et_bit_length_)) - 1); // if would exceed max Et, set equal to max Et and break out of input object loop
-                //    break; // br
-                } 
-                else{
-                    //std::cout << "output jet et incremented by: " << inputEt << "\n";
-                    outputJetEt += inputEt; // add input object Et to seed Et for resultant output jet Et
-                }
+            if (iInput < nSeedsOutput_){
+                etTree[iInput] = 0;
+            } else {
+                ap_uint<eta_bit_length_ > inputEta = inputObjectValues[iInput].range(eta_high_, eta_low_);
+                ap_uint<phi_bit_length_ > inputPhi = inputObjectValues[iInput].range(phi_high_, phi_low_);
+                ap_uint<et_bit_length_ > inputEt = inputObjectValues[iInput].range(et_high_, et_low_);
+                ap_uint<2*(eta_bit_length_ + phi_bit_length_)> deltaR2 = calcDeltaR2(seedEta, seedPhi, inputEta, inputPhi);
+                etTree[iInput] = (deltaR2 <= digitized_delta_R2_)
+                               ? ap_uint<et_bit_length_ + 11>(inputEt)
+                               : ap_uint<et_bit_length_ + 11>(0);
             }
         }
+        // Stage 2 (log2(N) levels): strided pairwise reduction; the total lands in etTree[0].
+        for (unsigned int stride = 1; stride < maxObjectsConsidered_; stride <<= 1){
+            #pragma HLS unroll
+            for (unsigned int i = 0; i + stride < maxObjectsConsidered_; i += (stride << 1)){
+                #pragma HLS unroll
+                etTree[i] += etTree[i + stride];
+            }
+        }
+        // Add the seed's own Et (outputJetEt currently holds it) and clamp once to max Et.
+        ap_uint<et_bit_length_ + 11> jetEtWide = ap_uint<et_bit_length_ + 11>(outputJetEt) + etTree[0];
+        outputJetEt = (jetEtWide >= ((1 << (et_bit_length_)) - 1))
+                    ? ap_uint<et_bit_length_>((1 << (et_bit_length_)) - 1) // clamp to max Et
+                    : ap_uint<et_bit_length_>(jetEtWide);
         //std::cout << "final outputJetEt: " << outputJetEt << "\n";
         outputJetValues[iSeed].range(padded_zeroes_high_, padded_zeroes_low_) = 0; 
         outputJetValues[iSeed].range(et_high_, et_low_) = outputJetEt;
