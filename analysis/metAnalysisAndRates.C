@@ -1,6 +1,7 @@
 // To execute: root -b -l -q 'metAnalysisAndRates.C+'
 
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <vector>
 #include <cmath>
@@ -444,6 +445,66 @@ void drawRateVsThresholdMulti(const std::vector<TH1F*>& backs_weighted,
     leg.Draw();
     c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
     for (auto* g : graphs) delete g;
+}
+
+// -----------------------------------------------------------------------
+// Per-JZ-slice rate-vs-threshold overlay drawn as points (markers, not HIST),
+// mirroring OverlayAndSave's 10-colour JZ palette + right-side JZ0..JZ9 legend.
+// Rate is the cumulative weighted integral above each threshold; yScale converts
+// Hz -> kHz (1e-3). xMax caps the threshold axis (e.g. 200 GeV).
+void OverlayRateAndSave(TH1F* hists[], int n, const char* canvasName,
+                        TString pdfOut, const char* legHeader,
+                        double xMax = 200.0, double yScale = 1e-3,
+                        const char* yLabel = "Estimated Background Rate [kHz]",
+                        double yMin = 1e-8) {
+    if (n <= 0 || !hists[0]) return;
+
+    // Same palette/order as OverlayAndSave so the JZ colours stay consistent.
+    const Color_t colors[10] = {
+        kRed+1, kGreen+1, kBlue, kYellow+1, kMagenta+1,
+        kCyan+1, kTeal+2, kViolet+1, kGray+1, kGray+3
+    };
+    const Style_t mkstyles[10] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45 };
+
+    TCanvas* c = new TCanvas(canvasName, canvasName, 900, 700);
+    c->SetMargin(0.12, 0.22, 0.16, 0.06); // room for right-side legend
+    c->SetTicks(1, 1);
+    c->SetLogy();
+
+    TLegend* leg = new TLegend(0.80, 0.15, 0.97, 0.92);
+    leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.030);
+    if (legHeader && legHeader[0] != '\0')
+        leg->AddEntry((TObject*)nullptr, legHeader, "");
+
+    std::vector<TGraphErrors*> graphs;
+    double yMaxSeen = yMin;
+    for (int i = 0; i < n; ++i) {
+        if (!hists[i]) continue;
+        TGraphErrors* g = makeRateGraph(hists[i], colors[i % 10], mkstyles[i % 10]);
+        if (yScale != 1.0)
+            for (int p = 0; p < g->GetN(); ++p) {
+                g->SetPoint(p, g->GetX()[p], g->GetY()[p] * yScale);
+                g->SetPointError(p, g->GetEX()[p], g->GetEY()[p] * yScale);
+            }
+        for (int p = 0; p < g->GetN(); ++p)
+            if (g->GetY()[p] > yMaxSeen) yMaxSeen = g->GetY()[p];
+        g->SetTitle(TString::Format(";%s;%s", hists[i]->GetXaxis()->GetTitle(), yLabel));
+        graphs.push_back(g);
+        g->Draw(graphs.size() == 1 ? "AP" : "P SAME");
+        if (graphs.size() == 1 && xMax > 0.0)
+            g->GetXaxis()->SetLimits(hists[i]->GetXaxis()->GetXmin(), xMax);
+        leg->AddEntry(g, TString::Format("JZ%d", i), "lp");
+    }
+    // Pin the log-y frame: floor at yMin (default 1e-8), headroom above the tallest slice.
+    if (!graphs.empty()) {
+        graphs[0]->SetMinimum(yMin);
+        graphs[0]->SetMaximum(yMaxSeen * 5.0);
+    }
+    leg->Draw();
+    gPad->Modified(); gPad->Update(); gPad->RedrawAxis();
+    c->cd(); DrawATLASLabel(); c->SaveAs(pdfOut);
+    for (auto* g : graphs) delete g;
+    delete c;
 }
 
 // -----------------------------------------------------------------------
@@ -1825,6 +1886,58 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                   << "                    TotalMET  20/40/80 kHz: "
                   << thr_TotalMET_20kHz << " / " << thr_TotalMET_40kHz << " / " << thr_TotalMET_80kHz << "\n";
 
+        // --- Estimated background rate for fixed-threshold trigger items (kHz) ---
+        // gXEJWOJ = gFEX XE (JwoJ), jXE = jFEX XE; number = fixed MET threshold [GeV].
+        {
+            auto rateAtThr_kHz = [](TH1F* hw, double thrGeV) {
+                const int binLo = hw->FindFixBin(thrGeV);
+                return hw->Integral(binLo, hw->GetNbinsX() + 1) / 1e3; // Hz -> kHz
+            };
+            std::cout << "  Trigger item rates [kHz]:\n"
+                      << "                    gXEJWOJ110: " << rateAtThr_kHz(back_hw_gMET, 110.0) << "\n"
+                      << "                    gXEJWOJ100: " << rateAtThr_kHz(back_hw_gMET, 100.0) << "\n"
+                      << "                    jXE110:     " << rateAtThr_kHz(back_hw_jMET, 110.0) << "\n"
+                      << "                    jXE100:     " << rateAtThr_kHz(back_hw_jMET, 100.0) << "\n";
+        }
+
+        // --- Per-JZ-slice contributions to jFEX MET above a fixed threshold ---
+        {
+            const double jzMETThr = 140.0; // GeV
+            double jzWeightedTotal = 0.0;
+            double jzWeightedPass[nJZSlices_];
+            for (unsigned int jz = 0; jz < nJZSlices_; ++jz) {
+                const int binLo = back_h_jMET_jz[jz]->FindFixBin(jzMETThr);
+                // include the overflow bin (nbins+1) in the pass integral
+                jzWeightedPass[jz] = back_h_jMET_jz[jz]->Integral(binLo, back_h_jMET_jz[jz]->GetNbinsX() + 1);
+                jzWeightedTotal += jzWeightedPass[jz];
+            }
+            std::cout << "  --- h_rates_jfexmet slice contributions at MET > " << jzMETThr << " GeV ---\n";
+            for (unsigned int jz = 0; jz < nJZSlices_; ++jz) {
+                const double frac = (jzWeightedTotal > 0.0) ? (100.0 * jzWeightedPass[jz] / jzWeightedTotal) : 0.0;
+                std::cout << "     JZ" << jz << ": "
+                          << std::fixed << std::setw(6) << std::setprecision(2) << frac << "%   (n_events="
+                          << (long long)back_h_jMET_jz[jz]->GetEntries() << ")\n"
+                          << std::defaultfloat;
+            }
+
+            double jzWeightedTotalNC = 0.0;
+            double jzWeightedPassNC[nJZSlices_];
+            for (unsigned int jz = 0; jz < nJZSlices_; ++jz) {
+                const int binLo = back_h_gMET_NC_jz[jz]->FindFixBin(jzMETThr);
+                // include the overflow bin (nbins+1) in the pass integral
+                jzWeightedPassNC[jz] = back_h_gMET_NC_jz[jz]->Integral(binLo, back_h_gMET_NC_jz[jz]->GetNbinsX() + 1);
+                jzWeightedTotalNC += jzWeightedPassNC[jz];
+            }
+            std::cout << "  --- h_rates_gfexncmet slice contributions at MET > " << jzMETThr << " GeV ---\n";
+            for (unsigned int jz = 0; jz < nJZSlices_; ++jz) {
+                const double frac = (jzWeightedTotalNC > 0.0) ? (100.0 * jzWeightedPassNC[jz] / jzWeightedTotalNC) : 0.0;
+                std::cout << "     JZ" << jz << ": "
+                          << std::fixed << std::setw(6) << std::setprecision(2) << frac << "%   (n_events="
+                          << (long long)back_h_gMET_NC_jz[jz]->GetEntries() << ")\n"
+                          << std::defaultfloat;
+            }
+        }
+
         // --- 2D combined threshold scan ---
         auto out2D_JwoJ_Jet   = MakeRateVsEff_ScanRMin(sig_h2_JwoJ_Jet,   back_hw2_JwoJ_Jet);
         auto out2D_JwoJ_Tower = MakeRateVsEff_ScanRMin(sig_h2_JwoJ_Tower, back_hw2_JwoJ_Tower);
@@ -2363,6 +2476,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         OverlayAndSave(back_h_jMET_jz,     nJZSlices_, "c_jMET_jz",     jzDir + "jFEX_MET_JZSlices.pdf",        0);
         OverlayAndSave(back_h_JetMET_jz,   nJZSlices_, "c_JetMET_jz",   jzDir + "GEP_JetMET_JZSlices.pdf",     0);
         OverlayAndSave(back_h_TowerMET_jz, nJZSlices_, "c_TowerMET_jz", jzDir + "GEP_TowerMET_JZSlices.pdf",   0);
+
+        // --- Per-JZ-slice rate vs threshold (points, kHz, up to 200 GeV) ---
+        OverlayRateAndSave(back_h_gMET_jz,     nJZSlices_, "c_gMET_jz_rate",     jzDir + "gFEX_MET_JZSlices_Rate.pdf",       "gFEX JwoJ");
+        OverlayRateAndSave(back_h_gMET_NC_jz,  nJZSlices_, "c_gMET_NC_jz_rate",  jzDir + "gFEX_NoiseCut_MET_JZSlices_Rate.pdf", "gFEX NoiseCut");
+        OverlayRateAndSave(back_h_gMET_Rms_jz, nJZSlices_, "c_gMET_Rms_jz_rate", jzDir + "gFEX_RMS_MET_JZSlices_Rate.pdf",    "gFEX Rms");
+        OverlayRateAndSave(back_h_jMET_jz,     nJZSlices_, "c_jMET_jz_rate",     jzDir + "jFEX_MET_JZSlices_Rate.pdf",       "jFEX");
+        OverlayRateAndSave(back_h_JetMET_jz,   nJZSlices_, "c_JetMET_jz_rate",   jzDir + "GEP_JetMET_JZSlices_Rate.pdf",     "GEP Jet MET");
+        OverlayRateAndSave(back_h_TowerMET_jz, nJZSlices_, "c_TowerMET_jz_rate", jzDir + "GEP_TowerMET_JZSlices_Rate.pdf",   "GEP Tower MET");
 
         // --- Per-file rate vs threshold plots ---
         drawRateVsThreshold(back_hw_TotalMET,  "Rate vs Emulated MET threshold",          "MET threshold [GeV]", fDir + "Rate_TotalMET.pdf");

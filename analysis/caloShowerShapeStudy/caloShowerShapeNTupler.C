@@ -36,10 +36,28 @@
 #include <vector>
 #include <cmath>
 #include <string>
+#include <set>
 #include "TFile.h"
 #include "TTree.h"
 #include "TSystem.h"
 #include "TString.h"
+
+// ---------------------------------------------------------------------------
+// Shower-parent selection + debug.
+// The shower-initiating LLPs (dark photon Zd -> e+ e-, diagonal dark pion 4900111
+// -> q qbar) decay to Standard-Model products at a displaced vertex; that decay
+// vertex is the displacement label for the regression model. Those decay vertices
+// are NOT in TruthBSM but ARE in TruthBSMWithDecayParticles (BSM particles + their
+// decay products) -- which is what showerParentTree reads.
+//   * kShowerParentPdgIds empty -> auto-select: a BSM parent (|pdgId|>=4900000 or
+//     Zd=32) with a decay vertex that decays to >=1 visible SM particle.
+//   * kShowerParentPdgIds set   -> select exactly those |pdgId| (with a decay vtx).
+// Read pdgIds/children off the "[BSMwithDecay dump]" printouts to verify.
+// ---------------------------------------------------------------------------
+static const std::set<int> kShowerParentPdgIds = {
+    // optional explicit override, e.g. 32 (Zd), 4900111 (diagonal dark pion)
+};
+static const int kDebugTruthBSMEvents = 5;   // dump decay chains for the first N events (0 = off)
 
 void caloShowerShapeNTupler(bool signalBool,
                             std::string signalString,
@@ -180,6 +198,27 @@ void caloShowerShapeNTupler(bool signalBool,
     truthBSMTree->Branch("decayVtx_z",  &bsm_decayVtx_z);
     truthBSMTree->Branch("decayVtx_t",  &bsm_decayVtx_t);
 
+    // ---- (5) shower-parent LLPs (selected subset of TruthBSM) --------------
+    // Only the BSM particles that seed calorimeter showers (kShowerParentPdgIds);
+    // their decay vertex is the displacement label for the regression model.
+    TTree* showerParentTree = new TTree("showerParentTree", "Shower-initiating BSM parents (decay vertex = label)");
+    std::vector<int>    sp_pdgId, sp_status, sp_hasDecayVtx;
+    std::vector<double> sp_pt, sp_eta, sp_phi, sp_m;
+    std::vector<double> sp_decayVtx_x, sp_decayVtx_y, sp_decayVtx_z;
+    std::vector<double> sp_decayVtx_Lxy, sp_decayVtx_r3d;   // convenience (mm)
+    showerParentTree->Branch("pdgId",        &sp_pdgId);
+    showerParentTree->Branch("status",       &sp_status);
+    showerParentTree->Branch("pt",           &sp_pt);
+    showerParentTree->Branch("eta",          &sp_eta);
+    showerParentTree->Branch("phi",          &sp_phi);
+    showerParentTree->Branch("m",            &sp_m);
+    showerParentTree->Branch("hasDecayVtx",  &sp_hasDecayVtx);
+    showerParentTree->Branch("decayVtx_x",   &sp_decayVtx_x);
+    showerParentTree->Branch("decayVtx_y",   &sp_decayVtx_y);
+    showerParentTree->Branch("decayVtx_z",   &sp_decayVtx_z);
+    showerParentTree->Branch("decayVtx_Lxy", &sp_decayVtx_Lxy);
+    showerParentTree->Branch("decayVtx_r3d", &sp_decayVtx_r3d);
+
     // ===============================================================
     // Open inputs: DAOD (xAOD) + GEP ntuple
     // ===============================================================
@@ -287,6 +326,10 @@ void caloShowerShapeNTupler(bool signalBool,
         bsm_px.clear(); bsm_py.clear(); bsm_pz.clear();
         bsm_hasProdVtx.clear(); bsm_prodVtx_x.clear(); bsm_prodVtx_y.clear(); bsm_prodVtx_z.clear(); bsm_prodVtx_t.clear();
         bsm_hasDecayVtx.clear(); bsm_decayVtx_x.clear(); bsm_decayVtx_y.clear(); bsm_decayVtx_z.clear(); bsm_decayVtx_t.clear();
+        sp_pdgId.clear(); sp_status.clear(); sp_hasDecayVtx.clear();
+        sp_pt.clear(); sp_eta.clear(); sp_phi.clear(); sp_m.clear();
+        sp_decayVtx_x.clear(); sp_decayVtx_y.clear(); sp_decayVtx_z.clear();
+        sp_decayVtx_Lxy.clear(); sp_decayVtx_r3d.clear();
 
         // ---- event info ----
         const xAOD::EventInfo* evtInfo = nullptr;
@@ -342,6 +385,50 @@ void caloShowerShapeNTupler(bool signalBool,
             }
         }
 
+        // ---- DEBUG (event 0 only): TruthBSM carries NO decay vertices here
+        //      (hasDecayVtx() is false for every particle -> decayLxy prints -1).
+        //      Probe which truth containers exist and which hold the LLP decay
+        //      vertices we need for the displacement label. ----
+        if (kDebugTruthBSMEvents > 0 && iEvt == 0) {
+            std::cout << "\n[truth containers present in this DAOD]\n";
+            for (const char* name : { "TruthParticles", "TruthBSM", "TruthElectrons",
+                                      "TruthMuons", "TruthPhotons", "TruthTaus",
+                                      "TruthBSMWithDecayParticles", "TruthBSMWithDecayVertices",
+                                      "TruthLLP", "HardScatterParticles", "TruthHFWithDecayParticles" }) {
+                const xAOD::TruthParticleContainer* c = nullptr;
+                if (event.retrieve(c, name).isSuccess() && c) {
+                    int nDec = 0;
+                    for (const auto* p : *c) if (p && p->hasDecayVtx()) ++nDec;
+                    std::cout << "  particles '" << name << "': " << c->size()
+                              << "  (with decayVtx: " << nDec << ")\n";
+                }
+            }
+            for (const char* name : { "TruthVertices", "TruthPrimaryVertices",
+                                      "TruthDisplacedVertices", "TruthBSMVertices" }) {
+                const xAOD::TruthVertexContainer* c = nullptr;
+                if (event.retrieve(c, name).isSuccess() && c)
+                    std::cout << "  vertices  '" << name << "': " << c->size() << "\n";
+            }
+            // If the full TruthParticles record is present, show the LLP decay vertices.
+            const xAOD::TruthParticleContainer* tp = nullptr;
+            if (event.retrieve(tp, "TruthParticles").isSuccess() && tp) {
+                std::cout << "  [TruthParticles LLP decay vertices]\n";
+                int shown = 0;
+                for (const auto* p : *tp) {
+                    if (!p) continue;
+                    int a = p->pdgId(); if (a < 0) a = -a;
+                    bool llp = (a == 32 || a == 4900111 || a == 4900113 || a == 4900211 || a == 4900213);
+                    if (llp && p->hasDecayVtx() && p->decayVtx() && shown < 20) {
+                        const auto* v = p->decayVtx();
+                        std::cout << "    pdgId=" << p->pdgId() << " status=" << p->status()
+                                  << " decayLxy=" << std::sqrt(v->x() * v->x() + v->y() * v->y())
+                                  << "mm decayZ=" << v->z() << "mm nChildren=" << v->nOutgoingParticles() << "\n";
+                        ++shown;
+                    }
+                }
+            }
+        }
+
         // ---- (4) truth BSM particles (loop whole collection) ----
         const xAOD::TruthParticleContainer* truthBSM = nullptr;
         if (event.retrieve(truthBSM, "TruthBSM").isSuccess()) {
@@ -388,12 +475,77 @@ void caloShowerShapeNTupler(bool signalBool,
             std::cerr << "[caloShowerShapeNTupler] WARNING: TruthBSM not available -- truthBSMTree will be empty.\n";
         }
 
+        // ---- (5) shower-parent LLPs from TruthBSMWithDecayParticles ----
+        // TruthBSM has no decay vertices; TruthBSMWithDecayParticles keeps the BSM
+        // particles AND their decay products, so the LLP decay vertex (= our label)
+        // and the SM children resolve here.
+        const xAOD::TruthParticleContainer* bsmDecay = nullptr;
+        bool haveBsmDecay = event.retrieve(bsmDecay, "TruthBSMWithDecayParticles").isSuccess() && bsmDecay;
+
+        // parent is BSM (dark sector 4900xxx, or Zd=32); child is a visible SM particle.
+        auto isBSM = [](int pid){ int a = pid < 0 ? -pid : pid; return a >= 4900000 || a == 32; };
+        auto isVisibleSM = [](int pid){ int a = pid < 0 ? -pid : pid;
+            return a > 0 && a < 4900000 && a != 12 && a != 14 && a != 16; };  // exclude neutrinos
+        auto seedsShower = [&](const xAOD::TruthParticle* p) -> bool {
+            if (!p->hasDecayVtx() || !p->decayVtx()) return false;
+            int a = p->pdgId(); if (a < 0) a = -a;
+            if (!kShowerParentPdgIds.empty()) return kShowerParentPdgIds.count(a) > 0;
+            if (!isBSM(p->pdgId())) return false;   // parent must be a BSM particle
+            const auto* dv = p->decayVtx();
+            for (size_t c = 0; c < dv->nOutgoingParticles(); ++c)
+                if (dv->outgoingParticle(c) && isVisibleSM(dv->outgoingParticle(c)->pdgId())) return true;
+            return false;                            // decays only to dark sector / invisible
+        };
+
+        if (haveBsmDecay) {
+            for (const auto* p : *bsmDecay) {
+                if (!p || !seedsShower(p)) continue;
+                const auto* v = p->decayVtx();
+                double dx = v->x(), dy = v->y(), dz = v->z();   // mm
+                sp_pdgId.push_back(p->pdgId());
+                sp_status.push_back(p->status());
+                sp_pt.push_back(p->pt() / 1000.0);              // GeV
+                sp_eta.push_back(p->eta());
+                sp_phi.push_back(p->phi());
+                sp_m.push_back(p->m() / 1000.0);
+                sp_hasDecayVtx.push_back(1);
+                sp_decayVtx_x.push_back(dx);
+                sp_decayVtx_y.push_back(dy);
+                sp_decayVtx_z.push_back(dz);
+                sp_decayVtx_Lxy.push_back(std::sqrt(dx * dx + dy * dy));
+                sp_decayVtx_r3d.push_back(std::sqrt(dx * dx + dy * dy + dz * dz));
+            }
+        } else if (iEvt == 0) {
+            std::cerr << "[caloShowerShapeNTupler] WARNING: TruthBSMWithDecayParticles not found -- "
+                         "showerParentTree will be empty.\n";
+        }
+
+        // DEBUG: dump the decaying particles (LLP candidates) with decay vertex +
+        // children pdgIds; [SEED] marks the selected shower parents.
+        if (kDebugTruthBSMEvents > 0 && iEvt < kDebugTruthBSMEvents && haveBsmDecay) {
+            std::cout << "\n[BSMwithDecay dump] evt " << iEvt << "  (" << bsmDecay->size()
+                      << " particles; showing those with a decay vertex)\n";
+            for (const auto* p : *bsmDecay) {
+                if (!p || !p->hasDecayVtx() || !p->decayVtx()) continue;
+                const auto* v = p->decayVtx();
+                std::cout << "  pdgId=" << p->pdgId() << " status=" << p->status()
+                          << " pt=" << p->pt() / 1000.0 << "GeV"
+                          << " decayLxy=" << std::sqrt(v->x() * v->x() + v->y() * v->y())
+                          << "mm decayZ=" << v->z() << "mm" << (seedsShower(p) ? " [SEED]" : "")
+                          << "  children:";
+                for (size_t c = 0; c < v->nOutgoingParticles(); ++c)
+                    if (v->outgoingParticle(c)) std::cout << " " << v->outgoingParticle(c)->pdgId();
+                std::cout << "\n";
+            }
+        }
+
         // ---- fill ----
         eventInfoTree->Fill();
         jetTaggerLRJEtaSKTree->Fill();      // pass-through (lrj_* filled by GetEntry)
         wtaConeCellsTowersEtaSKTree->Fill();
         gepCellsTowersEtaSKTree->Fill();
         truthBSMTree->Fill();
+        showerParentTree->Fill();
     } // event loop
 
     // ===============================================================
@@ -405,6 +557,7 @@ void caloShowerShapeNTupler(bool signalBool,
     wtaConeCellsTowersEtaSKTree->Write("", TObject::kOverwrite);
     gepCellsTowersEtaSKTree->Write("", TObject::kOverwrite);
     truthBSMTree->Write("", TObject::kOverwrite);
+    showerParentTree->Write("", TObject::kOverwrite);
     outputFile->Close();
 
     gf->Close();

@@ -194,33 +194,49 @@ static void drawCaloGeometry(TCanvas* c, std::vector<TObject*>& garbage) {
     }
 }
 
-// Draw the jet association cone (DeltaR = Rassoc in eta-phi) as a wireframe: a
-// boundary ring placed at the outer calo radius plus a few generator lines back to
-// the IP, in all 3 pads. Uses the same projective placement as the deposits.
-static void drawJetCone(TCanvas* c, double je, double jp, double Rassoc,
+// Draw the jet association cone (DeltaR = Rassoc in eta-phi). In 3D it is the full
+// boundary ring at the outer calo layer plus a few spokes back to the IP. In the 2D
+// panels we draw ONLY the outermost silhouette as a single wedge from the IP -- the
+// eta extent (je +/- Rassoc, at fixed phi) in r-z and the phi extent (jp +/- Rassoc,
+// at fixed eta) in x-y. Drawing the full projected ring there made one cone look like
+// several: the signed-r fold mirrors it about r=0, and the barrel/endcap seam makes
+// the ring stride across the pad. Uses the same projective placement as the deposits.
+static void drawJetCone(TCanvas* c, double je, double jp, double Rassoc, int col,
                         std::vector<TObject*>& garbage) {
-    const int col = kViolet+1;
-    const double Rdraw = kRbarrel[6];   // boundary ring at the outer calo layer
     const int N = 60;
+
+    // --- 3D: full cone = boundary ring at the outer calo layer + spokes to the IP ---
     std::vector<double> bx(N+1), by(N+1), bz(N+1);
     for (int k=0;k<=N;++k) {
         double t  = 2*M_PI*k/N;
         double eb = je + Rassoc*std::cos(t);
         double pb = jp + Rassoc*std::sin(t);
-        bx[k]=Rdraw*std::cos(pb); by[k]=Rdraw*std::sin(pb); bz[k]=Rdraw*std::sinh(eb);
+        layerXYZ(6, eb, pb, bx[k], by[k], bz[k]);
     }
-    // boundary ring in each view
-    c->cd(1); { TPolyLine* r=new TPolyLine(N+1); for(int k=0;k<=N;++k) r->SetPoint(k,bz[k],signedR(bx[k],by[k]));
-                r->SetLineColor(col); r->SetLineWidth(2); r->Draw(); garbage.push_back(r); }
-    c->cd(2); { TPolyLine* r=new TPolyLine(N+1); for(int k=0;k<=N;++k) r->SetPoint(k,bx[k],by[k]);
-                r->SetLineColor(col); r->SetLineWidth(2); r->Draw(); garbage.push_back(r); }
+    c->cd(3);
     { TPolyLine3D* r=new TPolyLine3D(N+1); for(int k=0;k<=N;++k) r->SetPoint(k,bx[k],by[k],bz[k]);
-      r->SetLineColor(col); r->SetLineWidth(2); c->cd(3); r->Draw(); garbage.push_back(r); }
-    // generator lines IP -> ring (3D cone surface only, to keep the 2D views clean)
+      r->SetLineColor(col); r->SetLineWidth(2); r->Draw(); garbage.push_back(r); }
     for (int k=0;k<N;k+=10) {
         TPolyLine3D* g=new TPolyLine3D(2); g->SetPoint(0,0,0,0); g->SetPoint(1,bx[k],by[k],bz[k]);
-        g->SetLineColor(col); c->cd(3); g->Draw(); garbage.push_back(g);
+        g->SetLineColor(col); g->Draw(); garbage.push_back(g);
     }
+
+    // --- 2D: outermost silhouette only, a wedge (two edges + closing base) from IP ---
+    double ax,ay,az, bx2,by2,bz2;
+    // r-z: eta extent at fixed phi = jp (single phi -> no signed-r fold)
+    c->cd(1);
+    layerXYZ(6, je-Rassoc, jp, ax,ay,az);
+    layerXYZ(6, je+Rassoc, jp, bx2,by2,bz2);
+    { TLine* e1=new TLine(0,0,az,signedR(ax,ay));         e1->SetLineColor(col); e1->SetLineWidth(2); e1->Draw(); garbage.push_back(e1);
+      TLine* e2=new TLine(0,0,bz2,signedR(bx2,by2));      e2->SetLineColor(col); e2->SetLineWidth(2); e2->Draw(); garbage.push_back(e2);
+      TLine* bs=new TLine(az,signedR(ax,ay),bz2,signedR(bx2,by2)); bs->SetLineColor(col); bs->SetLineWidth(2); bs->Draw(); garbage.push_back(bs); }
+    // x-y: phi extent at fixed eta = je
+    c->cd(2);
+    layerXYZ(6, je, jp-Rassoc, ax,ay,az);
+    layerXYZ(6, je, jp+Rassoc, bx2,by2,bz2);
+    { TLine* e1=new TLine(0,0,ax,ay);       e1->SetLineColor(col); e1->SetLineWidth(2); e1->Draw(); garbage.push_back(e1);
+      TLine* e2=new TLine(0,0,bx2,by2);     e2->SetLineColor(col); e2->SetLineWidth(2); e2->Draw(); garbage.push_back(e2);
+      TLine* bs=new TLine(ax,ay,bx2,by2);   bs->SetLineColor(col); bs->SetLineWidth(2); bs->Draw(); garbage.push_back(bs); }
 }
 
 // ===========================================================================
@@ -434,42 +450,58 @@ void caloShowerEventDisplays(std::string inputFile = "",
             c->cd(3); for (int l=0;l<7;++l) if (pm3[l]->Size()>0) pm3[l]->Draw();
 
             // ---- jet axes (IP -> calo at r=2m) ----
-            for (int sj : selJets) {
+            // Leading vs subleading jet get a slightly different shade so their cone,
+            // axis and shower line can be told apart (deposits stay layer-coloured).
+            for (size_t ji=0; ji<selJets.size(); ++ji) {
+                int sj = selJets[ji];
+                int axisCol = (ji==0 ? kGray+2   : kGray+1);
+                int coneCol = (ji==0 ? kViolet+1 : kViolet-4);
                 double je=jets[sj][0], jp=jets[sj][1];
                 double rr=2.0, xx=rr*std::cos(jp), yy=rr*std::sin(jp), zz=rr*std::sinh(je);
-                c->cd(1); TLine* lrz=new TLine(0,0,zz,signedR(xx,yy)); lrz->SetLineColor(kGray+2);
+                c->cd(1); TLine* lrz=new TLine(0,0,zz,signedR(xx,yy)); lrz->SetLineColor(axisCol);
                 lrz->SetLineStyle(2); lrz->Draw(); garbage.push_back(lrz);
-                c->cd(2); TLine* lxy=new TLine(0,0,xx,yy); lxy->SetLineColor(kGray+2);
+                c->cd(2); TLine* lxy=new TLine(0,0,xx,yy); lxy->SetLineColor(axisCol);
                 lxy->SetLineStyle(2); lxy->Draw(); garbage.push_back(lxy);
                 TPolyLine3D* l3=new TPolyLine3D(2); l3->SetPoint(0,0,0,0); l3->SetPoint(1,xx,yy,zz);
-                l3->SetLineColor(kGray+2); l3->SetLineStyle(2); c->cd(3); l3->Draw(); garbage.push_back(l3);
+                l3->SetLineColor(axisCol); l3->SetLineStyle(2); c->cd(3); l3->Draw(); garbage.push_back(l3);
 
                 // ---- jet association cone (DeltaR = Rassoc) ----
-                drawJetCone(c, je, jp, coll.Rassoc, garbage);
+                drawJetCone(c, je, jp, coll.Rassoc, coneCol, garbage);
             }
 
             // ---- shower pointing: Et-weighted per-layer-centroid line fit ----
             // Straight line through the 7 per-layer energy centroids; NOT forced
             // through the IP, so a displaced shower's line misses the origin (d0>0).
-            for (int sj : selJets) {
+            for (size_t ji=0; ji<selJets.size(); ++ji) {
+                int sj = selJets[ji];
+                int showerCol = (ji==0 ? kGreen+2 : kGreen-6);
                 double je=jets[sj][0], jp=jets[sj][1];
                 double cc[3], dd[3], d0=0;
                 if (!jetShowerPointing(je,jp,coll.Rassoc,etMinTower,tow_Eta,tow_Phi,tow_Et_l,cc,dd,d0)) continue;
                 pointingD0.push_back(d0);
-                const double L=8.0;   // half-length; the pad clips the drawn segment
-                double ax=cc[0]-L*dd[0], ay=cc[1]-L*dd[1], az=cc[2]-L*dd[2];
-                double bx=cc[0]+L*dd[0], by=cc[1]+L*dd[1], bz=cc[2]+L*dd[2];
+                // Draw the fit segment only where it is meaningful: from just past
+                // the IP out to the outer calo layer, on the shower side. A fixed
+                // +/-8 m span let a small fit tilt throw the ends across the canvas
+                // (and a second jet's line into a spurious "X").
+                double cd2  = cc[0]*dd[0]+cc[1]*dd[1]+cc[2]*dd[2];
+                double t0   = -cd2;                       // closest-approach (d0) point
+                double Rout = kRbarrel[6] + 0.2;
+                double reach= std::sqrt(std::max(0.0, Rout*Rout - d0*d0));
+                double sgn  = (cd2 >= 0 ? 1.0 : -1.0);    // extend toward the deposits
+                double tlo  = t0 - 0.5*sgn, thi = t0 + sgn*(reach + 0.5);
+                double ax=cc[0]+tlo*dd[0], ay=cc[1]+tlo*dd[1], az=cc[2]+tlo*dd[2];
+                double bx=cc[0]+thi*dd[0], by=cc[1]+thi*dd[1], bz=cc[2]+thi*dd[2];
                 // r-z: sample so the signed-r sign flip near y=0 is drawn faithfully
                 const int NS=24; TPolyLine* prz=new TPolyLine(NS);
-                for (int k=0;k<NS;++k){ double tt=-L + 2.0*L*k/(NS-1);
+                for (int k=0;k<NS;++k){ double tt=tlo + (thi-tlo)*k/(NS-1);
                     double x=cc[0]+tt*dd[0], y=cc[1]+tt*dd[1], z=cc[2]+tt*dd[2];
                     prz->SetPoint(k, z, signedR(x,y)); }
-                prz->SetLineColor(kGreen+2); prz->SetLineWidth(2);
+                prz->SetLineColor(showerCol); prz->SetLineWidth(2);
                 c->cd(1); prz->Draw(); garbage.push_back(prz);
-                c->cd(2); TLine* pxy=new TLine(ax,ay,bx,by); pxy->SetLineColor(kGreen+2); pxy->SetLineWidth(2);
+                c->cd(2); TLine* pxy=new TLine(ax,ay,bx,by); pxy->SetLineColor(showerCol); pxy->SetLineWidth(2);
                 pxy->Draw(); garbage.push_back(pxy);
                 TPolyLine3D* p3=new TPolyLine3D(2); p3->SetPoint(0,ax,ay,az); p3->SetPoint(1,bx,by,bz);
-                p3->SetLineColor(kGreen+2); p3->SetLineWidth(2); c->cd(3); p3->Draw(); garbage.push_back(p3);
+                p3->SetLineColor(showerCol); p3->SetLineWidth(2); c->cd(3); p3->Draw(); garbage.push_back(p3);
             }
 
             // ---- truth overlay: IP + BSM prod/decay vertices + flight path ----
@@ -518,14 +550,16 @@ void caloShowerEventDisplays(std::string inputFile = "",
                 TLine* lp=new TLine(); lp->SetLineColor(kGreen+2); lp->SetLineWidth(2); leg->AddEntry(lp,"shower pointing (layer fit)","l"); garbage.push_back(lp);
                 TLine* lg=new TLine(); lg->SetLineColor(kBlack); lg->SetLineStyle(3); leg->AddEntry(lg,"calo layers (nominal)","l"); garbage.push_back(lg);
                 TLine* lc=new TLine(); lc->SetLineColor(kViolet+1); lc->SetLineWidth(2); leg->AddEntry(lc,Form("jet cone (#DeltaR=%.1f)",coll.Rassoc),"l"); garbage.push_back(lc);
+                TLine* l1=new TLine(); l1->SetLineColor(kViolet+1); l1->SetLineWidth(2); leg->AddEntry(l1,"leading jet (cone/axis/line)","l"); garbage.push_back(l1);
+                TLine* l2=new TLine(); l2->SetLineColor(kViolet-4); l2->SetLineWidth(2); leg->AddEntry(l2,"subleading jet (lighter shade)","l"); garbage.push_back(l2);
             }
             leg->SetBorderSize(0); leg->Draw(); garbage.push_back(leg);
             TLatex* note=new TLatex(); note->SetNDC(); note->SetTextSize(0.030);
             note->DrawLatex(0.05,0.22,Form("#splitline{marker size #propto layer E_{T}}{#splitline{%d matched jet(s)}{nominal calo geometry}}",(int)selJets.size()));
             if (!pointingD0.empty()) {
                 TString s="shower line d_{0}#approx";
-                for (size_t i=0;i<pointingD0.size();++i) s += Form("%s%.2f", i?", ":" ", pointingD0[i]);
-                s += " m";
+                for (size_t i=0;i<pointingD0.size();++i) s += Form("%s%.0f", i?", ":" ", pointingD0[i]*1000.);
+                s += " mm";
                 note->DrawLatex(0.05,0.10,s);
             }
             garbage.push_back(note);

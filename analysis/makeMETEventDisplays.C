@@ -56,9 +56,9 @@ void callMakeMETEventDisplays(std::string herInputFile,
     SetPlotStyle();
 
     // --- Hardcoded display thresholds (jet E_T cuts for eta-phi circles / transverse arrows) ---
-    const double truthJetMinEt    = 20.0;   // truth WZ-dressed AntiKt4 jets
-    const double inTimePUJetMinEt = 20.0;   // in-time pileup AntiKt4 truth jets
-    const double ootPUJetMinEt    = 100.0;  // out-of-time pileup AntiKt4 truth jets
+    const double truthJetMinEt    = 15.0;   // truth WZ-dressed AntiKt4 jets
+    const double inTimePUJetMinEt = 15.0;   // in-time pileup AntiKt4 truth jets
+    const double ootPUJetMinEt    = 50.0;  // out-of-time pileup AntiKt4 truth jets
 
     // --- Parse jet / tower Et thresholds and the emu config tag from the emu filename ---
     double jetEtThreshold   = parseEtThreshold(metEmuFile, "jetEt",   10.0);

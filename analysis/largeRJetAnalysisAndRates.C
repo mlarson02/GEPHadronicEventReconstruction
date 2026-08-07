@@ -5411,6 +5411,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     SetAxes(out_gFEX_Sim_leading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
     SetAxes(out_gFEX_Sim_leading.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
 
+    // --- Estimated background rate for the gFEX leading LRJ trigger at a fixed 140 GeV E_T threshold ---
+    {
+        auto rateAtThr_kHz = [](const TH1* hRateVsThr, double thrGeV) {
+            return hRateVsThr->GetBinContent(hRateVsThr->FindFixBin(thrGeV)) / 1e3; // Hz -> kHz
+        };
+        std::cout << "  gFEX leading LRJ trigger rate at E_{T} > 140 GeV [kHz]:\n"
+                  << "                    gFEX (AOD):   " << rateAtThr_kHz(out_gFEX_leading.hRate_vsThr,     140.0) << "\n"
+                  << "                    gFEX (Resim): " << rateAtThr_kHz(out_gFEX_Sim_leading.hRate_vsThr, 140.0) << "\n";
+    }
+
     auto c1_gFEX_Sim_leading = new TCanvas("c1_gFEX_Sim_leading","gFEX Sim vs threshold",1200,500);
     c1_gFEX_Sim_leading->Divide(2,1);
     c1_gFEX_Sim_leading->cd(1);
@@ -24512,8 +24522,8 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
         // ggF HH->4b v4 ntuples
         { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
           "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
-          { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
-          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+          //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
 
         // ttbar v4 ntuples
           //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
@@ -24537,8 +24547,8 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
         // v3 QCD JZ (fallback until v4 JZ hadd is run)
         { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
           "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
-          { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
-          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+          //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
 
           //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
           //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
@@ -24548,9 +24558,9 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
         //  "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
     };
 
-    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_Plots_v4_ggF/";
+    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_Plots_v4_ggF_SinglePrintout/";
     gSystem->mkdir(overlayOutputFileDir);
-    gSystem->RedirectOutput("debug_newsamples_atlaslabel_v3_ggF_Plots.log", "w");
+    gSystem->RedirectOutput("debug_newsamples_atlaslabel_v3_ggF_Plots_singlePrintoutgFEX140.log", "w");
     gErrorIgnoreLevel = kError;
     std::cout << "number of signal files: " << signalFiles.size() << " number of background files: " << backgroundFiles.size() << "\n";
     bool categorySubjetEtScan_8 = false;

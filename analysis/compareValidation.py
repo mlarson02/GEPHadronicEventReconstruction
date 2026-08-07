@@ -29,7 +29,7 @@ def as_list(entry, branch):
 
 
 def main():
-    version = sys.argv[1] if len(sys.argv) > 1 else "3"
+    version = sys.argv[1] if len(sys.argv) > 1 else "2"
     tol     = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0e-2
 
     ath_path = f"{RUN_DIR}HERNTupler_trigGepPerfValidation_v{version}.root"
