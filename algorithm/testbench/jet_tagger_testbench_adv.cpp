@@ -65,11 +65,13 @@ int main() {
             std::bitset<eta_bit_length_ > eta_bitset(eta_value);
             std::bitset<phi_bit_length_ > phi_bitset(phi_value);
 
+            // Pack MSB -> LSB as num_subjets | phi | eta | et, i.e. et occupies the LSBs
+            // (matches constants_adv.h)
             uint32_t combined_value =
-                ((numsubjets_value & maskN(num_subjets_length_)) << (et_bit_length_ + eta_bit_length_ + phi_bit_length_)) |
-                ((et_value   & maskN(et_bit_length_  )) << (eta_bit_length_ + phi_bit_length_)) |
-                ((eta_value  & maskN(eta_bit_length_ )) <<  phi_bit_length_) |
-                ( phi_value  & maskN(phi_bit_length_ ));
+                ((numsubjets_value & maskN(num_subjets_length_)) << (phi_bit_length_ + eta_bit_length_ + et_bit_length_)) |
+                ((phi_value  & maskN(phi_bit_length_ )) << (eta_bit_length_ + et_bit_length_)) |
+                ((eta_value  & maskN(eta_bit_length_ )) <<  et_bit_length_) |
+                ( et_value   & maskN(et_bit_length_  ));
 
             //std::cout << "total_bits_output_: " << std::dec << total_bits_output_ << "\n";
             //std::cout << "combined_value : " << std::hex << combined_value << "\n";
@@ -83,7 +85,7 @@ int main() {
             //std::cout << "et_bitset.to_string() : " << et_bitset.to_string() << "\n";
             // Output in the required format
             outFile << "0x" << std::setw(2) << std::setfill('0') << std::hex << iOutput
-            << " " << io_bitset.to_string() << "|" << et_bitset.to_string() << "|" << eta_bitset.to_string() << "|" << phi_bitset.to_string()
+            << " " << io_bitset.to_string() << "|" << phi_bitset.to_string() << "|" << eta_bitset.to_string() << "|" << et_bitset.to_string()
             << " 0x" << hexValue << std::endl; 
 
             //totalOutputJetMergedIO[iOutput] += numio_value; 

@@ -58,10 +58,11 @@ int main() {
             std::bitset<eta_bit_length_ > eta_bitset(eta_value);
             std::bitset<phi_bit_length_ > phi_bitset(phi_value);
 
+            // Pack MSB -> LSB as phi | eta | et, i.e. et occupies the LSBs (matches constants.h)
             uint64_t combined_value =
-                ((et_value   & maskN(et_bit_length_  )) << (eta_bit_length_ + phi_bit_length_)) |
-                ((eta_value  & maskN(eta_bit_length_ )) <<  phi_bit_length_) |
-                ( phi_value  & maskN(phi_bit_length_ ));
+                ((phi_value  & maskN(phi_bit_length_ )) << (eta_bit_length_ + et_bit_length_)) |
+                ((eta_value  & maskN(eta_bit_length_ )) <<  et_bit_length_) |
+                ( et_value   & maskN(et_bit_length_  ));
 
             // Convert to hexadecimal (for the last field)
             std::stringstream hex_stream;
@@ -73,7 +74,7 @@ int main() {
             //std::cout << "et_bitset.to_string() : " << et_bitset.to_string() << "\n";
             // Output in the required format
             outFile << "0x" << std::setw(2) << std::setfill('0') << std::hex << iOutput
-            << " " << et_bitset.to_string() << "|" << eta_bitset.to_string() << "|" << phi_bitset.to_string()
+            << " " << phi_bitset.to_string() << "|" << eta_bitset.to_string() << "|" << et_bitset.to_string()
             << " 0x" << hexValue << std::endl; 
 
             //totalOutputJetMergedIO[iOutput] += numio_value; 

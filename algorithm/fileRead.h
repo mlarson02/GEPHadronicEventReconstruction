@@ -12,13 +12,14 @@
 #include <cmath>
 
 // Define constants used by testbench
-const std::string memPrintsPath_ = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/MemPrints_v3/";
+const std::string memPrintsPath_ = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/MemPrints_v2/";
+const std::string lutPath_ = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/LUTs/deltaR2Cut.dat";
 static inline uint32_t maskN(unsigned n) { return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }
-const std::string kFileSuffix = "nSeeds2_r2Cut1p21_maxObj128_rMerge2p0_sig_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL_MODIFICATIONS_DETERMINISTIC_TREEFIX";
+const std::string kFileSuffix = "nSeeds2_r2Cut1p21_maxObj10_0p001sig_WTAConeJetsCellsTowers_ValidateEmulation_FINAL_MODIFIED_Resynth";
 constexpr bool signalBool_ = true;
 constexpr unsigned int jzSlice_ = 3;
 
-const unsigned int maxEvent_ = signalBool_ ? 10000 : 10000;
+const unsigned int maxEvent_ = signalBool_ ? 100 : 100;
 const std::string fileName_ =
     signalBool_        ? "mc21_14TeV_HHbbbb_HLLHC" :
     (jzSlice_ == 2)    ? "mc21_14TeV_jj_JZ2" :
@@ -82,12 +83,13 @@ inline void extract_values_from_file(const std::string& fileName, input (&values
                 continue;
             }
 
-            std::string et_bin  = bin.substr(0, first_pipe);
+            // Binary column is written MSB -> LSB as phi | eta | et, i.e. et occupies the LSBs
+            std::string phi_bin = bin.substr(0, first_pipe);
             std::string eta_bin = bin.substr(first_pipe + 1, second_pipe - first_pipe - 1);
-            std::string phi_bin = bin.substr(second_pipe + 1);
-            //std::cout << "et_bin : " << et_bin << std::endl;
-            //std::cout << "eta_bin : " << eta_bin << std::endl;
+            std::string et_bin  = bin.substr(second_pipe + 1);
             //std::cout << "phi_bin : " << phi_bin << std::endl;
+            //std::cout << "eta_bin : " << eta_bin << std::endl;
+            //std::cout << "et_bin : " << et_bin << std::endl;
 
             // Prepend 5 zero bits (as MSB) to represent num_io = 0
             std::string num_io_bin = "00000";

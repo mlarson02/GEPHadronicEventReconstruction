@@ -171,9 +171,9 @@ static inline uint32_t maskN(unsigned n) {{ return (n >= 32) ? 0xFFFFFFFFu : ((1
     #mc21_14TeV_flatpT_Zprime_tthad
     # Now continue with the rest of the file content
     remaining_content = """
-const unsigned int maxEvent_ = signalBool_ ? 10000 : 10000;
+const unsigned int maxEvent_ = signalBool_ ? 100 : 100;
 const std::string fileName_ =
-    signalBool_        ? "mc21_14TeV_flatpT_Zprime_tthad" :
+    signalBool_        ? "mc21_14TeV_HHbbbb_HLLHC" :
     (jzSlice_ == 2)    ? "mc21_14TeV_jj_JZ2" :
     (jzSlice_ == 3)    ? "mc21_14TeV_jj_JZ3" :
     (jzSlice_ == 4)    ? "mc21_14TeV_jj_JZ4" :
@@ -235,12 +235,13 @@ inline void extract_values_from_file(const std::string& fileName, input (&values
                 continue;
             }
 
-            std::string et_bin  = bin.substr(0, first_pipe);
+            // Binary column is written MSB -> LSB as phi | eta | et, i.e. et occupies the LSBs
+            std::string phi_bin = bin.substr(0, first_pipe);
             std::string eta_bin = bin.substr(first_pipe + 1, second_pipe - first_pipe - 1);
-            std::string phi_bin = bin.substr(second_pipe + 1);
-            //std::cout << "et_bin : " << et_bin << std::endl;
-            //std::cout << "eta_bin : " << eta_bin << std::endl;
+            std::string et_bin  = bin.substr(second_pipe + 1);
             //std::cout << "phi_bin : " << phi_bin << std::endl;
+            //std::cout << "eta_bin : " << eta_bin << std::endl;
+            //std::cout << "et_bin : " << et_bin << std::endl;
 
             // Prepend 5 zero bits (as MSB) to represent num_io = 0
             std::string num_io_bin = "00000";
@@ -476,7 +477,7 @@ if __name__ == "__main__":
                                             f"maxObj{maxObjectsConsidered}_"
                                             f"{rMergeCut_str}"
                                             f"{signal_str}"
-                                            "_WTAConeJetsCellsTowers_ValidateEmulation_FINAL_MODIFIED"
+                                            "_WTAConeJetsCellsTowers_ValidateEmulation_FINAL_MODIFIED_Resynth"
                                             #f"{energyCutBool_str}_"
                                             #f"ecutVal{energyCut_str}"
                                         )

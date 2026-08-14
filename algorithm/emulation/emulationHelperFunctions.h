@@ -383,16 +383,17 @@ void write_constants_header(const std::string& header_path,
     out << "constexpr unsigned int digitized_delta_R2Cut_ = static_cast<unsigned int>(r2Cut_/deltaR2_granularity_ + 0.5);\n";
     out << "constexpr unsigned int digitized_d_search_squared_ = static_cast<unsigned int>(((rMergeCut_) * (rMergeCut_))/deltaR2_granularity_ + 0.5);\n";
     out << "constexpr unsigned int total_bits_ = padded_zeroes_length_ + num_subjets_length_ + et_bit_length_ + eta_bit_length_ + phi_bit_length_;\n";
-    out << "constexpr unsigned int phi_low_  = 0;\n";
-    out << "constexpr unsigned int phi_high_ = phi_low_ + phi_bit_length_ - 1;\n";
-
-    out << "constexpr unsigned int eta_low_  = phi_high_ + 1;\n";
-    out << "constexpr unsigned int eta_high_ = eta_low_ + eta_bit_length_ - 1;\n";
-
-    out << "constexpr unsigned int et_low_   = eta_high_ + 1;\n";
+    out << "// MSB -> LSB word order is substruct_0 | phi | eta | et, i.e. et occupies the LSBs\n";
+    out << "constexpr unsigned int et_low_   = 0;\n";
     out << "constexpr unsigned int et_high_  = et_low_ + et_bit_length_ - 1;\n";
 
-    out << "constexpr unsigned int substruct_0_bit_low_  = et_high_ + 1;\n";
+    out << "constexpr unsigned int eta_low_  = et_high_ + 1;\n";
+    out << "constexpr unsigned int eta_high_ = eta_low_ + eta_bit_length_ - 1;\n";
+
+    out << "constexpr unsigned int phi_low_  = eta_high_ + 1;\n";
+    out << "constexpr unsigned int phi_high_ = phi_low_ + phi_bit_length_ - 1;\n";
+
+    out << "constexpr unsigned int substruct_0_bit_low_  = phi_high_ + 1;\n";
     out << "constexpr unsigned int substruct_0_bit_high_ = substruct_0_bit_low_ + num_subjets_length_ - 1;\n";
 
     //out << "constexpr unsigned int substruct_1_bit_low_  = substruct_0_bit_high_ + 1;\n";

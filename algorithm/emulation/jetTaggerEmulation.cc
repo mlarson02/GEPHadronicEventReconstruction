@@ -1137,21 +1137,21 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             tau_2_bitset_array[iSeed] = tau_2_bitset;
             tau_21_array[iSeed] = tau_21;
 
-            // Pack into one word: [nsubjets | et | eta | phi]
+            // Pack into one word MSB -> LSB: [nsubjets | phi | eta | et], i.e. et occupies the LSBs
             // NOTE: psi_R now saved in output ntuple, but not in output test vector - kept for ease of using analysis script
             uint64_t combined_value;
             if(algoVersion_ == 2){
                 combined_value =
-                    ((et_value   & maskN(et_bit_length_  )) << (eta_bit_length_ + phi_bit_length_)) |
-                    ((eta_value  & maskN(eta_bit_length_ )) <<  phi_bit_length_) |
-                    ( phi_value  & maskN(phi_bit_length_ ));
+                    ((phi_value  & maskN(phi_bit_length_ )) << (eta_bit_length_ + et_bit_length_)) |
+                    ((eta_value  & maskN(eta_bit_length_ )) <<  et_bit_length_) |
+                    ( et_value   & maskN(et_bit_length_  ));
             }
             else if(algoVersion_ == 3){
                 combined_value =
-                    ((num_subjets_value & maskN(num_subjets_length_)) << (et_bit_length_ + eta_bit_length_ + phi_bit_length_)) |
-                    ((et_value   & maskN(et_bit_length_  )) << (eta_bit_length_ + phi_bit_length_)) |
-                    ((eta_value  & maskN(eta_bit_length_ )) <<  phi_bit_length_) |
-                    ( phi_value  & maskN(phi_bit_length_ ));
+                    ((num_subjets_value & maskN(num_subjets_length_)) << (phi_bit_length_ + eta_bit_length_ + et_bit_length_)) |
+                    ((phi_value  & maskN(phi_bit_length_ )) << (eta_bit_length_ + et_bit_length_)) |
+                    ((eta_value  & maskN(eta_bit_length_ )) <<  et_bit_length_) |
+                    ( et_value   & maskN(et_bit_length_  ));
             }
 
             // Hex string with width = total_bits_/4 (=8 for 32 bits)
@@ -1162,14 +1162,14 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             // Final writing of output test vectors - remove num subjets for v2 algo
             if(algoVersion_ == 2){
                 f_output << "0x" << std::hex << std::setw(2) << std::setfill('0') << iSeed
-                    << " " << et_bitset.to_string()
-                    << "|" << eta_bitset.to_string()  << "|" << phi_bitset.to_string()
+                    << " " << phi_bitset.to_string()
+                    << "|" << eta_bitset.to_string()  << "|" << et_bitset.to_string()
                     << " 0x" << hexValue << std::endl;
             }
             else if(algoVersion_ == 3){
                 f_output << "0x" << std::hex << std::setw(2) << std::setfill('0') << iSeed
-                    << " "  << num_subjets_bitset.to_string() << "|" << et_bitset.to_string()
-                    << "|"  << eta_bitset.to_string()  << "|" << phi_bitset.to_string()
+                    << " "  << num_subjets_bitset.to_string() << "|" << phi_bitset.to_string()
+                    << "|"  << eta_bitset.to_string()  << "|" << et_bitset.to_string()
                     << " 0x" << hexValue << std::endl;
             }
             

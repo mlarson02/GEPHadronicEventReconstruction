@@ -554,10 +554,10 @@ with open(output_file_topo422, "w") as f_topo:
                         #print("topo422 phi_bin, eta_bin, et_bin:", phi_bin, eta_bin, et_bin)
 
                         # Create binary word
-                        binary_word = f"{et_bin:0{et_bit_length}b}|{eta_bin:0{eta_bit_length}b}|{phi_bin:0{phi_bit_length}b}"
+                        binary_word = f"{phi_bin:0{phi_bit_length}b}|{eta_bin:0{eta_bit_length}b}|{et_bin:0{et_bit_length}b}"
 
                         # Create hex word
-                        hex_word = f"{(et_bin << (eta_bit_length + phi_bit_length)) | (eta_bin << phi_bit_length) | phi_bin:08x}"
+                        hex_word = f"{(phi_bin << (eta_bit_length + et_bit_length)) | (eta_bin << et_bit_length) | et_bin:08x}"
 
                         # Write to file
                         if topo422_it == 0:
@@ -589,10 +589,10 @@ with open(output_file_topo422, "w") as f_topo:
                         #print("gfex phi_bin, eta_bin, et_bin:", phi_bin, eta_bin, et_bin)
 
                         # Create binary word
-                        binary_word = f"{et_bin:0{et_bit_length}b}|{eta_bin:0{eta_bit_length}b}|{phi_bin:0{phi_bit_length}b}"
+                        binary_word = f"{phi_bin:0{phi_bit_length}b}|{eta_bin:0{eta_bit_length}b}|{et_bin:0{et_bit_length}b}"
 
                         # Create hex word
-                        hex_word = f"{(et_bin << (eta_bit_length + phi_bit_length)) | (eta_bin << phi_bit_length) | phi_bin:08x}"
+                        hex_word = f"{(phi_bin << (eta_bit_length + et_bit_length)) | (eta_bin << et_bit_length) | et_bin:08x}"
 
                         # Write to file
                         if gfex_it == 0: 
@@ -625,10 +625,10 @@ with open(output_file_topo422, "w") as f_topo:
                         #print("jfex phi_bin, eta_bin, et_bin:", phi_bin, eta_bin, et_bin)
 
                         # Create binary word
-                        binary_word = f"{et_bin:0{et_bit_length}b}|{eta_bin:0{eta_bit_length}b}|{phi_bin:0{phi_bit_length}b}"
+                        binary_word = f"{phi_bin:0{phi_bit_length}b}|{eta_bin:0{eta_bit_length}b}|{et_bin:0{et_bit_length}b}"
 
                         # Create hex word
-                        hex_word = f"{(et_bin << (eta_bit_length + phi_bit_length)) | (eta_bin << phi_bit_length) | phi_bin:08x}"
+                        hex_word = f"{(phi_bin << (eta_bit_length + et_bit_length)) | (eta_bin << et_bit_length) | et_bin:08x}"
 
                         # Write to file
                         #if jfex_it == 0:

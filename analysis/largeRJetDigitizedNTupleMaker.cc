@@ -168,13 +168,14 @@ void analyze_file(const std::vector<std::string> fileNames, const bool signalBoo
             std::string index, binary, hex_word;
             ss >> index >> binary >> hex_word;
     
-            // Split binary into Et, Phi, and Eta
+            // Split binary into Phi, Eta, and Et. The column is written MSB -> LSB as
+            // phi | eta | et, i.e. et occupies the LSBs of the packed word.
             size_t first_pipe = binary.find('|');
             size_t second_pipe = binary.rfind('|');
-    
-            std::string et_bin = binary.substr(0, first_pipe);
+
+            std::string phi_bin = binary.substr(0, first_pipe);
             std::string eta_bin = binary.substr(first_pipe + 1, second_pipe - first_pipe - 1);
-            std::string phi_bin = binary.substr(second_pipe + 1);
+            std::string et_bin = binary.substr(second_pipe + 1);
     
             // Convert to bitsets
             std::bitset<et_bit_length_> et_bits(et_bin);

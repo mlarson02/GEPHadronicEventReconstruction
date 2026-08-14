@@ -102,7 +102,7 @@ if hls_exec == 0: # hls_exec determined by function input
     comp.run(operation='C_SIMULATION')
 if hls_exec == 1: # hls_exec determined by function input
     #print("why is this triggered")
-    comp.run(operation='C_SIMULATION')
+    #comp.run(operation='C_SIMULATION')
     comp.run(operation='SYNTHESIS')
 elif hls_exec == 2:
     comp.run(operation='C_SIMULATION')
