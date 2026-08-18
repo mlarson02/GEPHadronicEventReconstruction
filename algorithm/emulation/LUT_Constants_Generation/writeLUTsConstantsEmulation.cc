@@ -7,7 +7,7 @@
 #include "../emulationHelperFunctions.h"
 
 
-int main() {
+int writeLUTsConstantsEmulation() {
     gSystem->RedirectOutput("debuglog.log", "w");
 
     std::vector<double > rMergeCuts;
@@ -15,6 +15,7 @@ int main() {
     unsigned int etaBitLength;
     unsigned int etaRange;
     unsigned int phiBitLength;
+    unsigned int phiRange;
     unsigned int substruct0BitLength;
     unsigned int substruct1BitLength;
     unsigned int substruct2BitLength;
@@ -36,11 +37,18 @@ int main() {
     
     for(unsigned int algoVersion : algoVersions){
 
+        // Both versions digitize the same physical grid -- the GEP tower grid, etaRange
+        // towers of 0.1 in eta and phiRange towers of pi/32 covering the full 2*pi.
+        // The bit lengths are only the widths of the fields the codes are packed into
+        // (v2 keeps the standard TOB format, 10b eta / 9b phi), so they must never be
+        // used to derive a granularity or a dynamic range; the unused high bits of the
+        // v2 fields are zero padding.
         if(algoVersion == 2){ // BASIC ALGORITHM
             etBitLength = 13;
             etaBitLength = 10;
-            etaRange = 784; // FIXME this should be computed on the fly
+            etaRange = 98;
             phiBitLength = 9;
+            phiRange = 64;
             substruct0BitLength = 0;
             substruct1BitLength = 0;
             substruct2BitLength = 0;
@@ -55,6 +63,7 @@ int main() {
             etaBitLength = 7;
             etaRange = 98;
             phiBitLength = 6;
+            phiRange = 64;
             substruct0BitLength = 2;
             substruct1BitLength = 8;
             substruct2BitLength = 8;
@@ -67,14 +76,19 @@ int main() {
 
         gSystem->mkdir(("LUTs/v" + std::to_string(algoVersion) + "/").c_str(), kTRUE);
 
+        // 98 towers of 0.1 spanning |eta| < 4.9; 64 towers covering exactly 2*pi, i.e. pi/32
         double etaGranularity = 9.8 / double(etaRange);
-        double phiGranularity = 6.4 / double((1 << phiBitLength));
+        double phiGranularity = (2 * M_PI) / double(phiRange);
+
+        // A wrapped |deltaPhi| never exceeds pi, so the LUT rows only need the
+        // phiRange / 2 codes that fit below it.
+        const unsigned int nDeltaPhiCodes = phiRange / 2;
 
         for(double rMergeCut : rMergeCuts){ // Loop through algorithm configurations affecting constants.h
             for(double rSquaredCut : rSquaredCuts){ // And generate different constants files
-                unsigned int max_R2lut_size = calculate_lut_max_size(rSquaredCut, etaBitLength, phiBitLength, etaGranularity, phiGranularity, true); // true: compare digitized deltaR^2 against rSquaredCut
+                unsigned int max_R2lut_size = calculate_lut_max_size(rSquaredCut, etaRange, phiRange, etaGranularity, phiGranularity, true); // true: compare digitized deltaR^2 against rSquaredCut
                 double psi_R_granularity = 2 * sqrt(rSquaredCut) / (1 << substruct4BitLength);
-                unsigned int max_R_8b_lut_size = calculate_lut_max_size(2 * std::sqrt(rSquaredCut), etaBitLength, phiBitLength, etaGranularity, phiGranularity, false); // NOTE use this now to compute distances not just from jet axis, but between subjets up to the jet diameter distance apart
+                unsigned int max_R_8b_lut_size = calculate_lut_max_size(2 * std::sqrt(rSquaredCut), etaRange, phiRange, etaGranularity, phiGranularity, false); // NOTE use this now to compute distances not just from jet axis, but between subjets up to the jet diameter distance apart
                 for(unsigned int nIOOption : nIOs){
                     for(unsigned int nSeedOption : nSeeds){
                         for (unsigned int nSeedInputOption : nSeedsInput){
@@ -88,7 +102,7 @@ int main() {
                                 std::cout << "---------------------" << "\n";
                                 std::string constantsFilePath = makeInputConstantsFileName(rMergeCut, nIOOption, nSeedOption, rSquaredCut, algoVersion);
                                 write_constants_header(constantsFilePath, rSquaredCut, rMergeCut, nIOOption, nSeedOption, nSeedInputOption, nProtoSeedsOption,
-                                    totalBits, etBitLength, etaBitLength, etaRange, phiBitLength, max_R_8b_lut_size, 
+                                    totalBits, etBitLength, etaBitLength, etaRange, phiBitLength, phiRange, max_R_8b_lut_size,
                                     substruct0BitLength, substruct1BitLength, substruct2BitLength, substruct3BitLength, substruct4BitLength, algoVersion);
                             }
                         }
@@ -103,7 +117,7 @@ int main() {
                 outfile << "{\n    ";
 
                 for (unsigned int etaIt = 0; etaIt < etaRange; ++etaIt) {
-                    for (unsigned int phiIt = 0; phiIt < (1 << (phiBitLength - 1)); ++phiIt) { // phi bit length - 1 as max deltaPhi = pi, not 2pi
+                    for (unsigned int phiIt = 0; phiIt < nDeltaPhiCodes; ++phiIt) { // only codes below pi: a wrapped deltaPhi never exceeds it
                         if (idx >= max_R2lut_size) break; // STOP when you reach max_R2lut_size!
 
                         float etaSquared = etaIt * etaGranularity * etaIt * etaGranularity;
@@ -129,10 +143,10 @@ int main() {
                 // stay valid for whatever threshold a caller compares it against, which can exceed rMergeCut.
                 double deltaR_max = std::sqrt(
                     std::pow((etaRange - 1) * etaGranularity, 2) +
-                    std::pow(((1 << (phiBitLength - 1)) - 1) * phiGranularity, 2)
+                    std::pow((nDeltaPhiCodes - 1) * phiGranularity, 2)
                 );
                 double deltaR_granularity = deltaR_max / 255.0; // 8-bit digitization
-                unsigned int full_Rlut_size = etaRange * (1 << (phiBitLength - 1));
+                unsigned int full_Rlut_size = etaRange * nDeltaPhiCodes;
 
                 std::string lutR_output_path = makeInputLUTFileName(rMergeCut, rSquaredCut, "deltaR", algoVersion);
                 std::ofstream outfileR(lutR_output_path);
@@ -140,7 +154,7 @@ int main() {
                 outfileR << "{\n    ";
 
                 for (unsigned int etaIt = 0; etaIt < etaRange; ++etaIt) {
-                    for (unsigned int phiIt = 0; phiIt < (1 << (phiBitLength - 1)); ++phiIt) { // phi bit length - 1 as max deltaPhi = pi, not 2pi
+                    for (unsigned int phiIt = 0; phiIt < nDeltaPhiCodes; ++phiIt) { // only codes below pi: a wrapped deltaPhi never exceeds it
                         float deltaEta = etaIt * etaGranularity;
                         float deltaPhi = phiIt * phiGranularity;
                         float deltaR2 = deltaEta * deltaEta + deltaPhi * deltaPhi;
@@ -168,7 +182,7 @@ int main() {
                 //std::cout << "r2Cut_ for LUT: " << r2Cut_ << "\n";
 
                 for (unsigned int etaIt = 0; etaIt < etaRange; ++etaIt) { // loop through
-                    for (unsigned int phiIt = 0; phiIt < (1 << (phiBitLength - 1)); ++phiIt) { // phi bit length - 1 as max deltaPhi = pi, not 2pi
+                    for (unsigned int phiIt = 0; phiIt < nDeltaPhiCodes; ++phiIt) { // only codes below pi: a wrapped deltaPhi never exceeds it
                         if (iR >= max_R_8b_lut_size) break;
 
                         float deltaEta = etaIt * etaGranularity;

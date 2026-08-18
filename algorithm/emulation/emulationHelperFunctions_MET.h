@@ -13,7 +13,9 @@ inline unsigned int wrapPhiUnsigned(unsigned int phi) {
     return phiWrapped;
 }
 
-// Compute digitized deltaR^2 between two (eta, phi) coordinates, with phi wrap
+// Compute digitized deltaR^2 between two (eta, phi) coordinates, with phi wrap.
+// The fold is around pi_digitized_in_phi_ = phi_range_ / 2, so codes on opposite
+// sides of the +-pi seam come out a code apart rather than most of a turn apart.
 inline unsigned int digitizedDeltaR2(unsigned int eta1, unsigned int phi1, unsigned int eta2, unsigned int phi2) {
     unsigned int uDeltaEta = static_cast<unsigned int>(std::abs(int(eta1) - int(eta2)));
     unsigned int uDeltaPhi = static_cast<unsigned int>(std::abs(int(phi1) - int(phi2)));
@@ -21,11 +23,44 @@ inline unsigned int digitizedDeltaR2(unsigned int eta1, unsigned int phi1, unsig
     return uDeltaEta * uDeltaEta + uDeltaPhi * uDeltaPhi;
 }
 
+// Digitize phi onto the tower grid.
+//
+// Kept separate from digitize() because phi is periodic while eta/Et are not:
+// the generic function saturates at range - 1, which is wrong at both ends of
+// the phi axis. A value in the top half tower (phi within pi/64 of +pi) belongs
+// in code 0, not in a code one past the end of the range -- which would not even
+// fit the phi field. The code count is phi_range_ rather than
+// 1 << phi_bit_length_ so the grid stays tied to the towers, not to the field
+// width. Same definition as the jet tagger chain in emulationHelperFunctions.h.
+inline unsigned int digitize_phi(double phi) {
+    const int nPhi = static_cast<int>(phi_range_);
+    const int code = static_cast<int>(std::lround((phi - phi_min_) / phi_granularity_));
+    return static_cast<unsigned int>(((code % nPhi) + nPhi) % nPhi);
+}
+
+// The reconstruction tag encodes the pileup scenario: PU200 samples are r16130,
+// PU140 samples r16129 (HERNTupler stamps this into the ntuple names). Carrying it
+// through to the emulation outputs is what keeps the two scenarios distinguishable
+// by file name alone, since both land in the same output directory.
+// For the makeInputFileName fallback the ntuple directory is switched as well,
+// PU140 ntuples living in the parallel ntuples_PU140 tree.
+inline std::string applyPileupTags(std::string path, unsigned int pileup) {
+    if (pileup != 140) return path;
+    auto replaceFirst = [&path](const std::string& from, const std::string& to) {
+        size_t pos = path.find(from);
+        if (pos != std::string::npos) path.replace(pos, from.size(), to);
+    };
+    replaceFirst("_r16130_", "_r16129_");
+    replaceFirst("/ntuples/", "/ntuples_PU140/");
+    return path;
+}
+
 // Returns input NTuple file name given parameters
 std::string makeInputFileName(bool signalBool, std::string signalString,
-                              std::string inputRootFilePath = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/") {
+                              std::string inputRootFilePath = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/",
+                              unsigned int pileup = 200) {
     std::ostringstream ss;
-    
+
     if (signalBool) {
         if(signalString == "VBF_hh_bbbb_cvv0") ss << inputRootFilePath << "mc21_14TeV_hh_bbbb_vbf_novhh_cvv0_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if(signalString == "VBF_hh_bbbb_cvv1") ss << inputRootFilePath << "mc21_14TeV_hh_bbbb_vbf_novhh_cvv1_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
@@ -35,10 +70,11 @@ std::string makeInputFileName(bool signalBool, std::string signalString,
         else if (signalString == "Zprime_ttbar") ss << inputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ttbar_semilep") ss << inputRootFilePath << "ttbar_semilep_v4/mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ttbar_dilep") ss << inputRootFilePath << "ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "Zmumu") ss << inputRootFilePath << "Zmumu_v4/mc21_14TeV_Zmumu_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     } else {
         ss << inputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     }
-    return ss.str();
+    return applyPileupTags(ss.str(), pileup);
 }
 
 unsigned int digitize(double value, int bit_length, double min_val, double max_val, unsigned int altRange = 0) {
@@ -86,7 +122,8 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
                                   std::string outputRootFilePath = "/data/larsonma/GEPMET/outputNTuplesDev_METv2/",
                                   bool useEtaSKObjects = false,
                                   double towerScaleFactor = 1.0,
-                                  double jetScaleFactor   = 1.0) {
+                                  double jetScaleFactor   = 1.0,
+                                  unsigned int pileup     = 200) {
     gSystem->mkdir(outputRootFilePath.c_str());
     std::string usePUSuppress = useEtaSKObjects ? "EtaSK" : (useSKObjects ? "SK" : "NoSK");
     std::string overlapTag    = doJetTowerOverlapRemoval ? "OR" : "NoOR";
@@ -123,6 +160,7 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
         else if (signalString == "Zprime_ttbar")      ss << outputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_";
         else if (signalString == "ttbar_semilep")     ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_";
         else if (signalString == "ttbar_dilep")       ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_";
+        else if (signalString == "Zmumu")             ss << outputRootFilePath << "mc21_14TeV_Zmumu_e8557_s4422_r16130_";
     } else {
         ss << outputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_";
     }
@@ -134,5 +172,5 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
        << "_twrSF"    << twrSFTag
        << "_jetSF"    << jetSFTag
        << ".root";
-    return ss.str();
+    return applyPileupTags(ss.str(), pileup);
 }

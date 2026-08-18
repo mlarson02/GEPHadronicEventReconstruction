@@ -26,37 +26,51 @@ base_constants = {
     "maxObjectsConsidered_": 1024,
     "inputEnergyCut_": 1,
     "useInputEnergyCut_": "false", 
-    "et_granularity_": 0.125,
+    "et_granularity_": 0.25, # 250 MeV LSB = et_max_ / (1 << et_bit_length_)
     "r2Cut_": 1.0,
     "rCut_": 1.0,
     "rMergeCut_": 5.0,
     "et_bit_length_": 13,
+    # ---- digitization grid ----
+    # Same physical grid as the advanced version (run_hls_adv.py): the GEP tower
+    # grid, eta_range_ towers of 0.1 spanning |eta| < 4.9 and phi_range_ towers of
+    # pi/32 covering the full 2*pi, matching Athena's
+    # CaloTowerContainer::configureGrid(98, -4.9, 4.9, 64). Only the field widths
+    # differ (10b eta / 9b phi, the standard TOB format) and they are only field
+    # widths: the dynamic range and the granularity come from the code counts, and
+    # the high bits the grid never reaches are padding. eta_min_ / phi_min_ are the
+    # first tower centre, *_max_ one LSB past the last, so a tower digitizes to an
+    # integer code rather than to a round-half tie between two.
     "eta_bit_length_": 10,
-    "eta_range_": 784, 
+    "eta_range_": 98,
     "phi_bit_length_": 9,
-    "phi_min_": -3.2,
-    "phi_max_": 3.2,
-    "pi_digitized_in_phi_": 251, # rounding 3.1415/0.0125
+    "phi_range_": 64,
+    "eta_granularity_": 0.1,
     "eta_min_": -4.85,
-    "eta_max_": 4.95,
-    "eta_granularity_": 0.0125,
-    "phi_granularity_": 0.0125, # fixme these should be calculated from range and bit length not hard-coded!
-    "deltaR2_granularity_": 0.00015625,
+    "eta_max_": -4.85 + 98 * 0.1,
+    "phi_granularity_": math.pi / 32,
+    "phi_min_": -math.pi + math.pi / 64,
+    "phi_max_": -math.pi + math.pi / 64 + 64 * (math.pi / 32),
+    "pi_digitized_in_phi_": 32, # phi_range_ / 2
+    "deltaR2_granularity_": 0.1 * 0.1,
     "et_min_": 0,
-    "et_max_": 1024,
+    "et_max_": 2048,
     "useMax_": "false",
     "max_R2lut_size_": 2048,
     "max_Rlut_size_": 2048,
-    "deltaR_max_": 10.48187,
+    "deltaR_max_": math.sqrt((97 * 0.1) ** 2 + (31 * math.pi / 32) ** 2),
     "deltaR_bits_": 8
 }
 
-def calculate_lutR2_max_size(r2Cut, eta_range, phi_bit_length, eta_granularity, phi_granularity):
+# Sized off the code counts, not the field widths: the LUT is indexed by
+# (deltaEta, deltaPhi) over the tower grid, and a wrapped |deltaPhi| never exceeds
+# pi, so the rows are phi_range // 2 wide.
+def calculate_lutR2_max_size(r2Cut, eta_range, phi_range, eta_granularity, phi_granularity):
     last_one_index = 0
     idx = 0
     #print("r2cut used in calculating max lut size: ", r2Cut)
     for etaIt in range(eta_range): # now looping through for deltaEta, deltaPhi (before wrapped)
-        for phiIt in range(1 << (phi_bit_length)):
+        for phiIt in range(phi_range // 2):
             #print("etaIt:", etaIt)
             #print("phiIt:", phiIt)
             etaSquared = (etaIt * eta_granularity) ** 2
@@ -78,12 +92,12 @@ def calculate_lutR2_max_size(r2Cut, eta_range, phi_bit_length, eta_granularity, 
     #print("lut_max_size:", lut_max_size)
     return lut_max_size
 
-def calculate_lutR_max_size(rCut, eta_range, phi_bit_length, eta_granularity, phi_granularity):
+def calculate_lutR_max_size(rCut, eta_range, phi_range, eta_granularity, phi_granularity):
     last_one_index = 0
     idx = 0
     #print("r2cut used in calculating max lut size: ", r2Cut)
     for etaIt in range(eta_range):
-        for phiIt in range(1 << (phi_bit_length)):
+        for phiIt in range(phi_range // 2):
             etaSquared = (etaIt * eta_granularity) ** 2
             phiSquared = (wrapSym(phiIt * phi_granularity)) ** 2
             #print("etaSquared:", etaSquared)
@@ -102,7 +116,8 @@ def calculate_lutR_max_size(rCut, eta_range, phi_bit_length, eta_granularity, ph
     return lut_max_size
 
 def compute_derived(constants):
-    constants["phi_range_"] = constants["phi_max_"] - constants["phi_min_"]
+    # phi_range_ is a code count (like eta_range_), not the span in radians, so
+    # there is nothing to derive -- it is set with the rest of the grid above.
     return constants
 
 """def run_lut_generator_via_root(source_file: str):
@@ -315,7 +330,7 @@ def write_constants_h(constants: dict, output_file: str, unroll: int, ii: int):
         f.write('''
 
 
-const unsigned int lut_size_ = (eta_range_ * (1 << (phi_bit_length_)));
+const unsigned int lut_size_ = (eta_range_ * (phi_range_ / 2)); // rows of |deltaPhi| codes below pi
 #if !WRITE_LUT
 constexpr unsigned int padded_zeroes_length_ = 64 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;
 constexpr unsigned int padded_zeroes_length_32b_ = 128 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;
@@ -411,9 +426,11 @@ if __name__ == "__main__":
                                         if inputEnergyCutBool:
                                             constants["inputEnergyCut_"] = inputEnergyCutValues
 
-                                        # Calculate phi and eta granularities from base constants
-                                        phi_range = base_constants["phi_max_"] - base_constants["phi_min_"]
-                                        phi_granularity = phi_range / (1 << base_constants["phi_bit_length_"])
+                                        # Calculate phi and eta granularities from base constants.
+                                        # Both come from the code counts (eta_range_ / phi_range_),
+                                        # never from the field widths: the wider v2 fields carry the
+                                        # same tower grid, just zero padded.
+                                        phi_granularity = (2 * math.pi) / base_constants["phi_range_"]
                                         constants["phi_granularity_"] = phi_granularity
 
                                         eta_range = base_constants["eta_max_"] - base_constants["eta_min_"]
@@ -423,7 +440,7 @@ if __name__ == "__main__":
                                         lut_max_size = calculate_lutR2_max_size(
                                             r2Cut=constants["r2Cut_"],
                                             eta_range=base_constants["eta_range_"],
-                                            phi_bit_length=constants["phi_bit_length_"],
+                                            phi_range=base_constants["phi_range_"],
                                             eta_granularity=eta_granularity,
                                             phi_granularity=phi_granularity
                                         )
@@ -431,7 +448,7 @@ if __name__ == "__main__":
                                         lutR_max_size = calculate_lutR_max_size(
                                             rCut=constants["rMergeCut_"],
                                             eta_range=base_constants["eta_range_"],
-                                            phi_bit_length=constants["phi_bit_length_"],
+                                            phi_range=base_constants["phi_range_"],
                                             eta_granularity=eta_granularity,
                                             phi_granularity=phi_granularity
                                         )
@@ -439,7 +456,7 @@ if __name__ == "__main__":
                                         lutR_8b_max_size = calculate_lutR_max_size(
                                             rCut=constants["rCut_"],
                                             eta_range=base_constants["eta_range_"],
-                                            phi_bit_length=constants["phi_bit_length_"],
+                                            phi_range=base_constants["phi_range_"],
                                             eta_granularity=eta_granularity,
                                             phi_granularity=phi_granularity
                                         )

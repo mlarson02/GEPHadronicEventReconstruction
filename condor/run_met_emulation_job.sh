@@ -13,6 +13,7 @@
 #                             jobs this is the FIRST fidx in the chunk)
 #   ${10} towerScaleFactor   (scalar weight on tower MET in totalMET sum, e.g. 1.0)
 #   ${11} jetScaleFactor     (scalar weight on jet MET in totalMET sum, e.g. 0.4)
+#   ${12} pileup             (200 or 140; tags the output name r16130 / r16129. Default 200.)
 #
 # Ordering: when $8 is a `;`-separated list, the wrapper hadds the inputs in
 # the EXACT order given. The submit script provides them in sorted-fidx order,
@@ -30,9 +31,10 @@ INFILE="$8"
 FIDX="$9"
 TWRSF="${10}"
 JETSF="${11}"
+PILEUP="${12:-200}"
 
 echo "=== MET Emulation Condor job ==="
-echo "  signal=$SIGNAL  signalString=$SIGSTR  puSup=$PUSUP  etaSK=$ETASK"
+echo "  signal=$SIGNAL  signalString=$SIGSTR  puSup=$PUSUP  etaSK=$ETASK  pileup=$PILEUP"
 echo "  jetEtThreshold=$JETET  doJetTowerOR=$JTOR  towerEtThreshold=$TOWERET"
 echo "  inputFile=$INFILE  fileIndex=$FIDX"
 echo "  towerScaleFactor=$TWRSF  jetScaleFactor=$JETSF"
@@ -82,6 +84,6 @@ fi
 
 # --- Run emulation ---
 echo "Running emulation in: $JOBDIR"
-root -l -b -q "metEmulation.cc+(${SIGNAL}, ${PUSUP}, \"${SIGSTR}\", ${JETET}, ${JTOR}, ${TOWERET}, ${ETASK}, \"${EMU_INPUT}\", ${FIDX}, ${TWRSF}, ${JETSF})"
+root -l -b -q "metEmulation.cc+(${SIGNAL}, ${PUSUP}, \"${SIGSTR}\", ${JETET}, ${JTOR}, ${TOWERET}, ${ETASK}, \"${EMU_INPUT}\", ${FIDX}, ${TWRSF}, ${JETSF}, ${PILEUP})"
 
 echo "=== Job complete ==="

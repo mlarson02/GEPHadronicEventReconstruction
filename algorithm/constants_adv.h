@@ -2,6 +2,8 @@
 #define CONSTANTS_ADV_H
 // Constants used by SW & FW implementation
 
+#include <cmath>
+
 #define UNROLLFACTOR 16
 #define PIPELINEII 3
 
@@ -9,7 +11,7 @@ constexpr unsigned int nTotalSeeds_ = 10;
 constexpr unsigned int nSeedsInput_ = 6;
 constexpr unsigned int nSeedsOutput_ = 2;
 constexpr unsigned int maxObjectsConsidered_ = 128;
-constexpr double et_granularity_ = 0.125;
+constexpr double et_granularity_ = 0.25; // 250 MeV LSB = et_max_ / (1 << et_bit_length_)
 constexpr unsigned int subjet_et_threshold_ = 200;
 constexpr double r2Cut_ = 1.21;
 constexpr double rCut_ = 1.1;
@@ -20,16 +22,23 @@ constexpr unsigned int phi_bit_length_ = 6;
 constexpr unsigned int eta_range_ = 98;
 constexpr unsigned int num_subjets_length_ = 2;
 constexpr unsigned int deltaRBits_ = 8;
-constexpr double phi_min_ = -3.2;
-constexpr double phi_max_ = 3.2;
-constexpr unsigned int pi_digitized_in_phi_ = 31;
-constexpr double eta_min_ = -4.85;
-constexpr double eta_max_ = 4.95;
+// ---- digitization grid ----
+// The GEP tower grid: 98 eta towers of 0.1 spanning |eta| < 4.9 and 64 phi towers
+// of pi/32 covering the full 2*pi, matching Athena's
+// CaloTowerContainer::configureGrid(98, -4.9, 4.9, 64). eta_range_ / phi_range_
+// are code counts and are what set the dynamic range and the granularity -- the
+// bit lengths above are only the widths of the fields the codes are packed into.
+// eta_min_ / phi_min_ are the first tower centre, *_max_ one LSB past the last.
 constexpr double eta_granularity_ = 0.1;
-constexpr double phi_granularity_ = 0.1;
+constexpr double eta_min_ = -4.85;
+constexpr double eta_max_ = eta_min_ + eta_range_ * eta_granularity_; // 4.95
+constexpr unsigned int phi_range_ = 64;
+constexpr double phi_granularity_ = (2 * M_PI) / double(phi_range_); // pi/32
+constexpr double phi_min_ = -M_PI + phi_granularity_ / 2;
+constexpr double phi_max_ = phi_min_ + phi_range_ * phi_granularity_;
+constexpr unsigned int pi_digitized_in_phi_ = phi_range_ / 2; // 32
 constexpr unsigned int et_min_ = 0;
-constexpr unsigned int et_max_ = 1024;
-constexpr double phi_range_ = 6.4;
+constexpr unsigned int et_max_ = 2048;
 
 
 constexpr unsigned int padded_zeroes_length_ = 64 - et_bit_length_ - eta_bit_length_ - phi_bit_length_ - num_subjets_length_ - num_subjets_length_;

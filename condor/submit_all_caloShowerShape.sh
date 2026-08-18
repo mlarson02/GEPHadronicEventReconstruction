@@ -39,16 +39,17 @@ submit emerging_jets \
     --gep-dir  "$(find_container $GEP_BASE/EmergingJets  EXT0)" \
     --output-dir $OUT_BASE
 
-# --- Background: QCD dijet, for the "what does background look like" comparison.
-# One or more JZ slices; --label keeps their outputs/logs from colliding.
-# Edit DIJET_JZ to pick which slices to run (a couple is usually enough).
-# NOTE: QCD dijet is not part of the CaloShowerShapeTriggers download yet — update
-# the QCD_Dijet/JZ* sub-paths below to match the new layout once it is staged.
-DIJET_JZ="2 4"
+# --- Background: QCD dijet, JZ0-9.
+# Each slice becomes its own caloShowerShape_dijet_JZ<N>.root; the analysis macros
+# chain the ten with a caloShowerShape_dijet_JZ* glob, so there is no combined
+# hadd step. --jz is what lets the ntupler stamp each event with the slice's
+# cross-section weight, and it auto-resolves the QCD_Dijet/JZ<N> input containers
+# under the main GEPHadronicEventReconstruction layout (the dijet DAODs/GEP
+# ntuples are not part of the CaloShowerShapeTriggers download).
+# Edit DIJET_JZ to run a subset of slices.
+DIJET_JZ=$(seq 0 9)
 for JZ in $DIJET_JZ; do
     submit dijet_JZ${JZ} \
-        --background --label dijet_JZ${JZ} \
-        --daod-dir "$(find_container $DAOD_BASE/QCD_Dijet/JZ${JZ} EXT1)" \
-        --gep-dir  "$(find_container $GEP_BASE/QCD_Dijet/JZ${JZ}  EXT0)" \
+        --background --jz ${JZ} \
         --output-dir $OUT_BASE
 done

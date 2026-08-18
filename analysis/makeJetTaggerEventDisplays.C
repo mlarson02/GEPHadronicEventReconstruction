@@ -1,4 +1,5 @@
 #include "analysisHelperFunctions.h"
+#include "chainSource.h"
 
 // Draw the ATLAS "Work in progress" label (plus beam-energy / pileup and physics
 // process info) in a white strip ABOVE the plot frame on the currently active canvas.
@@ -30,7 +31,8 @@ void DrawATLASLabel(double x = 0.20, double /*y*/ = 0.88, const char* status = "
     TLatex p; p.SetNDC(); p.SetTextFont(42); p.SetTextColor(kBlack); p.SetTextSize(0.04);
     p.DrawLatex(x + 0.13, yAtlas, status);
     TLatex e; e.SetNDC(); e.SetTextFont(42); e.SetTextColor(kBlack); e.SetTextSize(0.035);
-    e.DrawLatex(x, yInfo, "#sqrt{s} = 14 TeV, <PU> = 200");
+    // #LT / #GT are TLatex's angle brackets; plain "<PU>" renders less-than/greater-than glyphs.
+    e.DrawLatex(x, yInfo, "#sqrt{s} = 14 TeV, #LTPU#GT = 200");
     if (processLabel && processLabel[0] != '\0') {
         TLatex pr; pr.SetNDC(); pr.SetTextFont(42); pr.SetTextColor(kBlack); pr.SetTextSize(0.035);
         pr.DrawLatex(0.70, yAtlas, processLabel);
@@ -230,7 +232,9 @@ void callMakeEventDisplays(std::string jetTaggerInputFile, std::string herInputF
     std::vector<double>* outOfTimeAntiKt4TruthSRJLeadingPhiValues = nullptr;
 
     TFile* jetTaggerFile = TFile::Open(jetTaggerInputFile.c_str(), "READ");
-    TFile* herFile = TFile::Open(herInputFile.c_str(), "READ");
+    // HER ntuple: ChainSource so a JZ-slice glob is read as one chained set of trees,
+    // matching how the analysis macros read the same input.
+    ChainSource* herFile = ChainSource::Open(herInputFile.c_str());
 
     // jet tagger trees — from jet tagger NTuple
     TTree* jetTaggerLRJs = (TTree*)jetTaggerFile->Get("jetTaggerLRJsTree");
@@ -1281,7 +1285,7 @@ void makeJetTaggerEventDisplays(){
 
     callMakeEventDisplays(
         "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root",
-        "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+        "/data/larsonma/GEPHadronicEventReconstruction/ntuples/QCD_Dijet_JZ*_v4/mc21_14TeV_jj_JZ*_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
         1, false, "jj_1", "WTACone", true);
 
     //callMakeEventDisplays("<jet_tagger_file>", "<her_input_file>",

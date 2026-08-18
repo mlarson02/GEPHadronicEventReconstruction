@@ -8,11 +8,22 @@
 //
 //   * jetTaggerLRJEtaSKTree       : JetTaggerLRJ EtaSK jets, taken straight from
 //                                   GEPOutputReader (the same objects used for
-//                                   TrigGepPerf validation).
+//                                   TrigGepPerf validation). OFF by default, see
+//                                   kWriteJetTaggerLRJ below.
 //   * wtaConeCellsTowersEtaSKTree : WTACone (EtaSK) cells-tower jets, from
 //                                   GEPOutputReader, Et-sorted.
 //   * gepCellsTowersEtaSKTree     : GEPCellsTowerEtaSK towers incl. per-layer Et
 //                                   (Et_l0..Et_l6), from GEPOutputReader.
+//   * gepCellsTowersTree          : the SAME towers with NO soft killer
+//                                   (GEPCellsTower), and
+//   * gepCellsTowersSKTree        : with the plain (non-eta-dependent) SK.
+//                                   EtaSK's dynamic O(1-2) GeV per-tower threshold
+//                                   is right for jet finding but starves the shower
+//                                   measurement -- a surviving tower spreads that Et
+//                                   over up to 7 layers, leaving a jet with 2-3
+//                                   towers and 1-2 lit layers, which is not enough
+//                                   for the per-layer-centroid fit. Measure the
+//                                   shower on these; keep the jets EtaSK.
 //   * truthBSMTree                : truth BSM particles from the DAOD (TruthBSM),
 //                                   4-vector + pdgId + production/decay vertices
 //                                   (loop the whole collection; filter by pdgId
@@ -25,7 +36,14 @@
 // Run interpreted, exactly like HERNTupler.C (xAOD types resolve via
 // autoloading in an AnalysisBase environment):
 //   root -b -q 'caloShowerShapeNTupler.C(signalBool,"signalString",
-//               "outputDir/","daodFile","gepFile","fileSuffix")'
+//               "outputDir/","daodFile","gepFile","fileSuffix",jzSlice,pileup)'
+//
+// QCD dijet background is produced one JZ slice at a time (jzSlice 0..9), one
+// merged ntuple per slice, and the downstream macros chain the ten of them. So
+// each background event is stamped with its slice index, its cross-section
+// weight and its HSTP filter decision -- eventInfoTree branches sampleJZSlice /
+// eventWeights / passHSTP, named as in HERNTupler.C. Signal keeps
+// sampleJZSlice = -1, eventWeights = {mcEventWeight}, passHSTP = true.
 //
 // We'll start with just these blocks and add more later.
 // ---------------------------------------------------------------------------
@@ -41,6 +59,7 @@
 #include "TTree.h"
 #include "TSystem.h"
 #include "TString.h"
+#include "jzSliceWeights.h"
 
 // ---------------------------------------------------------------------------
 // Shower-parent selection + debug.
@@ -59,23 +78,45 @@ static const std::set<int> kShowerParentPdgIds = {
 };
 static const int kDebugTruthBSMEvents = 5;   // dump decay chains for the first N events (0 = off)
 
+// The study is WTACone-only for now: the JetTaggerLRJ collection is empty in the
+// JZ1 (v22 PU200) production and the large-R side is not what we are measuring, so
+// its tree is neither bound nor written. Flip this on to bring it back.
+static const bool kWriteJetTaggerLRJ = false;
+
 void caloShowerShapeNTupler(bool signalBool,
                             std::string signalString,
                             std::string outputDir,
                             std::string daodFile,
                             std::string gepFile,
-                            std::string fileSuffix = "") {
+                            std::string fileSuffix = "",
+                            int jzSlice = -1,
+                            unsigned int pileup = 200) {
 
     // ---------------------------------------------------------------
     // Output file
     // ---------------------------------------------------------------
+    // Background gets a per-slice tag so the ten JZ ntuples sit side by side in
+    // the output directory and can be chained with a caloShowerShape_dijet_JZ[0-9]
+    // glob downstream.
     std::string tag = signalString.empty() ? "background" : signalString;
+    if (!signalBool && signalString.empty() && jzSlice >= 0)
+        tag = "dijet_JZ" + std::to_string(jzSlice);
+    if (!signalBool && jzSlice < 0)
+        std::cerr << "[caloShowerShapeNTupler] WARNING: background run without a JZ slice "
+                     "(jzSlice=-1) -- eventWeights fall back to mcEventWeight and the ntuple "
+                     "cannot be mixed with other slices.\n";
     std::string outDir = outputDir;
     if (!outDir.empty() && outDir.back() != '/') outDir += "/";
     std::string outName = outDir + "caloShowerShape_" + tag + fileSuffix + ".root";
     TString outputFileName = outName.c_str();
     TFile* outputFile = new TFile(outputFileName, "RECREATE");
     std::cout << "[caloShowerShapeNTupler] output: " << outputFileName << "\n";
+    if (!signalBool && jzSlice >= 0 && jzSlice < (int)JZSliceWeights::nJZSlices)
+        std::cout << "[norm] JZ" << jzSlice << " (PU" << pileup << "): xsec x filterEff = "
+                  << JZSliceWeights::crossSectionsByJZSlice[jzSlice]
+                     * JZSliceWeights::filterEffienciesByJZSlice[jzSlice] << " b, sumOfWeights = "
+                  << JZSliceWeights::sumOfEventWeightsForPU(jzSlice, pileup) << ", L = "
+                  << JZSliceWeights::reweightLuminosityForPU(pileup) << " b^-1\n";
 
     // ===============================================================
     // Output trees, output vectors, and (for GEP inputs) the pointers
@@ -91,6 +132,13 @@ void caloShowerShapeNTupler(bool signalBool,
     int           gepEventNumber  = 0;   // from GEP ntuple (int branch)
     int           gepRunNumber    = 0;
     int           signalFlag      = signalBool ? 1 : 0;
+    // JZ bookkeeping (background): slice index, the cross-section weight that makes
+    // a JZ0-9 chain a physical mixture, and the HSTP filter decision. Signal writes
+    // sampleJZSlice = -1, eventWeights = {mcEventWeight}, passHSTP = true.
+    int                 sampleJZSlice = signalBool ? -1 : jzSlice;
+    std::vector<double> eventWeights;
+    bool                passHSTP      = true;
+    bool                filterHSTP    = true;   // GEP ntuple branch (background only)
     eventInfoTree->Branch("eventNumber",     &eventNumber);
     eventInfoTree->Branch("runNumber",       &runNumber);
     eventInfoTree->Branch("mcChannelNumber", &mcChannelNumber);
@@ -98,6 +146,9 @@ void caloShowerShapeNTupler(bool signalBool,
     eventInfoTree->Branch("gepEventNumber",  &gepEventNumber);
     eventInfoTree->Branch("gepRunNumber",    &gepRunNumber);
     eventInfoTree->Branch("signal",          &signalFlag);
+    eventInfoTree->Branch("sampleJZSlice",   &sampleJZSlice);
+    eventInfoTree->Branch("eventWeights",    &eventWeights);
+    eventInfoTree->Branch("passHSTP",        &passHSTP);
 
     // ---- (1) JetTaggerLRJ EtaSK jets (GEPOutputReader) -------------
     // Pass-through: each pointer is bound BOTH to the GEP input branch and to
@@ -169,6 +220,46 @@ void caloShowerShapeNTupler(bool signalBool,
     // input pointers bound to the GEP tree
     std::vector<float>* in_tow_et = nullptr, *in_tow_eta = nullptr, *in_tow_phi = nullptr;
     std::vector<float>* in_tow_et_l[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+
+    // ---- (3b) the same towers WITHOUT the eta-dependent soft killer ----------
+    // EtaSK applies a dynamic O(1-2) GeV per-tower threshold from the event's energy
+    // density. That is right for jet finding and rates, but it starves the shower
+    // measurement: the per-layer centroid fit needs many towers per LAYER, and a
+    // surviving 1-2 GeV tower spreads its Et over up to 7 layers. Writing the
+    // unsuppressed (GEPCellsTower) and plain-SK (GEPCellsTowerSK) collections lets
+    // the shower shape / pointing be measured on all towers while the trigger jets
+    // stay EtaSK. Both are pass-throughs of the same shape as the EtaSK tree above.
+    struct TowerColl {
+        const char* treeName;
+        const char* branchPrefix;   // GEP branch prefix, e.g. "GEPCellsTower"
+        TTree*      tree;
+        std::vector<double> Et, Eta, Phi;
+        std::vector<double> Et_l[7];
+        std::vector<float>* in_et;
+        std::vector<float>* in_eta;
+        std::vector<float>* in_phi;
+        std::vector<float>* in_et_l[7];
+    };
+    // Value-initialized (new TowerColl()) so every input pointer starts null; the
+    // interpreter is happier with this than with aggregate-initializing a struct
+    // that mixes vectors, arrays and pointers.
+    std::vector<TowerColl*> extraTowerColls;
+    {
+        const char* names[2]    = { "gepCellsTowersTree", "gepCellsTowersSKTree" };
+        const char* prefixes[2] = { "GEPCellsTower",      "GEPCellsTowerSK"      };
+        for (int i = 0; i < 2; ++i) {
+            TowerColl* tc = new TowerColl();
+            tc->treeName     = names[i];
+            tc->branchPrefix = prefixes[i];
+            tc->tree = new TTree(tc->treeName,
+                                 Form("%s towers incl. per-layer Et (GEPOutputReader)", tc->branchPrefix));
+            tc->tree->Branch("Et",  &tc->Et);
+            tc->tree->Branch("Eta", &tc->Eta);
+            tc->tree->Branch("Phi", &tc->Phi);
+            for (int l = 0; l < 7; ++l) tc->tree->Branch(Form("Et_l%d", l), &tc->Et_l[l]);
+            extraTowerColls.push_back(tc);
+        }
+    }
 
     // ---- (4) truth BSM particles (DAOD TruthBSM) ------------------
     TTree* truthBSMTree = new TTree("truthBSMTree", "Truth BSM particles (DAOD TruthBSM)");
@@ -260,20 +351,31 @@ void caloShowerShapeNTupler(bool signalBool,
     bind("eventNumber", &gepEventNumber);
     bind("runNumber",   &gepRunNumber);
 
+    // HSTP filter (background only): removes the JZ events whose hard-scatter truth
+    // particle is out of time, the same cut metAnalysisAndRates.C / largeRJet-
+    // AnalysisAndRates.C apply to the background chain.
+    const bool haveFilterHSTP = !signalBool && gt->GetBranch("filterHSTP") != nullptr;
+    if (haveFilterHSTP) bind("filterHSTP", &filterHSTP);
+    else if (!signalBool)
+        std::cerr << "[caloShowerShapeNTupler] WARNING: no filterHSTP branch in the GEP file -- "
+                     "passHSTP will be true for every event.\n";
+
     // (1) JetTaggerLRJ EtaSK
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_Et",         &lrj_Et);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_eta",        &lrj_eta);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_phi",        &lrj_phi);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_m",          &lrj_m);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_nSubjets",   &lrj_nSubjets);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_psi_R",      &lrj_psi_R);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_1",      &lrj_tau_1);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_2",      &lrj_tau_2);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_21",     &lrj_tau_21);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_massApprox", &lrj_massApprox);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_Et",  &lrj_subjet_Et);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_eta", &lrj_subjet_eta);
-    bind("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_phi", &lrj_subjet_phi);
+    if (kWriteJetTaggerLRJ) {
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_Et",         &lrj_Et);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_eta",        &lrj_eta);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_phi",        &lrj_phi);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_m",          &lrj_m);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_nSubjets",   &lrj_nSubjets);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_psi_R",      &lrj_psi_R);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_1",      &lrj_tau_1);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_2",      &lrj_tau_2);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_21",     &lrj_tau_21);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_massApprox", &lrj_massApprox);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_Et",  &lrj_subjet_Et);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_eta", &lrj_subjet_eta);
+        bind("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_phi", &lrj_subjet_phi);
+    }
 
     // (2) WTACone EtaSK cells-tower jets
     bind("WTAConeGEPCellsTowerEtaSKJets_pt",            &in_wta_pt);
@@ -299,6 +401,15 @@ void caloShowerShapeNTupler(bool signalBool,
     for (int l = 0; l < 7; ++l)
         bind(Form("GEPCellsTowerEtaSK_et_l%d", l), &in_tow_et_l[l]);
 
+    // (3b) the unsuppressed + plain-SK tower collections
+    for (TowerColl* tc : extraTowerColls) {
+        bind(Form("%s_et",  tc->branchPrefix), &tc->in_et);
+        bind(Form("%s_eta", tc->branchPrefix), &tc->in_eta);
+        bind(Form("%s_phi", tc->branchPrefix), &tc->in_phi);
+        for (int l = 0; l < 7; ++l)
+            bind(Form("%s_et_l%d", tc->branchPrefix, l), &tc->in_et_l[l]);
+    }
+
     // ===============================================================
     // Event loop
     // ===============================================================
@@ -321,6 +432,10 @@ void caloShowerShapeNTupler(bool signalBool,
         wta_totalTobN.clear(); wta_ring0TobN.clear(); wta_ring1TobN.clear(); wta_ring2TobN.clear(); wta_ring3TobN.clear(); wta_ring4TobN.clear();
         tow_Et.clear(); tow_Eta.clear(); tow_Phi.clear();
         for (int l = 0; l < 7; ++l) tow_Et_l[l].clear();
+        for (TowerColl* tc : extraTowerColls) {
+            tc->Et.clear(); tc->Eta.clear(); tc->Phi.clear();
+            for (int l = 0; l < 7; ++l) tc->Et_l[l].clear();
+        }
         bsm_pdgId.clear(); bsm_status.clear();
         bsm_pt.clear(); bsm_eta.clear(); bsm_phi.clear(); bsm_m.clear(); bsm_e.clear();
         bsm_px.clear(); bsm_py.clear(); bsm_pz.clear();
@@ -332,6 +447,7 @@ void caloShowerShapeNTupler(bool signalBool,
         sp_decayVtx_Lxy.clear(); sp_decayVtx_r3d.clear();
 
         // ---- event info ----
+        eventWeights.clear();
         const xAOD::EventInfo* evtInfo = nullptr;
         if (event.retrieve(evtInfo, "EventInfo").isSuccess()) {
             eventNumber     = evtInfo->eventNumber();
@@ -341,6 +457,10 @@ void caloShowerShapeNTupler(bool signalBool,
         } else {
             eventNumber = 0; runNumber = 0; mcChannelNumber = 0; mcEventWeight = 0.;
         }
+        // Slice weight for background (mcEventWeight passed through for signal, whose
+        // sampleJZSlice is -1), and the HSTP decision read from the GEP ntuple.
+        eventWeights.push_back(JZSliceWeights::eventWeight(mcEventWeight, sampleJZSlice, pileup));
+        passHSTP = haveFilterHSTP ? filterHSTP : true;
 
         // ---- (2) WTACone EtaSK jets: Et-sorted (descending) ----
         if (in_wta_pt) {
@@ -365,6 +485,24 @@ void caloShowerShapeNTupler(bool signalBool,
                 wta_ring2TobN.push_back((*in_wta_r2N)[idx]);
                 wta_ring3TobN.push_back((*in_wta_r3N)[idx]);
                 wta_ring4TobN.push_back((*in_wta_r4N)[idx]);
+            }
+        }
+
+        // ---- (3b) unsuppressed + plain-SK towers: Et-sorted (descending) ----
+        for (TowerColl* tc : extraTowerColls) {
+            if (!tc->in_et) continue;
+            std::vector<unsigned int> order(tc->in_et->size());
+            std::iota(order.begin(), order.end(), 0u);
+            std::sort(order.begin(), order.end(),
+                      [&](unsigned int a, unsigned int b){ return (*tc->in_et)[a] > (*tc->in_et)[b]; });
+            for (unsigned int idx : order) {
+                tc->Et.push_back((*tc->in_et)[idx] / 1000.0);   // GeV
+                tc->Eta.push_back((*tc->in_eta)[idx]);
+                tc->Phi.push_back((*tc->in_phi)[idx]);
+                for (int l = 0; l < 7; ++l) {
+                    if (tc->in_et_l[l]) tc->Et_l[l].push_back((*tc->in_et_l[l])[idx] / 1000.0);
+                    else                tc->Et_l[l].push_back(0.0);
+                }
             }
         }
 
@@ -541,9 +679,10 @@ void caloShowerShapeNTupler(bool signalBool,
 
         // ---- fill ----
         eventInfoTree->Fill();
-        jetTaggerLRJEtaSKTree->Fill();      // pass-through (lrj_* filled by GetEntry)
+        if (kWriteJetTaggerLRJ) jetTaggerLRJEtaSKTree->Fill();   // pass-through (lrj_* filled by GetEntry)
         wtaConeCellsTowersEtaSKTree->Fill();
         gepCellsTowersEtaSKTree->Fill();
+        for (TowerColl* tc : extraTowerColls) tc->tree->Fill();
         truthBSMTree->Fill();
         showerParentTree->Fill();
     } // event loop
@@ -553,9 +692,10 @@ void caloShowerShapeNTupler(bool signalBool,
     // ===============================================================
     outputFile->cd();
     eventInfoTree->Write("", TObject::kOverwrite);
-    jetTaggerLRJEtaSKTree->Write("", TObject::kOverwrite);
+    if (kWriteJetTaggerLRJ) jetTaggerLRJEtaSKTree->Write("", TObject::kOverwrite);
     wtaConeCellsTowersEtaSKTree->Write("", TObject::kOverwrite);
     gepCellsTowersEtaSKTree->Write("", TObject::kOverwrite);
+    for (TowerColl* tc : extraTowerColls) tc->tree->Write("", TObject::kOverwrite);
     truthBSMTree->Write("", TObject::kOverwrite);
     showerParentTree->Write("", TObject::kOverwrite);
     outputFile->Close();

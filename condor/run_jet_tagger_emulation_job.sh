@@ -18,6 +18,7 @@
 #   $15 inputFilePath       (explicit path to input ntuple for per-file parallelism)
 #   $16 fileIndex           (integer index appended to output name to avoid collisions)
 #   $17 useEtaSKObjects     (true or false)
+#   $18 pileup              (200 or 140; tags the output name r16130 / r16129. Default 200.)
 
 RMRG="$1"
 R2="$2"
@@ -36,10 +37,11 @@ MINETC="${14}"
 INFILE="${15}"
 FIDX="${16}"
 ETASK="${17}"
+PILEUP="${18:-200}"
 
 echo "=== JetTagger Emulation Condor job ==="
 echo "  rMerge=$RMRG  rSquared=$R2  nIOs=$NIOS  nSeeds=$NSEEDS  algo=$ALGOV"
-echo "  signal=$SIGNAL  signalString=$SIGSTR  puSup=$PUSUP  etaSK=$ETASK"
+echo "  signal=$SIGNAL  signalString=$SIGSTR  puSup=$PUSUP  etaSK=$ETASK  pileup=$PILEUP"
 echo "  inputObj=$INOBJ  seedObj=$SEEDOBJ  subjetEt=$SJETT"
 echo "  etWtMid=$ETWM  minEtOpt=$MINETO  minEtCut=$MINETC"
 echo "  inputFile=$INFILE  fileIndex=$FIDX"
@@ -62,7 +64,7 @@ rMergeFmt=$(python3 -c "print(f'{float(\"$RMRG\"):.4g}')")
 r2Fmt=$(python3    -c "print(f'{float(\"$R2\"):.3g}')")
 
 CONSTANTS_FILE="$CONST_DIR/constants_rMerge_${rMergeFmt}_R2_${r2Fmt}_IOs_${NIOS}_Seeds_${NSEEDS}_v${ALGOV}.h"
-LUT_FILE="$LUT_DIR/LUT_deltaR_8b_rMerge_${rMergeFmt}_R2_${r2Fmt}.h"
+LUT_FILE="$LUT_DIR/v${ALGOV}/LUT_deltaR_8b_rMerge_${rMergeFmt}_R2_${r2Fmt}.h"
 
 echo "  constants: $CONSTANTS_FILE"
 echo "  LUT:       $LUT_FILE"
@@ -88,6 +90,6 @@ cd "$JOBDIR"
 
 # --- Run emulation ---
 echo "Running emulation in: $JOBDIR"
-root -l -b -q "jetTaggerEmulation.cc+(${RMRG}, ${NIOS}, ${NSEEDS}, ${R2}, ${SIGNAL}, true, ${PUSUP}, \"${SIGSTR}\", \"${INOBJ}\", \"${SEEDOBJ}\", ${SJETT}, ${ETWM}, ${MINETO}, ${MINETC}, false, \"${INFILE}\", ${FIDX}, ${ETASK})"
+root -l -b -q "jetTaggerEmulation.cc+(${RMRG}, ${NIOS}, ${NSEEDS}, ${R2}, ${SIGNAL}, true, ${PUSUP}, \"${SIGSTR}\", \"${INOBJ}\", \"${SEEDOBJ}\", ${SJETT}, ${ETWM}, ${MINETO}, ${MINETC}, false, \"${INFILE}\", ${FIDX}, ${ETASK}, false, ${PILEUP})"
 
 echo "=== Job complete ==="

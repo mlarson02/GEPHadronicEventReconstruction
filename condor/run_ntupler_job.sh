@@ -10,6 +10,7 @@
 #   $7  daodFile     (absolute path to the specific DAOD_JETM42 pool.root file)
 #   $8  gepFile      (absolute path to the matching TrigGepPerf ntuple file)
 #   $9  fileSuffix   (string appended before .root in output name, e.g. _000001)
+#   $10 pileup       (200 or 140; selects the reweighting constants. Default 200.)
 
 SIGNAL_BOOL="$1"
 SIGNAL_STRING="$2"
@@ -20,6 +21,7 @@ OUTPUT_DIR="$6"
 DAOD_FILE="$7"
 GEP_FILE="$8"
 FILE_SUFFIX="$9"
+PILEUP="${10:-200}"
 
 echo "=== HERNTupler Condor job ==="
 echo "  SIGNAL_BOOL    = $SIGNAL_BOOL"
@@ -31,6 +33,7 @@ echo "  OUTPUT_DIR     = $OUTPUT_DIR"
 echo "  DAOD_FILE      = $DAOD_FILE"
 echo "  GEP_FILE       = $GEP_FILE"
 echo "  FILE_SUFFIX    = $FILE_SUFFIX"
+echo "  PILEUP         = $PILEUP"
 echo ""
 
 # --- ATLAS environment setup ---
@@ -55,6 +58,6 @@ mkdir -p "$OUTPUT_DIR"
 ANALYSIS_DIR=/home/larsonma/GEPHadronicEventReconstruction/analysis
 cd "$ANALYSIS_DIR"
 
-root -b -q "HERNTupler.C(${SIGNAL_BOOL}, \"${SIGNAL_STRING}\", ${ALGO_VERSION}, ${JZ_SLICE}, ${SPECIAL_JZ0}, \"${OUTPUT_DIR}/\", \"${DAOD_FILE}\", \"${GEP_FILE}\", \"${FILE_SUFFIX}\")"
+root -b -q "HERNTupler.C(${SIGNAL_BOOL}, \"${SIGNAL_STRING}\", ${ALGO_VERSION}, ${JZ_SLICE}, ${SPECIAL_JZ0}, \"${OUTPUT_DIR}/\", \"${DAOD_FILE}\", \"${GEP_FILE}\", \"${FILE_SUFFIX}\", ${PILEUP})"
 
 echo "=== Job complete ==="

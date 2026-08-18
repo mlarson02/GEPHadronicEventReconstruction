@@ -16,7 +16,7 @@ base_constants = {
     "nSeedsInput_": 6,
     "nSeedsOutput_": 2,
     "maxObjectsConsidered_": 128,
-    "et_granularity_": 0.125,
+    "et_granularity_": 0.25, # 250 MeV LSB = et_max_ / (1 << et_bit_length_)
     "subjet_et_threshold_": 200, # == 25 GeV 
     "r2Cut_": 1.21,
     "rCut_": 1.1,
@@ -24,22 +24,33 @@ base_constants = {
     "et_bit_length_": 13,
     "eta_bit_length_": 7,
     "phi_bit_length_": 6,
-    "eta_range_": 98, # the range of allowed eta values - for giving the correct tower granularity (9.8 / 98 = 0.1)
-    "num_subjets_length_": 2, # note: with latest format, have 36 free bits! 
+    "num_subjets_length_": 2, # note: with latest format, have 36 free bits!
     "deltaRBits_": 8,
-    "phi_min_": -3.2,
-    "phi_max_": 3.2,
-    "pi_digitized_in_phi_": 31,
-    "eta_min_": -4.85,
-    "eta_max_": 4.95,
+    # ---- digitization grid ----
+    # The GEP tower grid: eta_range_ towers of 0.1 spanning |eta| < 4.9 and
+    # phi_range_ towers of pi/32 covering the full 2*pi, matching Athena's
+    # CaloTowerContainer::configureGrid(98, -4.9, 4.9, 64). These code counts, not
+    # the bit lengths above, set the dynamic range and the granularity -- the bit
+    # lengths are only the widths of the fields the codes are packed into, which is
+    # why the basic version (run_hls.py) can carry the same grid in wider fields.
+    # eta_min_ / phi_min_ are the first tower centre, *_max_ one LSB past the last,
+    # so a tower digitizes to an integer code rather than to a round-half tie.
+    "eta_range_": 98,
+    "phi_range_": 64,
     "eta_granularity_": 0.1,
-    "phi_granularity_": 0.1,
+    "eta_min_": -4.85,
+    "eta_max_": -4.85 + 98 * 0.1,
+    "phi_granularity_": math.pi / 32,
+    "phi_min_": -math.pi + math.pi / 64,
+    "phi_max_": -math.pi + math.pi / 64 + 64 * (math.pi / 32),
+    "pi_digitized_in_phi_": 32, # phi_range_ / 2
     "et_min_": 0,
-    "et_max_": 1024
+    "et_max_": 2048
 }
 
 def compute_derived(constants):
-    constants["phi_range_"] = constants["phi_max_"] - constants["phi_min_"]
+    # phi_range_ is a code count (like eta_range_), not the span in radians, so
+    # there is nothing to derive -- it is set with the rest of the grid above.
     return constants
 
 import os
@@ -235,11 +246,11 @@ def write_constants_h(constants: dict, output_file: str, unroll: int, ii: int, u
     # linear thresholds compared against lutR_ entries line up with how that table was digitized.
     eta_range = constants["eta_range_"]
     eta_granularity = constants["eta_granularity_"]
-    phi_bit_length = constants["phi_bit_length_"]
+    phi_range = constants["phi_range_"]
     phi_granularity = constants["phi_granularity_"]
     deltaR_max = math.sqrt(
         ((eta_range - 1) * eta_granularity) ** 2
-        + (((1 << (phi_bit_length - 1)) - 1) * phi_granularity) ** 2
+        + (((phi_range // 2) - 1) * phi_granularity) ** 2
     )
     deltaR_granularity = deltaR_max / 255.0
     digitized_two_rCut = round(2 * constants["rCut_"] / deltaR_granularity)
@@ -372,9 +383,10 @@ if __name__ == "__main__":
                             print("rMergeCut:", rMergeCut)
                             print("maxobjectsconsidered:", maxObjectsConsidered)
 
-                            # Calculate phi and eta granularities from base constants
-                            phi_range = base_constants["phi_max_"] - base_constants["phi_min_"]
-                            phi_granularity = phi_range / (1 << base_constants["phi_bit_length_"])
+                            # Calculate phi and eta granularities from base constants.
+                            # Both come from the code counts (eta_range_ / phi_range_),
+                            # never from the field widths.
+                            phi_granularity = (2 * math.pi) / base_constants["phi_range_"]
                             constants["phi_granularity_"] = phi_granularity
 
                             eta_undigi_range = base_constants["eta_max_"] - base_constants["eta_min_"]

@@ -6,6 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <map>
 #include "TFile.h"
 #include "TTree.h"
 #include "TH1F.h"
@@ -18,8 +19,10 @@
 #include "TLine.h"
 #include "TLatex.h"
 #include "TSystem.h"
+#include "TStopwatch.h"
 #include "TROOT.h"
 #include "analysisHelperFunctions.h"
+#include "chainSource.h"
 
 #include "/home/larsonma/atlasrootstyle/AtlasStyle.C"
 
@@ -58,6 +61,29 @@ const int kP10Cyan   = TColor::GetColor("#92dadd");
 // Set per-file before the per-file plots and cleared for multi-file overlays. Empty = nothing drawn.
 std::string gProcLabel = "";
 
+// Average pileup quoted on the info line. Set from the sample being processed (see
+// SetPileupFromPath) so PU140 samples are not labelled as PU200.
+int gPileup = 200;
+
+// Is this a PU140 path? Two conventions are recognised:
+//   * the reconstruction tag in the file name — r16129 = PU140, r16130 = PU200.
+//     This is the primary differentiator: HERNTupler stamps it into the ntuple
+//     names and the emulation carries it through to its own outputs, which land
+//     in the same directory for both pileup scenarios.
+//   * a PU140 / pu140 / _140 marker in the path, e.g. the ntuples_PU140 directory.
+bool IsPU140Path(const std::string& path) {
+    return path.find("r16129") != std::string::npos ||
+           path.find("PU140")  != std::string::npos ||
+           path.find("pu140")  != std::string::npos ||
+           path.find("_140")   != std::string::npos;
+}
+
+// PU140 inputs carry the pileup in their filename; PU200 inputs are unlabelled (see the
+// sum-of-weights convention in HERNTupler.C). Detect from any input path.
+void SetPileupFromPath(const std::string& path) {
+    gPileup = IsPU140Path(path) ? 140 : 200;
+}
+
 // Draw the ATLAS "Work in progress" label (plus beam-energy / pileup info) in a
 // white strip ABOVE the plot frame on the currently active canvas.
 // Call after cd()'ing to the canvas and before SaveAs/Print.
@@ -75,7 +101,8 @@ void DrawATLASLabel(double x = 0.20, double /*y*/ = 0.88, const char* status = "
     TLatex p; p.SetNDC(); p.SetTextFont(42); p.SetTextColor(kBlack); p.SetTextSize(0.04);
     p.DrawLatex(x + 0.13, yAtlas, status);
     TLatex e; e.SetNDC(); e.SetTextFont(42); e.SetTextColor(kBlack); e.SetTextSize(0.035);
-    e.DrawLatex(x, yInfo, "#sqrt{s} = 14 TeV, <PU> = 200");
+    // #LT / #GT are TLatex's angle brackets; plain "<PU>" renders less-than/greater-than glyphs.
+    e.DrawLatex(x, yInfo, Form("#sqrt{s} = 14 TeV, #LTPU#GT = %d", gPileup));
     // Process label at the top-right of the strip (right-aligned), to the right of "ATLAS <status>".
     if (!gProcLabel.empty()) {
         TLatex s; s.SetNDC(); s.SetTextFont(42); s.SetTextColor(kBlack); s.SetTextSize(0.038);
@@ -84,12 +111,58 @@ void DrawATLASLabel(double x = 0.20, double /*y*/ = 0.88, const char* status = "
     }
 }
 
+// Background-only plots must not carry the signal process label — they are the same dijet
+// sample whatever signal is being processed alongside. DrawATLASLabel reads gProcLabel from
+// inside every drawing helper, so swap the global for the duration of a draw and restore it
+// afterwards.
+const std::string kBkgProcLabel = "QCD dijet";
+struct BkgProcLabel {
+    std::string saved;
+    BkgProcLabel() : saved(gProcLabel) { gProcLabel = kBkgProcLabel; }
+    ~BkgProcLabel() { gProcLabel = saved; }
+};
+
 const int   nColors = 7;
 int cols[nColors] = { kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan};
 
 // Skip background events with passHSTP == false (HSTP filter removes high-energy
 // pileup transients that are not modelled correctly in dijet MC).
 const bool applyHSTPFilter = true;
+
+// Progress printouts through the long event loops and the tree-opening stages, so a slow run
+// can be told apart from a stuck one. Every line is flushed, because a redirected stdout is
+// block-buffered and would otherwise hold the output back and look like a hang by itself.
+const bool printIOProgress   = true;
+const Long64_t progressEvery = 10000;   // events between progress lines
+
+// --- Rate normalization after the HSTP filter ----------------------------------
+// HERNTupler normalizes the per-event weights so that the sum over the UNFILTERED sample is
+// its targetRate (30 MHz). The HSTP filter above then removes ~99% of that weight — almost
+// all of JZ0, which alone is 95.4% of the target, plus 79% of JZ1 — and nothing puts it back,
+// so the weighted background sums to ~323 kHz instead of 30 MHz (measured on the v4 PU200
+// ntuples with checkHSTPNormalization.C, 2026-08-12).
+//
+// This is corrected once, at the histogram level, immediately after the background loop has
+// filled them: every weighted background histogram is scaled so that its rate at threshold 0 —
+// its integral, which is bin 1 of the cumulative — is targetTotalRateHz. Everything downstream
+// is a cumulative sum of those same histograms, so the rate-vs-threshold curves, the
+// 20/40/60/80 kHz thresholds, the rate-vs-efficiency curves and the turn-on curves evaluated at
+// those thresholds all come out normalized, rather than only the plots that rescale explicitly.
+// Set normalizeRateToTarget = false to go back to the weights exactly as filled.
+//
+// CAVEAT on the normalized curves: the surviving sample is enriched in slices that pass the
+// filter (JZ2 keeps 96.8% of its weight, JZ3 99.9%, against JZ0's 0.064%), so scaling it hands
+// the full collision rate to a jet-enriched population, and every threshold moves by the same
+// factor — including the high-threshold region fed by JZ2/JZ3 where the normalization already
+// closed. Check JZSlices/*_JZSlices_Rate.pdf for which slices populate a given working point.
+// Scale target: the colliding-bunch crossing rate, 30.9 MHz — the rate an L1 trigger sees at
+// zero threshold. Taken from kCrossingRateHz in analysisHelperFunctions.h so this rescale and
+// the jet binomial conversion use the same number. Deliberately NOT HERNTupler's targetRate
+// (30.0 MHz), which is a normalization choice for the event weights, not a crossing rate.
+const double targetTotalRateHz = kCrossingRateHz;
+// false = leave every histogram with the normalization the weights carry as filled.
+const bool normalizeRateToTarget = true;
+const unsigned int analysisPileup = 200;   // selects L_inst for the sigma x L overlay curve
 
 // Variable bin edges for turn-on histograms [GeV]:
 //   5 GeV bins [0, 100],  10 GeV bins [100, 200],  20 GeV bins [200, 400],  50 GeV bins [400, 600]
@@ -114,6 +187,45 @@ const Double_t metBinEdges[65] = {
     310, 320, 330, 340, 350, 360, 370, 380, 390, 400,
     450, 500, 550, 600
 };
+
+// Threshold axis cut-off for the rate-vs-threshold plots [GeV]. The histograms run to 600 GeV,
+// but the last 200 GeV carry no rate worth reading, so the curves are cropped for display. This
+// only sets the axis range — the cumulative rate at every threshold still integrates the full
+// spectrum above it, including the part beyond the cut-off. Callers that want a different range
+// (e.g. the 200 GeV zoomed algorithm comparison) pass their own xMax.
+const double kRateVsThrXMax = 400.0;
+
+// --- MET types shared by the Z->mumu turn-ons and the MET-vs-jet-multiplicity profiles ------
+// One entry per MET flavour, in a fixed order that both the per-file arrays and the multi-file
+// vectors index into. Everything else (rate histograms, per-event values, labels) is looked up
+// through this order, so a new MET type only has to be added here and in the two arrays that
+// bind it to its histogram / branch variable inside analyze_files.
+const int   nMETTypes = 7;
+const char* metTypeShort[nMETTypes] = {
+    "gFEX_JwoJ", "gFEX_NoiseCut", "gFEX_Rms", "jFEX", "JetMET", "TowerMET", "TotalMET"
+};
+const char* metTypeLabel[nMETTypes] = {
+    "gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"
+};
+// The GEP entries of the table above, for the GEP-only overlays.
+const int nGEPMETTypes = 3;
+const int gepMETTypeIdx[nGEPMETTypes] = { 4, 5, 6 };   // Jet, Tower, Total
+// Tower MET is meaningless once Overlap Removal is on, so this entry is dropped from the
+// overlays for OR configs (same convention as the GEP algorithm-comparison plots below).
+const int towerMETTypeIdx = 5;
+
+// Rate points the Z->mumu dimuon-pT turn-on curves are matched to.
+const int    nMuRates = 3;
+const double muRatesHz[nMuRates]   = { 40e3, 60e3, 80e3 };
+const char*  muRateNames[nMuRates] = { "40kHz", "60kHz", "80kHz" };
+
+// --- Background MET vs jet multiplicity ------------------------------------------------------
+// Jet multiplicity counts the truth AntiKt4 WZ-dressed jets (hard scatter) and the in-time
+// AntiKt4 truth jets (pileup overlay) together, each above kNJetMinEt: an event's jet activity
+// as MET sees it does not care which collision a jet came from.
+const int    nNJetBins  = 20;
+const double nJetAxisMax = 20.0;
+const double kNJetMinEt  = 15.0;   // [GeV]
 
 // -----------------------------------------------------------------------
 // Normalize histogram to unit area
@@ -389,7 +501,9 @@ TGraphErrors* makeRateGraph(TH1F* h, Color_t col, Style_t markerStyle = 20) {
 // -----------------------------------------------------------------------
 // Rate vs threshold from a weighted background histogram (rate in Hz)
 void drawRateVsThreshold(TH1F* back_weighted, const std::string& title,
-                         const std::string& xLabel, const std::string& outputPath) {
+                         const std::string& xLabel, const std::string& outputPath,
+                         double xMax = kRateVsThrXMax) {
+    BkgProcLabel bkgProc;   // background-only plot: label as QCD dijet, not the signal
     TGraphErrors* g = makeRateGraph(back_weighted, kP10Blue);
     g->SetTitle((title + ";" + xLabel + ";Rate [Hz]").c_str());
 
@@ -397,6 +511,8 @@ void drawRateVsThreshold(TH1F* back_weighted, const std::string& title,
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
     gPad->SetLogy();
     g->Draw("AP");
+    if (xMax > 0.0)
+        g->GetXaxis()->SetLimits(back_weighted->GetXaxis()->GetXmin(), xMax);
     c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
     delete g;
 }
@@ -408,8 +524,10 @@ void drawRateVsThresholdMulti(const std::vector<TH1F*>& backs_weighted,
                               const std::string& title, const std::string& xLabel,
                               const std::string& outputPath, const std::string& signalName = "",
                               const std::string& yLabel = "Rate [Hz]",
-                              double xMax = -1.0, double yScale = 1.0, double yMin = -1.0) {
+                              double xMax = kRateVsThrXMax, double yScale = 1.0, double yMin = -1.0,
+                              double yMax = -1.0) {
     if (backs_weighted.empty()) return;
+    BkgProcLabel bkgProc;   // background-only plot: label as QCD dijet, not the signal
     TCanvas c("c", title.c_str(), 700, 600);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
     gPad->SetLogy();
@@ -440,6 +558,10 @@ void drawRateVsThresholdMulti(const std::vector<TH1F*>& backs_weighted,
             g->GetXaxis()->SetLimits(backs_weighted[0]->GetXaxis()->GetXmin(), xMax);
         if (i == 0 && yMin > 0.0)
             g->SetMinimum(yMin);
+        // The frame is owned by the first graph, so a later curve that starts higher would be
+        // clipped off the top; callers overlaying curves of very different scale pass yMax.
+        if (i == 0 && yMax > 0.0)
+            g->SetMaximum(yMax);
         leg.AddEntry(g, labels[i].c_str(), "lp");
     }
     leg.Draw();
@@ -458,6 +580,7 @@ void OverlayRateAndSave(TH1F* hists[], int n, const char* canvasName,
                         const char* yLabel = "Estimated Background Rate [kHz]",
                         double yMin = 1e-8) {
     if (n <= 0 || !hists[0]) return;
+    BkgProcLabel bkgProc;   // per-JZ-slice rates are background only
 
     // Same palette/order as OverlayAndSave so the JZ colours stay consistent.
     const Color_t colors[10] = {
@@ -559,15 +682,20 @@ double findThreshold(TH1F* back_hw, double targetRateHz) {
 // -----------------------------------------------------------------------
 // Draw turn-on curves (efficiency vs truth NonInt MET) for multiple algorithms,
 // overlaid on one canvas at a single rate point
+// xLabel defaults to the truth MET axis these curves were written for; the Z->mumu turn-ons
+// pass the dimuon p_{T} axis instead.
 void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& labels,
                        const std::string& title, const std::string& outputPath,
                        const std::vector<double>& thresholds = {},
                        const std::string& rateLabel = "",
                        TH1F* truthDist = nullptr,
-                       double legX1 = 0.45, double legY1 = 0.15) {
+                       double legX1 = 0.45, double legY1 = 0.15,
+                       const std::string& xLabel = "Truth MET_{NonInt} [GeV]") {
     if (effs.empty()) return;
     int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan};
-    const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33 };
+    // Seven entries, matching mcols: both are indexed with i % 7 below, and the widest overlays
+    // (all seven MET types) reach index 6.
+    const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33, 34 };
 
     TCanvas c("c", title.c_str(), 700, 600);
     gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
@@ -586,7 +714,7 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
         effs[i]->SetMarkerSize(0.8);
         effs[i]->SetLineWidth(2);
         effs[i]->SetTitle(title.c_str());
-        effs[i]->GetXaxis()->SetTitle("Truth MET_{NonInt} [GeV]");
+        effs[i]->GetXaxis()->SetTitle(xLabel.c_str());
         effs[i]->GetYaxis()->SetTitle("Signal Efficiency");
         effs[i]->SetMaximum(1.10); effs[i]->SetMinimum(0.0);
         effs[i]->Draw(i == 0 ? "EP" : "EP SAME");
@@ -607,6 +735,62 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
         hTruth->Draw("HIST SAME");
     }
 
+    leg.Draw();
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
+}
+
+// -----------------------------------------------------------------------
+// Overlay N TProfile curves (mean of y in each x bin) on one canvas, drawn as points with
+// error bars. Used for the background <MET> vs jet-multiplicity plots, where every profile is
+// filled with the rate weights so the mean is the weighted mean.
+void drawProfileOverlay(const std::vector<TProfile*>& profs,
+                        const std::vector<std::string>& labels,
+                        const std::string& xLabel, const std::string& yLabel,
+                        const std::string& outputPath, const std::string& legHeader = "",
+                        double legX1 = 0.20, double legY1 = 0.60) {
+    if (profs.empty()) return;
+    int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet,
+                    kP10Orange, kP10Cyan, kP10Brown, kGray+2, kP10Yellow };
+    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45 };
+    const int nStyles = 10;
+
+    TCanvas c("c", "", 700, 600);
+    gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
+
+    int nLegRows = (int)profs.size() + (!legHeader.empty() ? 1 : 0);
+    TLegend leg(legX1, legY1, legX1 + 0.36, legY1 + 0.05 * nLegRows);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
+    if (!legHeader.empty())
+        leg.AddEntry((TObject*)nullptr, legHeader.c_str(), "");
+
+    // The frame belongs to the first profile drawn, so a later curve that runs higher would be
+    // clipped: take the maximum over all of them (mean + error) before drawing anything.
+    double ymax = 0.0;
+    for (auto* p : profs) {
+        if (!p) continue;
+        for (int ib = 1; ib <= p->GetNbinsX(); ++ib)
+            if (p->GetBinEntries(ib) > 0)
+                ymax = std::max(ymax, p->GetBinContent(ib) + p->GetBinError(ib));
+    }
+    if (ymax <= 0.0) ymax = 1.0;
+
+    bool first = true;
+    for (unsigned int i = 0; i < profs.size(); i++) {
+        if (!profs[i]) continue;
+        profs[i]->SetLineColor(mcols[i % nStyles]);
+        profs[i]->SetMarkerColor(mcols[i % nStyles]);
+        profs[i]->SetMarkerStyle(mkstyles[i % nStyles]);
+        profs[i]->SetMarkerSize(0.9);
+        profs[i]->SetLineWidth(2);
+        profs[i]->SetTitle("");
+        profs[i]->GetXaxis()->SetTitle(xLabel.c_str());
+        profs[i]->GetYaxis()->SetTitle(yLabel.c_str());
+        profs[i]->SetMinimum(0.0);
+        profs[i]->SetMaximum(ymax * 1.35);
+        profs[i]->Draw(first ? "E1" : "E1 SAME");
+        first = false;
+        leg.AddEntry(profs[i], labels[i].c_str(), "lp");
+    }
     leg.Draw();
     c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
@@ -734,8 +918,12 @@ TGraph* extractFrontier2D(const RateEff2DOut& out2D) {
 // configs), so we run this once per analyze_files call.
 void plotSKThresholds(const std::string& sigPath, const std::string& backPath,
                       const std::string& outputDir) {
-    TFile* sigF  = TFile::Open(sigPath.c_str(),  "READ");
-    TFile* backF = TFile::Open(backPath.c_str(), "READ");
+    if (printIOProgress)
+        std::cout << "plotSKThresholds: opening signal " << sigPath << "\n" << std::flush;
+    ChainSource* sigF  = ChainSource::Open(sigPath.c_str());
+    if (printIOProgress)
+        std::cout << "plotSKThresholds: opening background " << backPath << "\n" << std::flush;
+    ChainSource* backF = ChainSource::Open(backPath.c_str());
     if (!sigF || sigF->IsZombie() || !backF || backF->IsZombie()) {
         std::cerr << "plotSKThresholds: cannot open input ntuples\n";
         return;
@@ -784,8 +972,14 @@ void plotSKThresholds(const std::string& sigPath, const std::string& backPath,
     };
 
     Long64_t nSig = std::min(skSig->GetEntries(), etaSig->GetEntries());
-    std::cout << "plotSKThresholds: signal events = " << nSig << "\n";
+    std::cout << "plotSKThresholds: signal events = " << nSig << "\n" << std::flush;
+    TStopwatch swSK; swSK.Start();
     for (Long64_t i = 0; i < nSig; ++i) {
+        if (printIOProgress && i > 0 && i % progressEvery == 0) {
+            std::cout << "  plotSKThresholds: signal " << i << "/" << nSig
+                      << " (" << swSK.RealTime() << " s)\n" << std::flush;
+            swSK.Continue();   // RealTime() stops the watch
+        }
         skSig->GetEntry(i);
         etaSig->GetEntry(i);
         double tSK    = minPositive(skSigEt);
@@ -795,8 +989,14 @@ void plotSKThresholds(const std::string& sigPath, const std::string& backPath,
     }
 
     Long64_t nBack = std::min({skBack->GetEntries(), etaBack->GetEntries(), evtBack->GetEntries()});
-    std::cout << "plotSKThresholds: background events = " << nBack << "\n";
+    std::cout << "plotSKThresholds: background events = " << nBack << "\n" << std::flush;
+    swSK.Start();
     for (Long64_t i = 0; i < nBack; ++i) {
+        if (printIOProgress && i > 0 && i % progressEvery == 0) {
+            std::cout << "  plotSKThresholds: background " << i << "/" << nBack
+                      << " (" << swSK.RealTime() << " s)\n" << std::flush;
+            swSK.Continue();
+        }
         evtBack->GetEntry(i);
         if (applyHSTPFilter && !passHSTPValuesBack) continue;
         double w = eventWeightsValuesBack->at(0);
@@ -866,6 +1066,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
     std::vector<TH1F*> sig_h_metTruthNonInt_vec, back_h_metTruthNonInt_vec;
 
     // Weighted background histograms for rate vs threshold
+    std::vector<TH1F*> back_hw_SumJetET_vec;   // H_T
     std::vector<TH1F*> back_hw_TotalMET_vec;
     std::vector<TH1F*> back_hw_gMET_vec;
     std::vector<TH1F*> back_hw_gMET_NC_vec;
@@ -927,14 +1128,27 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
     std::vector<double> thr_gMET_NCAOD_60kHz_vec;
     std::vector<double> thr_gMET_RmsAOD_60kHz_vec;
 
+    // Z->mumu dimuon-p_{T} turn-ons, [MET type][rate point], one entry per Z->mumu input file.
+    // Only Z->mumu files contribute (see isZmumuSample below), so these run parallel to
+    // zmumuLabels rather than to labels — a run mixing Z->mumu with other signal processes
+    // still gets a consistent multi-file overlay.
+    std::vector<TH1F*>  effMu_vec[nMETTypes][nMuRates];
+    std::vector<double> thrMu_vec[nMETTypes][nMuRates];
+    std::vector<std::string> zmumuLabels;
+    std::vector<TH1F*>  sig_h_dimuonPt_coarse_vec;   // unnormalized clone for the turn-on overlay
+
+    // Background <MET> vs jet multiplicity, one profile per MET type per file.
+    std::vector<TProfile*> back_prof_METvsNJets_vec[nMETTypes];
+    std::vector<std::string> nJetProfLabels;
+
     bool hasSumJetET   = false;
     bool hasSumTowerET = false;
 
     for (unsigned int fileIt = 0; fileIt < signalFiles.size(); fileIt++) {
         std::cout << "Processing file " << fileIt << ": " << labels[fileIt] << "\n";
         // HERNTupler input ntuples: provide all upstream trees (gFEX MET, truth, gepCellsTowers jets, etc.)
-        TFile* sigF  = TFile::Open(signalFiles[fileIt].first.c_str(),     "READ");
-        TFile* backF = TFile::Open(backgroundFiles[fileIt].first.c_str(), "READ");
+        ChainSource* sigF  = ChainSource::Open(signalFiles[fileIt].first.c_str());
+        ChainSource* backF = ChainSource::Open(backgroundFiles[fileIt].first.c_str());
         // MET emulator outputs: provide metTree (and emulEventInfoTree for ordering validation)
         TFile* sigEmu  = TFile::Open(signalFiles[fileIt].second.c_str(),     "READ");
         TFile* backEmu = TFile::Open(backgroundFiles[fileIt].second.c_str(), "READ");
@@ -955,10 +1169,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TTree* jFexMETTreeBack         = (TTree*)backF->Get("jFexMETTree");
         TTree* metTruthTreeSig         = (TTree*)sigF->Get("metTruthTree");
         TTree* metTruthTreeBack        = (TTree*)backF->Get("metTruthTree");
-        TTree* coreEMTopoTreeSig       = (TTree*)sigF->Get("metCoreAntiKt4EMTopoTree");
-        TTree* coreEMTopoTreeBack      = (TTree*)backF->Get("metCoreAntiKt4EMTopoTree");
-        TTree* coreEMPFlowTreeSig      = (TTree*)sigF->Get("metCoreAntiKt4EMPFlowTree");
-        TTree* coreEMPFlowTreeBack     = (TTree*)backF->Get("metCoreAntiKt4EMPFlowTree");
+        // TTree* coreEMTopoTreeSig       = (TTree*)sigF->Get("metCoreAntiKt4EMTopoTree");
+        // TTree* coreEMTopoTreeBack      = (TTree*)backF->Get("metCoreAntiKt4EMTopoTree");
+        // TTree* coreEMPFlowTreeSig      = (TTree*)sigF->Get("metCoreAntiKt4EMPFlowTree");
+        // TTree* coreEMPFlowTreeBack     = (TTree*)backF->Get("metCoreAntiKt4EMPFlowTree");
         TTree* eventInfoTreeBack       = (TTree*)backF->Get("eventInfoTree");
 
         // --- Resimulated gFEX MET trees (only present in resim ntuples) ---
@@ -1003,12 +1217,34 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TTree* truthAntiKt4WZDressedJetsTreeBack = (TTree*)backF->Get("truthAntiKt4TruthDressedWZJets");
         bool hasTruthAntiKt4WZDressed = (truthAntiKt4WZDressedJetsTreeSig  != nullptr) &&
                                         (truthAntiKt4WZDressedJetsTreeBack != nullptr);
+        // Leading truth jet of each event, entry 0 of its own collection (HERNTupler writes it
+        // separately). Feeds the truth-jet binomial correction below; if the tree is missing the
+        // correction falls back to the maximum of the full Et vector.
+        TTree* leadingTruthAntiKt4WZDressedJetsTreeBack = (TTree*)backF->Get("leadingTruthAntiKt4TruthDressedWZJets");
 
         // --- In-time pileup truth jet tree (optional) ---
         TTree* inTimeAntiKt4TruthJetsTreeSig  = (TTree*)sigF->Get("inTimeAntiKt4TruthJetsTree");
         TTree* inTimeAntiKt4TruthJetsTreeBack = (TTree*)backF->Get("inTimeAntiKt4TruthJetsTree");
         bool hasInTimeAntiKt4TruthJets = (inTimeAntiKt4TruthJetsTreeSig  != nullptr) &&
                                          (inTimeAntiKt4TruthJetsTreeBack != nullptr);
+
+        // --- Z->mumu dimuon system (signal eventInfoTree, optional) ---
+        // HERNTupler builds the dimuon system from the two leading truth muons and only
+        // retrieves TruthMuons for the Zmumu sample; every other process leaves the branches at
+        // their defaults (dimuonPt = -1). So a dimuon-p_{T} turn-on is only meaningful on Zmumu,
+        // and both conditions are required here: the sample has to BE Zmumu and the ntuple has
+        // to carry the branch. Without the name check a non-Zmumu ntuple would happily produce a
+        // plot built entirely from default values.
+        TTree* eventInfoTreeSig = (TTree*)sigF->Get("eventInfoTree");
+        const bool isZmumuName = (signalFiles[fileIt].first.find("Zmumu")  != std::string::npos) ||
+                                 (signalFiles[fileIt].second.find("Zmumu") != std::string::npos);
+        const bool hasDimuonBranch = (eventInfoTreeSig != nullptr) &&
+                                     (eventInfoTreeSig->GetBranch("dimuonPt") != nullptr);
+        const bool isZmumuSample = isZmumuName && hasDimuonBranch;
+        if (isZmumuName && !hasDimuonBranch)
+            std::cout << "  Z->mumu sample but no dimuonPt branch — dimuon p_{T} turn-ons skipped\n";
+        else if (isZmumuSample)
+            std::cout << "  Z->mumu sample — dimuon p_{T} turn-ons enabled\n";
 
         // --- Branch variables: emulated MET ---
         double sig_TotalMET,  sig_TotalMETX,  sig_TotalMETY;
@@ -1146,24 +1382,24 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         }
 
         // --- Branch variables: core MET EMTopo ---
-        double sig_coreEMTopo_SoftClus_MET   = 0.0, sig_coreEMTopo_PVSoftTrk_MET  = 0.0, sig_coreEMTopo_SoftClusEM_MET = 0.0;
-        double back_coreEMTopo_SoftClus_MET  = 0.0, back_coreEMTopo_PVSoftTrk_MET = 0.0, back_coreEMTopo_SoftClusEM_MET = 0.0;
+        // double sig_coreEMTopo_SoftClus_MET   = 0.0, sig_coreEMTopo_PVSoftTrk_MET  = 0.0, sig_coreEMTopo_SoftClusEM_MET = 0.0;
+        // double back_coreEMTopo_SoftClus_MET  = 0.0, back_coreEMTopo_PVSoftTrk_MET = 0.0, back_coreEMTopo_SoftClusEM_MET = 0.0;
 
-        coreEMTopoTreeSig->SetBranchAddress("SoftClus_MET",   &sig_coreEMTopo_SoftClus_MET);
-        coreEMTopoTreeSig->SetBranchAddress("PVSoftTrk_MET",  &sig_coreEMTopo_PVSoftTrk_MET);
-        coreEMTopoTreeSig->SetBranchAddress("SoftClusEM_MET", &sig_coreEMTopo_SoftClusEM_MET);
-        coreEMTopoTreeBack->SetBranchAddress("SoftClus_MET",   &back_coreEMTopo_SoftClus_MET);
-        coreEMTopoTreeBack->SetBranchAddress("PVSoftTrk_MET",  &back_coreEMTopo_PVSoftTrk_MET);
-        coreEMTopoTreeBack->SetBranchAddress("SoftClusEM_MET", &back_coreEMTopo_SoftClusEM_MET);
+        // coreEMTopoTreeSig->SetBranchAddress("SoftClus_MET",   &sig_coreEMTopo_SoftClus_MET);
+        // coreEMTopoTreeSig->SetBranchAddress("PVSoftTrk_MET",  &sig_coreEMTopo_PVSoftTrk_MET);
+        // coreEMTopoTreeSig->SetBranchAddress("SoftClusEM_MET", &sig_coreEMTopo_SoftClusEM_MET);
+        // coreEMTopoTreeBack->SetBranchAddress("SoftClus_MET",   &back_coreEMTopo_SoftClus_MET);
+        // coreEMTopoTreeBack->SetBranchAddress("PVSoftTrk_MET",  &back_coreEMTopo_PVSoftTrk_MET);
+        // coreEMTopoTreeBack->SetBranchAddress("SoftClusEM_MET", &back_coreEMTopo_SoftClusEM_MET);
 
         // --- Branch variables: core MET EMPFlow ---
-        double sig_coreEMPFlow_SoftClus_MET  = 0.0, sig_coreEMPFlow_PVSoftTrk_MET  = 0.0;
-        double back_coreEMPFlow_SoftClus_MET = 0.0, back_coreEMPFlow_PVSoftTrk_MET = 0.0;
+        // double sig_coreEMPFlow_SoftClus_MET  = 0.0, sig_coreEMPFlow_PVSoftTrk_MET  = 0.0;
+        // double back_coreEMPFlow_SoftClus_MET = 0.0, back_coreEMPFlow_PVSoftTrk_MET = 0.0;
 
-        coreEMPFlowTreeSig->SetBranchAddress("SoftClus_MET",  &sig_coreEMPFlow_SoftClus_MET);
-        coreEMPFlowTreeSig->SetBranchAddress("PVSoftTrk_MET", &sig_coreEMPFlow_PVSoftTrk_MET);
-        coreEMPFlowTreeBack->SetBranchAddress("SoftClus_MET",  &back_coreEMPFlow_SoftClus_MET);
-        coreEMPFlowTreeBack->SetBranchAddress("PVSoftTrk_MET", &back_coreEMPFlow_PVSoftTrk_MET);
+        // coreEMPFlowTreeSig->SetBranchAddress("SoftClus_MET",  &sig_coreEMPFlow_SoftClus_MET);
+        // coreEMPFlowTreeSig->SetBranchAddress("PVSoftTrk_MET", &sig_coreEMPFlow_PVSoftTrk_MET);
+        // coreEMPFlowTreeBack->SetBranchAddress("SoftClus_MET",  &back_coreEMPFlow_SoftClus_MET);
+        // coreEMPFlowTreeBack->SetBranchAddress("PVSoftTrk_MET", &back_coreEMPFlow_PVSoftTrk_MET);
 
         // --- Background event weights + JZ slice index ---
         std::vector<double>* eventWeightsValuesBack = nullptr;
@@ -1172,6 +1408,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         eventInfoTreeBack->SetBranchAddress("eventWeights",  &eventWeightsValuesBack);
         eventInfoTreeBack->SetBranchAddress("sampleJZSlice", &sampleJZSliceBack);
         eventInfoTreeBack->SetBranchAddress("passHSTP",      &passHSTPValuesBack);
+        // Reconstructed primary vertices with >= 2 tracks, written by HERNTupler. Guarded so
+        // older ntuples without the branch still run.
+        int nPrimaryVerticesBack = -1;
+        const bool hasNPrimaryVertices = (eventInfoTreeBack->GetBranch("nPrimaryVertices") != nullptr);
+        if (hasNPrimaryVertices)
+            eventInfoTreeBack->SetBranchAddress("nPrimaryVertices", &nPrimaryVerticesBack);
+        else
+            std::cout << "  nPrimaryVertices branch not found — primary-vertex plot skipped\n";
 
         // --- Branch variables: WTA-cone GEP jets (optional) ---
         std::vector<double>* gepWTAConeCellsTowersJetsEtValuesSig          = nullptr;
@@ -1196,9 +1440,12 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // --- Branch variables: truth AntiKt4 WZ-dressed jets (optional) ---
         std::vector<double>* truthAntiKt4WZDressedJetsEtValuesSig  = nullptr;
         std::vector<double>* truthAntiKt4WZDressedJetsEtValuesBack = nullptr;
+        std::vector<double>* leadingTruthAntiKt4WZDressedJetsEtValuesBack = nullptr;
         if (hasTruthAntiKt4WZDressed) {
             truthAntiKt4WZDressedJetsTreeSig->SetBranchAddress("Et",  &truthAntiKt4WZDressedJetsEtValuesSig);
             truthAntiKt4WZDressedJetsTreeBack->SetBranchAddress("Et", &truthAntiKt4WZDressedJetsEtValuesBack);
+            if (leadingTruthAntiKt4WZDressedJetsTreeBack)
+                leadingTruthAntiKt4WZDressedJetsTreeBack->SetBranchAddress("Et", &leadingTruthAntiKt4WZDressedJetsEtValuesBack);
         }
 
         // --- Branch variables: in-time pileup truth jets (optional) ---
@@ -1207,6 +1454,15 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         if (hasInTimeAntiKt4TruthJets) {
             inTimeAntiKt4TruthJetsTreeSig->SetBranchAddress("Et",  &inTimeAntiKt4TruthJetsEtValuesSig);
             inTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Et", &inTimeAntiKt4TruthJetsEtValuesBack);
+        }
+
+        // --- Branch variables: Z->mumu dimuon system (signal only, Zmumu only) ---
+        double sig_dimuonPt = -1.0, sig_dimuonMass = -1.0;
+        int    sig_nTruthMuons = 0;
+        if (isZmumuSample) {
+            eventInfoTreeSig->SetBranchAddress("dimuonPt",    &sig_dimuonPt);
+            eventInfoTreeSig->SetBranchAddress("dimuonMass",  &sig_dimuonMass);
+            eventInfoTreeSig->SetBranchAddress("nTruthMuons", &sig_nTruthMuons);
         }
 
         // --- Histograms ---
@@ -1272,16 +1528,16 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* back_h_metTruthIntOut = new TH1F(("back_h_TruthIntOut_"+tag).c_str(), "", 25, 0, 100);
 
         // Core MET term histograms
-        TH1F* sig_h_coreEMTopo_SoftClus_MET    = new TH1F(("sig_coreEMTopo_SoftClus_"  +tag).c_str(), "", 70, 0, 350);
-        TH1F* back_h_coreEMTopo_SoftClus_MET   = new TH1F(("back_coreEMTopo_SoftClus_" +tag).c_str(), "", 70, 0, 350);
-        TH1F* sig_h_coreEMTopo_PVSoftTrk_MET   = new TH1F(("sig_coreEMTopo_PVSoftTrk_" +tag).c_str(), "", 20, 0, 100);
-        TH1F* back_h_coreEMTopo_PVSoftTrk_MET  = new TH1F(("back_coreEMTopo_PVSoftTrk_"+tag).c_str(), "", 20, 0, 100);
-        TH1F* sig_h_coreEMTopo_SoftClusEM_MET  = new TH1F(("sig_coreEMTopo_SoftClusEM_" +tag).c_str(), "", 40, 0, 200);
-        TH1F* back_h_coreEMTopo_SoftClusEM_MET = new TH1F(("back_coreEMTopo_SoftClusEM_"+tag).c_str(), "", 40, 0, 200);
-        TH1F* sig_h_coreEMPFlow_SoftClus_MET   = new TH1F(("sig_coreEMPFlow_SoftClus_"  +tag).c_str(), "", 20, 0, 100);
-        TH1F* back_h_coreEMPFlow_SoftClus_MET  = new TH1F(("back_coreEMPFlow_SoftClus_" +tag).c_str(), "", 20, 0, 100);
-        TH1F* sig_h_coreEMPFlow_PVSoftTrk_MET  = new TH1F(("sig_coreEMPFlow_PVSoftTrk_" +tag).c_str(), "", 10, 0, 50);
-        TH1F* back_h_coreEMPFlow_PVSoftTrk_MET = new TH1F(("back_coreEMPFlow_PVSoftTrk_"+tag).c_str(), "", 10, 0, 50);
+        // TH1F* sig_h_coreEMTopo_SoftClus_MET    = new TH1F(("sig_coreEMTopo_SoftClus_"  +tag).c_str(), "", 70, 0, 350);
+        // TH1F* back_h_coreEMTopo_SoftClus_MET   = new TH1F(("back_coreEMTopo_SoftClus_" +tag).c_str(), "", 70, 0, 350);
+        // TH1F* sig_h_coreEMTopo_PVSoftTrk_MET   = new TH1F(("sig_coreEMTopo_PVSoftTrk_" +tag).c_str(), "", 20, 0, 100);
+        // TH1F* back_h_coreEMTopo_PVSoftTrk_MET  = new TH1F(("back_coreEMTopo_PVSoftTrk_"+tag).c_str(), "", 20, 0, 100);
+        // TH1F* sig_h_coreEMTopo_SoftClusEM_MET  = new TH1F(("sig_coreEMTopo_SoftClusEM_" +tag).c_str(), "", 40, 0, 200);
+        // TH1F* back_h_coreEMTopo_SoftClusEM_MET = new TH1F(("back_coreEMTopo_SoftClusEM_"+tag).c_str(), "", 40, 0, 200);
+        // TH1F* sig_h_coreEMPFlow_SoftClus_MET   = new TH1F(("sig_coreEMPFlow_SoftClus_"  +tag).c_str(), "", 20, 0, 100);
+        // TH1F* back_h_coreEMPFlow_SoftClus_MET  = new TH1F(("back_coreEMPFlow_SoftClus_" +tag).c_str(), "", 20, 0, 100);
+        // TH1F* sig_h_coreEMPFlow_PVSoftTrk_MET  = new TH1F(("sig_coreEMPFlow_PVSoftTrk_" +tag).c_str(), "", 10, 0, 50);
+        // TH1F* back_h_coreEMPFlow_PVSoftTrk_MET = new TH1F(("back_coreEMPFlow_PVSoftTrk_"+tag).c_str(), "", 10, 0, 50);
 
         // Weighted background histograms for rate plots
         TH1F* back_hw_TotalMET = new TH1F(("back_hw_TotalMET_"+tag).c_str(), "", nMETBins, metBinEdges);
@@ -1292,6 +1548,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_hw_jMET->Sumw2();
         TH1F* back_hw_JetMET   = new TH1F(("back_hw_JetMET_"  +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_hw_TowerMET = new TH1F(("back_hw_TowerMET_"+tag).c_str(), "", nMETBins, metBinEdges);
+        // H_T = sum of jet E_T, for the H_T rate curve. Its own weighted histogram rather than
+        // back_h_SumJetET, which the shape overlays normalize to unit area in place.
+        TH1F* back_hw_SumJetET = new TH1F(("back_hw_SumJetET_"+tag).c_str(), "", 52, 0, 1040);
+        back_hw_SumJetET->Sumw2();
 
         // Resimulated gFEX MET distribution histograms and weighted background histograms
         TH1F* sig_h_gMET_JwoJAOD  = new TH1F(("sig_h_gMET_JwoJAOD_" +tag).c_str(), "", nMETBins, metBinEdges);
@@ -1304,6 +1564,45 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* back_hw_gMET_NCAOD   = new TH1F(("back_hw_gMET_NCAOD_"  +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_hw_gMET_RmsAOD  = new TH1F(("back_hw_gMET_RmsAOD_" +tag).c_str(), "", nMETBins, metBinEdges);
         back_hw_gMET_JwoJAOD->Sumw2(); back_hw_gMET_NCAOD->Sumw2(); back_hw_gMET_RmsAOD->Sumw2();
+
+        // Binomial per-crossing counterparts of the weighted background histograms above: same
+        // events, same fills, but each weight multiplied by the truth-jet binomial correction
+        // c(E_T^lead truth jet) built before the loop. Their cumulative is a per-crossing rate
+        // rather than a collision rate, and they are deliberately left out of the rate
+        // normalization further down (see the note there).
+        TH1F* back_hwBin_TotalMET = new TH1F(("back_hwBin_TotalMET_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_gMET     = new TH1F(("back_hwBin_gMET_"    +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_gMET_NC  = new TH1F(("back_hwBin_gMET_NC_" +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_gMET_Rms = new TH1F(("back_hwBin_gMET_Rms_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_jMET     = new TH1F(("back_hwBin_jMET_"    +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_JetMET   = new TH1F(("back_hwBin_JetMET_"  +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_TowerMET = new TH1F(("back_hwBin_TowerMET_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_gMET_JwoJAOD = new TH1F(("back_hwBin_gMET_JwoJAOD_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_gMET_NCAOD   = new TH1F(("back_hwBin_gMET_NCAOD_"  +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_gMET_RmsAOD  = new TH1F(("back_hwBin_gMET_RmsAOD_" +tag).c_str(), "", nMETBins, metBinEdges);
+        back_hwBin_TotalMET->Sumw2(); back_hwBin_gMET->Sumw2();
+        back_hwBin_gMET_NC->Sumw2();  back_hwBin_gMET_Rms->Sumw2();
+        back_hwBin_jMET->Sumw2();     back_hwBin_JetMET->Sumw2();
+        back_hwBin_TowerMET->Sumw2();
+        back_hwBin_gMET_JwoJAOD->Sumw2(); back_hwBin_gMET_NCAOD->Sumw2(); back_hwBin_gMET_RmsAOD->Sumw2();
+
+        // Weighted background histograms, JZ0 only with no HSTP requirement (rate comparison
+        // against the all-JZ + HSTP-filtered curves). Filled before the HSTP filter below.
+        TH1F* back_hw_TotalMET_JZ0 = new TH1F(("back_hw_TotalMET_JZ0_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_JZ0     = new TH1F(("back_hw_gMET_JZ0_"    +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_NC_JZ0  = new TH1F(("back_hw_gMET_NC_JZ0_" +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_Rms_JZ0 = new TH1F(("back_hw_gMET_Rms_JZ0_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_jMET_JZ0     = new TH1F(("back_hw_jMET_JZ0_"    +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_JetMET_JZ0   = new TH1F(("back_hw_JetMET_JZ0_"  +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_TowerMET_JZ0 = new TH1F(("back_hw_TowerMET_JZ0_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_JwoJAOD_JZ0 = new TH1F(("back_hw_gMET_JwoJAOD_JZ0_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_NCAOD_JZ0   = new TH1F(("back_hw_gMET_NCAOD_JZ0_"  +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_gMET_RmsAOD_JZ0  = new TH1F(("back_hw_gMET_RmsAOD_JZ0_" +tag).c_str(), "", nMETBins, metBinEdges);
+        back_hw_TotalMET_JZ0->Sumw2(); back_hw_gMET_JZ0->Sumw2();
+        back_hw_gMET_NC_JZ0->Sumw2();  back_hw_gMET_Rms_JZ0->Sumw2();
+        back_hw_jMET_JZ0->Sumw2();     back_hw_JetMET_JZ0->Sumw2();
+        back_hw_TowerMET_JZ0->Sumw2();
+        back_hw_gMET_JwoJAOD_JZ0->Sumw2(); back_hw_gMET_NCAOD_JZ0->Sumw2(); back_hw_gMET_RmsAOD_JZ0->Sumw2();
 
         // 2D histograms for combined gFEX + GEP selection (x = gFEX MET, y = GEP MET), 10 GeV bins 0-600
         const int n2D = 60; const double lo2D = 0.0, hi2D = 600.0;
@@ -1516,6 +1815,46 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* h_turnOn_num_combo_Rms_Tower_80kHz  = new TH1F(("h_turnOn_num_combo_Rms_Tower_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_combo_Rms_Tower_60kHz  = new TH1F(("h_turnOn_num_combo_Rms_Tower_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
 
+        // Z->mumu turn-on histograms vs dimuon p_{T}: one denominator plus a numerator for every
+        // (MET type, rate point). The dimuon system is the well-measured proxy for the invisible
+        // momentum here — muons are near-invisible to the calorimeter, so a Z->mumu event looks
+        // like an event with MET = p_{T}^{mumu} to every MET algorithm in the table. The binning
+        // is the same as the truth-MET turn-ons so the two can be read side by side.
+        TH1F* h_turnOnMu_denom = new TH1F(("h_turnOnMu_denom_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOnMu_num[nMETTypes][nMuRates];
+        for (int iA = 0; iA < nMETTypes; ++iA)
+            for (int iR = 0; iR < nMuRates; ++iR)
+                h_turnOnMu_num[iA][iR] = new TH1F(
+                    (std::string("h_turnOnMu_num_") + metTypeShort[iA] + "_" + muRateNames[iR] + "_" + tag).c_str(),
+                    "", nTurnOnBins, turnOnBinEdges);
+        // Coarse dimuon p_{T} spectrum, drawn as the shaded distribution under the turn-on curves
+        // (same role sig_h_metTruthNonInt_coarse plays for the truth-MET turn-ons).
+        TH1F* sig_h_dimuonPt_coarse = new TH1F(("sig_h_dimuonPt_coarse_"+tag).c_str(), "", 30, 0, 600);
+        TH1F* sig_h_dimuonPt        = new TH1F(("sig_h_dimuonPt_"       +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* sig_h_dimuonMass      = new TH1F(("sig_h_dimuonMass_"     +tag).c_str(), "", 60, 60, 120);
+
+        // Background <MET> vs jet multiplicity, one profile per MET type. Weighted with the rate
+        // weights, so each point is the rate-weighted mean MET of the crossings with that many
+        // jets — the same population the rate curves are built from.
+        TProfile* back_prof_METvsNJets[nMETTypes];
+        for (int iA = 0; iA < nMETTypes; ++iA) {
+            back_prof_METvsNJets[iA] = new TProfile(
+                (std::string("back_prof_METvsNJets_") + metTypeShort[iA] + "_" + tag).c_str(),
+                "", nNJetBins, 0.0, nJetAxisMax);
+            back_prof_METvsNJets[iA]->SetDirectory(0);
+        }
+
+        // Reconstructed primary vertices per background event. Filled both ways: raw counts
+        // give the sample's vertex multiplicity, the weighted version gives the vertex
+        // multiplicity of the background rate (dominated by whichever slices carry the weight).
+        TH1F* back_h_nPrimaryVertices    = new TH1F(("back_h_nPrimaryVertices_"   +tag).c_str(),
+                                                    "Reconstructed primary vertices;N_{primary vertices};Events",
+                                                    35, 20, 160);
+        TH1F* back_hw_nPrimaryVertices   = new TH1F(("back_hw_nPrimaryVertices_"  +tag).c_str(),
+                                                    "Reconstructed primary vertices;N_{primary vertices};Weighted events",
+                                                    35, 20, 160);
+        back_hw_nPrimaryVertices->Sumw2();
+
         // Per-JZ-slice MET histograms for background (gFEX MET, GEP Jet MET, GEP Tower MET)
         TH1F* back_h_gMET_jz[nJZSlices_];
         TH1F* back_h_gMET_NC_jz[nJZSlices_];
@@ -1619,8 +1958,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             // metTruthNonIntX/Y already points in the standard MET direction (sum of NonInt particle
             // momenta = direction of neutrinos). The DAOD note's constraint is consistent with
             // momentum conservation, with the Int/IntOut/IntMuon terms (not NonInt) carrying the sign flip.
-            coreEMTopoTreeSig->GetEntry(iEvt);
-            coreEMPFlowTreeSig->GetEntry(iEvt);
+            // coreEMTopoTreeSig->GetEntry(iEvt);
+            // coreEMPFlowTreeSig->GetEntry(iEvt);
 
             sig_h_TotalMET->Fill(clampVal(sig_h_TotalMET, sig_TotalMET));
             sig_h_TotalMETX->Fill(sig_TotalMETX);
@@ -1630,7 +1969,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             sig_h_SumET->Fill(sig_SumET);
             if (hasSumJetET)   sig_h_SumJetET->Fill(sig_SumJetET);
             if (hasSumTowerET) sig_h_SumTowerET->Fill(sig_SumTowerET);
-            std::cout << "sig_gMET: " << sig_gMET << "\n";
+            //std::cout << "sig_gMET: " << sig_gMET << "\n";
             sig_h_gMET->Fill(clampVal(sig_h_gMET, sig_gMET));
             sig_h_gMET_NC->Fill(clampVal(sig_h_gMET_NC, sig_gMET_NC));
             sig_h_gMET_Rms->Fill(clampVal(sig_h_gMET_Rms, sig_gMET_Rms));
@@ -1663,11 +2002,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             sig_h_metTruthNonInt_coarse->Fill(std::min(sig_metTruthNonInt, 599.9));
             sig_h_metTruthInt->Fill(clampVal(sig_h_metTruthInt, sig_metTruthInt));
             sig_h_metTruthIntOut->Fill(clampVal(sig_h_metTruthIntOut, sig_metTruthIntOut));
-            sig_h_coreEMTopo_SoftClus_MET->Fill(clampVal(sig_h_coreEMTopo_SoftClus_MET, sig_coreEMTopo_SoftClus_MET));
-            sig_h_coreEMTopo_PVSoftTrk_MET->Fill(clampVal(sig_h_coreEMTopo_PVSoftTrk_MET, sig_coreEMTopo_PVSoftTrk_MET));
-            sig_h_coreEMTopo_SoftClusEM_MET->Fill(clampVal(sig_h_coreEMTopo_SoftClusEM_MET, sig_coreEMTopo_SoftClusEM_MET));
-            sig_h_coreEMPFlow_SoftClus_MET->Fill(clampVal(sig_h_coreEMPFlow_SoftClus_MET, sig_coreEMPFlow_SoftClus_MET));
-            sig_h_coreEMPFlow_PVSoftTrk_MET->Fill(clampVal(sig_h_coreEMPFlow_PVSoftTrk_MET, sig_coreEMPFlow_PVSoftTrk_MET));
+            // sig_h_coreEMTopo_SoftClus_MET->Fill(clampVal(sig_h_coreEMTopo_SoftClus_MET, sig_coreEMTopo_SoftClus_MET));
+            // sig_h_coreEMTopo_PVSoftTrk_MET->Fill(clampVal(sig_h_coreEMTopo_PVSoftTrk_MET, sig_coreEMTopo_PVSoftTrk_MET));
+            // sig_h_coreEMTopo_SoftClusEM_MET->Fill(clampVal(sig_h_coreEMTopo_SoftClusEM_MET, sig_coreEMTopo_SoftClusEM_MET));
+            // sig_h_coreEMPFlow_SoftClus_MET->Fill(clampVal(sig_h_coreEMPFlow_SoftClus_MET, sig_coreEMPFlow_SoftClus_MET));
+            // sig_h_coreEMPFlow_PVSoftTrk_MET->Fill(clampVal(sig_h_coreEMPFlow_PVSoftTrk_MET, sig_coreEMPFlow_PVSoftTrk_MET));
             h_turnOn_denom->Fill(clampVal(h_turnOn_denom, sig_metTruthNonInt));
 
             // Calibration / resolution fills (guard against truth = 0 to avoid division by zero)
@@ -1707,20 +2046,189 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             }
         }
 
+        // --- Per-JZ-slice rate bookkeeping (printed after the background loop) ---
+        // Diagnoses where the background rate normalization ends up: how much weighted rate
+        // each slice carries, how much of it the HSTP filter removes, and how large the
+        // single-event weights are (a JZ0 event can be worth O(kHz) on its own).
+        const bool printJZRateDiagnostics = true;
+        long   dbgNEvents_jz[nJZSlices_]     = {0};
+        long   dbgNEventsHSTP_jz[nJZSlices_] = {0};
+        double dbgSumW_jz[nJZSlices_]        = {0.0};
+        double dbgSumWHSTP_jz[nJZSlices_]    = {0.0};
+        double dbgMaxW_jz[nJZSlices_]        = {0.0};
+        long   dbgNoSliceEvents = 0;   // events whose sampleJZSlice is outside [0, nJZSlices_)
+        long   dbgNoWeightEvents = 0;  // events with an empty eventWeights vector (see below)
+
         // --- Background event loop ---
         unsigned int nBack = metTreeBack->GetEntries();
         std::cout << "  Background events: " << nBack << "\n";
+
+        // --- Truth-jet binomial correction, built before the main loop ---
+        // The binomial pileup factorization splits "the crossing fired" into mu independent
+        // collisions. That is only meaningful for an object belonging to a single collision — a
+        // jet — not for MET, which is a crossing-level vector sum. So the correction is derived
+        // in truth-jet space, where it is valid, and carried over to the MET spectra as a
+        // per-event weight (largeRJetAnalysisAndRates.C does the jet-space part of this).
+        //
+        //   R_coll(x)  cumulative weighted rate of the leading AntiKt4TruthDressedWZ jet above x,
+        //              all JZ slices, before the HSTP filter. HERNTupler runs in luminosity mode
+        //              (useRateNormalization = false), so the weights already carry the physical
+        //              collision rate sigma x L_inst and no RateModeToCollisionRateScale applies.
+        //   p(x)       = R_coll(x) / (f_BX x mu), the per-collision pass probability.
+        //   R_BX(x)    = f_BX (1 - (1-p)^mu), the per-crossing rate — MakeBinomialCrossingRateHist.
+        //   c(x)       = R_BX(x) / R_coll(x), in (0, 1] and rising to 1 where p << 1.
+        //
+        // Each background event is then filled into back_hwBin_* with weight w x c(x_event),
+        // x_event being that event's leading truth jet E_T. This treats an event as if it sat at
+        // a threshold equal to its own leading truth jet E_T: events with little jet activity —
+        // which dominate the low-MET, high-rate end where crossings saturate — are suppressed
+        // most, while rare high-E_T events keep c ~ 1. That is a re-weighting of the event
+        // population by saturation, and is deliberately NOT the same thing as applying the
+        // binomial formula to the MET rate curve directly.
+        // mu is read from THIS file pair's paths rather than from gPileup: SetPileupFromPath does
+        // not run until the plotting section further down, so gPileup still holds the previous
+        // file's value at this point in the loop (and the initial 200 on the first iteration).
+        const double binomialPileup =
+            IsPU140Path(backgroundFiles[fileIt].first + " " + backgroundFiles[fileIt].second) ? 140.0 : 200.0;
+        TH1F* back_h_leadTruthWZ_Et = nullptr;   // as filled: collision rate vs truth jet E_T
+        TH1* h_binomialCorr         = nullptr;   // c(x), looked up per event below
+        if (hasTruthAntiKt4WZDressed) {
+            back_h_leadTruthWZ_Et = new TH1F(("back_h_leadTruthWZ_Et_"+tag).c_str(),
+                                             "Leading truth HS jet E_{T} (JZ0-9, no HSTP);"
+                                             "E_{T} [GeV];Rate [Hz]", nMETBins, metBinEdges);
+            back_h_leadTruthWZ_Et->Sumw2();
+            TStopwatch swPre; swPre.Start();
+            if (printIOProgress)
+                std::cout << "  [binomial] truth-jet pre-pass over " << nBack << " events...\n" << std::flush;
+            for (unsigned int iEvt = 0; iEvt < nBack; iEvt++) {
+                if (printIOProgress && iEvt > 0 && iEvt % progressEvery == 0) {
+                    std::cout << "  [binomial] pre-pass " << iEvt << "/" << nBack
+                              << " (" << swPre.RealTime() << " s)\n" << std::flush;
+                    swPre.Continue();
+                }
+                eventInfoTreeBack->GetEntry(iEvt);
+                if (!eventWeightsValuesBack || eventWeightsValuesBack->empty()) continue;
+                const double wTruth = eventWeightsValuesBack->at(0);
+                // Events with no truth jet fill 0, so bin 1 of the cumulative stays the total
+                // event rate — the same convention largeRJetAnalysisAndRates.C uses.
+                double etLeadTruthWZ = 0.0;
+                if (leadingTruthAntiKt4WZDressedJetsTreeBack) {
+                    leadingTruthAntiKt4WZDressedJetsTreeBack->GetEntry(iEvt);
+                    if (leadingTruthAntiKt4WZDressedJetsEtValuesBack &&
+                        !leadingTruthAntiKt4WZDressedJetsEtValuesBack->empty())
+                        etLeadTruthWZ = leadingTruthAntiKt4WZDressedJetsEtValuesBack->at(0);
+                } else {
+                    truthAntiKt4WZDressedJetsTreeBack->GetEntry(iEvt);
+                    if (truthAntiKt4WZDressedJetsEtValuesBack &&
+                        !truthAntiKt4WZDressedJetsEtValuesBack->empty())
+                        etLeadTruthWZ = *std::max_element(truthAntiKt4WZDressedJetsEtValuesBack->begin(),
+                                                         truthAntiKt4WZDressedJetsEtValuesBack->end());
+                }
+                back_h_leadTruthWZ_Et->Fill(clampVal(back_h_leadTruthWZ_Et, etLeadTruthWZ), wTruth);
+            }
+
+            TH1* hTruthColl = MakeCumulativeRateHist(back_h_leadTruthWZ_Et,
+                                                     ("truthColl_"+tag).c_str());
+            TH1* hTruthBX   = MakeBinomialCrossingRateHist(hTruthColl, ("truthBX_"+tag).c_str(),
+                                                           /*collisionRateScale=*/1.0, binomialPileup);
+            h_binomialCorr = (TH1*)hTruthBX->Clone(("binomialCorr_"+tag).c_str());
+            h_binomialCorr->SetDirectory(nullptr);
+            for (int ib = 1; ib <= h_binomialCorr->GetNbinsX(); ++ib) {
+                const double rColl = hTruthColl->GetBinContent(ib);
+                // Empty bins carry no events to weight; 1.0 leaves any that appear untouched.
+                h_binomialCorr->SetBinContent(ib, rColl > 0.0 ? hTruthBX->GetBinContent(ib) / rColl : 1.0);
+                h_binomialCorr->SetBinError(ib, 0.0);
+            }
+            printf("  [binomial] mu = %.0f, f_BX = %.1f MHz, truth-jet collision rate at E_{T} > 0"
+                   " = %.4g GHz\n", binomialPileup, kCrossingRateHz / 1e6,
+                   hTruthColl->GetBinContent(1) / 1e9);
+            printf("  [binomial] c(E_T) at 0 / 50 / 100 / 200 GeV = %.4g / %.4g / %.4g / %.4g\n",
+                   h_binomialCorr->GetBinContent(h_binomialCorr->FindBin(0.0)),
+                   h_binomialCorr->GetBinContent(h_binomialCorr->FindBin(50.0)),
+                   h_binomialCorr->GetBinContent(h_binomialCorr->FindBin(100.0)),
+                   h_binomialCorr->GetBinContent(h_binomialCorr->FindBin(200.0)));
+            delete hTruthColl; delete hTruthBX;
+        } else {
+            std::cout << "  Truth AntiKt4 WZ-dressed jets not found — binomial per-crossing"
+                      << " curves skipped\n";
+        }
+
+        // Per-event lookup of c(x): bin of this event's leading truth jet E_T, overflow clamped
+        // to the last bin. Returns 1.0 when the correction could not be built, which leaves the
+        // back_hwBin_* histograms identical to the as-filled ones.
+        auto binomialWeight = [&](double etLeadTruthWZ) -> double {
+            if (!h_binomialCorr) return 1.0;
+            int ib = h_binomialCorr->FindBin(etLeadTruthWZ);
+            if (ib < 1) ib = 1;
+            if (ib > h_binomialCorr->GetNbinsX()) ib = h_binomialCorr->GetNbinsX();
+            return h_binomialCorr->GetBinContent(ib);
+        };
+        TStopwatch swBack; swBack.Start();
         for (unsigned int iEvt = 0; iEvt < nBack; iEvt++) {
+            if (printIOProgress && iEvt > 0 && iEvt % progressEvery == 0) {
+                std::cout << "  background loop " << iEvt << "/" << nBack
+                          << " (" << swBack.RealTime() << " s)\n" << std::flush;
+                swBack.Continue();
+            }
             metTreeBack->GetEntry(iEvt);
             gNomJwoJBack->GetEntry(iEvt);   // nominal gFEX (resim when available, else AOD)
             gNomNCBack->GetEntry(iEvt);
             gNomRmsBack->GetEntry(iEvt);
             metTruthTreeBack->GetEntry(iEvt);
-            coreEMTopoTreeBack->GetEntry(iEvt);
-            coreEMPFlowTreeBack->GetEntry(iEvt);
+            // coreEMTopoTreeBack->GetEntry(iEvt);
+            // coreEMPFlowTreeBack->GetEntry(iEvt);
             eventInfoTreeBack->GetEntry(iEvt);
+
+            // The two blocks below run BEFORE the HSTP filter, so unlike the rest of the loop
+            // they also see events the filter rejects. Some of those carry an empty
+            // eventWeights vector, so read it defensively rather than with at(0).
+            const bool haveWeight = (eventWeightsValuesBack && !eventWeightsValuesBack->empty());
+            const double wPre = haveWeight ? eventWeightsValuesBack->at(0) : 0.0;
+            if (!haveWeight) dbgNoWeightEvents++;
+
+            // Rate bookkeeping — counted before the HSTP filter so the filter's effect is visible.
+            if (haveWeight && sampleJZSliceBack >= 0 && sampleJZSliceBack < (int)nJZSlices_) {
+                double wDbg = wPre;
+                dbgNEvents_jz[sampleJZSliceBack]++;
+                dbgSumW_jz[sampleJZSliceBack] += wDbg;
+                if (wDbg > dbgMaxW_jz[sampleJZSliceBack]) dbgMaxW_jz[sampleJZSliceBack] = wDbg;
+                if (!applyHSTPFilter || passHSTPValuesBack) {
+                    dbgNEventsHSTP_jz[sampleJZSliceBack]++;
+                    dbgSumWHSTP_jz[sampleJZSliceBack] += wDbg;
+                }
+            } else if (haveWeight) {
+                dbgNoSliceEvents++;
+            }
+
+            // JZ0-only fills (no HSTP requirement) for rate comparison — must run before the
+            // HSTP filter below. jFEX / AOD gFEX entries are loaded here since their GetEntry
+            // calls sit after the filter; repeating them below is harmless.
+            if (haveWeight && sampleJZSliceBack == 0) {
+                double wJZ0 = wPre;
+                jFexMETTreeBack->GetEntry(iEvt);
+                back_hw_TotalMET_JZ0->Fill(clampVal(back_hw_TotalMET_JZ0, back_TotalMET),  wJZ0);
+                back_hw_gMET_JZ0->Fill(clampVal(back_hw_gMET_JZ0,         back_gMET),      wJZ0);
+                back_hw_gMET_NC_JZ0->Fill(clampVal(back_hw_gMET_NC_JZ0,   back_gMET_NC),   wJZ0);
+                back_hw_gMET_Rms_JZ0->Fill(clampVal(back_hw_gMET_Rms_JZ0, back_gMET_Rms),  wJZ0);
+                back_hw_jMET_JZ0->Fill(clampVal(back_hw_jMET_JZ0,         back_jMET),      wJZ0);
+                back_hw_JetMET_JZ0->Fill(clampVal(back_hw_JetMET_JZ0,     back_JetMet),    wJZ0);
+                back_hw_TowerMET_JZ0->Fill(clampVal(back_hw_TowerMET_JZ0, back_TowerMet),  wJZ0);
+                if (hasGFexSimMET) {
+                    gFexMETTreeBack->GetEntry(iEvt);
+                    gFexMETNoiseCutTreeBack->GetEntry(iEvt);
+                    gFexMETRmsTreeBack->GetEntry(iEvt);
+                    back_hw_gMET_JwoJAOD_JZ0->Fill(clampVal(back_hw_gMET_JwoJAOD_JZ0, back_gMET_JwoJAOD), wJZ0);
+                    back_hw_gMET_NCAOD_JZ0->Fill(clampVal(back_hw_gMET_NCAOD_JZ0,     back_gMET_NCAOD),   wJZ0);
+                    back_hw_gMET_RmsAOD_JZ0->Fill(clampVal(back_hw_gMET_RmsAOD_JZ0,   back_gMET_RmsAOD),  wJZ0);
+                }
+            }
+
             if (applyHSTPFilter && !passHSTPValuesBack) continue;
             double w = eventWeightsValuesBack->at(0);
+            if (hasNPrimaryVertices && nPrimaryVerticesBack >= 0) {
+                back_h_nPrimaryVertices->Fill(clampVal(back_h_nPrimaryVertices, nPrimaryVerticesBack));
+                back_hw_nPrimaryVertices->Fill(clampVal(back_hw_nPrimaryVertices, nPrimaryVerticesBack), w);
+            }
             back_h_TotalMET->Fill(clampVal(back_h_TotalMET, back_TotalMET), w);
             back_h_TotalMETX->Fill(back_TotalMETX, w);
             back_h_TotalMETY->Fill(back_TotalMETY, w);
@@ -1729,6 +2237,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_h_SumET->Fill(back_SumET, w);
             if (hasSumJetET)   back_h_SumJetET->Fill(back_SumJetET, w);
             if (hasSumTowerET) back_h_SumTowerET->Fill(back_SumTowerET, w);
+            if (hasSumJetET)
+                back_hw_SumJetET->Fill(clampVal(back_hw_SumJetET, back_SumJetET), w);
             back_h_gMET->Fill(clampVal(back_h_gMET, back_gMET), w);
             back_h_gMET_NC->Fill(clampVal(back_h_gMET_NC, back_gMET_NC), w);
             back_h_gMET_Rms->Fill(clampVal(back_h_gMET_Rms, back_gMET_Rms), w);
@@ -1744,11 +2254,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_h_metTruthNonInt->Fill(clampVal(back_h_metTruthNonInt, back_metTruthNonInt), w);
             back_h_metTruthInt->Fill(clampVal(back_h_metTruthInt, back_metTruthInt), w);
             back_h_metTruthIntOut->Fill(clampVal(back_h_metTruthIntOut, back_metTruthIntOut), w);
-            back_h_coreEMTopo_SoftClus_MET->Fill(clampVal(back_h_coreEMTopo_SoftClus_MET, back_coreEMTopo_SoftClus_MET), w);
-            back_h_coreEMTopo_PVSoftTrk_MET->Fill(clampVal(back_h_coreEMTopo_PVSoftTrk_MET, back_coreEMTopo_PVSoftTrk_MET), w);
-            back_h_coreEMTopo_SoftClusEM_MET->Fill(clampVal(back_h_coreEMTopo_SoftClusEM_MET, back_coreEMTopo_SoftClusEM_MET), w);
-            back_h_coreEMPFlow_SoftClus_MET->Fill(clampVal(back_h_coreEMPFlow_SoftClus_MET, back_coreEMPFlow_SoftClus_MET), w);
-            back_h_coreEMPFlow_PVSoftTrk_MET->Fill(clampVal(back_h_coreEMPFlow_PVSoftTrk_MET, back_coreEMPFlow_PVSoftTrk_MET), w);
+            // back_h_coreEMTopo_SoftClus_MET->Fill(clampVal(back_h_coreEMTopo_SoftClus_MET, back_coreEMTopo_SoftClus_MET), w);
+            // back_h_coreEMTopo_PVSoftTrk_MET->Fill(clampVal(back_h_coreEMTopo_PVSoftTrk_MET, back_coreEMTopo_PVSoftTrk_MET), w);
+            // back_h_coreEMTopo_SoftClusEM_MET->Fill(clampVal(back_h_coreEMTopo_SoftClusEM_MET, back_coreEMTopo_SoftClusEM_MET), w);
+            // back_h_coreEMPFlow_SoftClus_MET->Fill(clampVal(back_h_coreEMPFlow_SoftClus_MET, back_coreEMPFlow_SoftClus_MET), w);
+            // back_h_coreEMPFlow_PVSoftTrk_MET->Fill(clampVal(back_h_coreEMPFlow_PVSoftTrk_MET, back_coreEMPFlow_PVSoftTrk_MET), w);
 
             back_hw_TotalMET->Fill(clampVal(back_hw_TotalMET, back_TotalMET), w);
             back_hw_gMET->Fill(clampVal(back_hw_gMET, back_gMET), w);
@@ -1757,6 +2267,33 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_hw_jMET->Fill(clampVal(back_hw_jMET, back_jMET), w);
             back_hw_JetMET->Fill(clampVal(back_hw_JetMET, back_JetMet), w);
             back_hw_TowerMET->Fill(clampVal(back_hw_TowerMET, back_TowerMet), w);
+
+            // Same fills weighted by the truth-jet binomial correction at this event's leading
+            // truth jet E_T, giving a per-crossing rather than a collision rate. wBin == w when
+            // the correction could not be built, so these stay usable either way.
+            double etLeadTruthWZEvt = 0.0;
+            if (hasTruthAntiKt4WZDressed) {
+                if (leadingTruthAntiKt4WZDressedJetsTreeBack) {
+                    leadingTruthAntiKt4WZDressedJetsTreeBack->GetEntry(iEvt);
+                    if (leadingTruthAntiKt4WZDressedJetsEtValuesBack &&
+                        !leadingTruthAntiKt4WZDressedJetsEtValuesBack->empty())
+                        etLeadTruthWZEvt = leadingTruthAntiKt4WZDressedJetsEtValuesBack->at(0);
+                } else {
+                    truthAntiKt4WZDressedJetsTreeBack->GetEntry(iEvt);
+                    if (truthAntiKt4WZDressedJetsEtValuesBack &&
+                        !truthAntiKt4WZDressedJetsEtValuesBack->empty())
+                        etLeadTruthWZEvt = *std::max_element(truthAntiKt4WZDressedJetsEtValuesBack->begin(),
+                                                             truthAntiKt4WZDressedJetsEtValuesBack->end());
+                }
+            }
+            const double wBin = w * binomialWeight(etLeadTruthWZEvt);
+            back_hwBin_TotalMET->Fill(clampVal(back_hwBin_TotalMET, back_TotalMET), wBin);
+            back_hwBin_gMET->Fill(clampVal(back_hwBin_gMET, back_gMET), wBin);
+            back_hwBin_gMET_NC->Fill(clampVal(back_hwBin_gMET_NC, back_gMET_NC), wBin);
+            back_hwBin_gMET_Rms->Fill(clampVal(back_hwBin_gMET_Rms, back_gMET_Rms), wBin);
+            back_hwBin_jMET->Fill(clampVal(back_hwBin_jMET, back_jMET), wBin);
+            back_hwBin_JetMET->Fill(clampVal(back_hwBin_JetMET, back_JetMet), wBin);
+            back_hwBin_TowerMET->Fill(clampVal(back_hwBin_TowerMET, back_TowerMet), wBin);
             if (hasGFexSimMET) {
                 gFexMETTreeBack->GetEntry(iEvt);          // AOD gFEX copies for the AOD-vs-Sim block
                 gFexMETNoiseCutTreeBack->GetEntry(iEvt);
@@ -1767,6 +2304,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 back_hw_gMET_JwoJAOD->Fill(clampVal(back_hw_gMET_JwoJAOD, back_gMET_JwoJAOD), w);
                 back_hw_gMET_NCAOD->Fill(clampVal(back_hw_gMET_NCAOD,     back_gMET_NCAOD),   w);
                 back_hw_gMET_RmsAOD->Fill(clampVal(back_hw_gMET_RmsAOD,   back_gMET_RmsAOD),  w);
+                back_hwBin_gMET_JwoJAOD->Fill(clampVal(back_hwBin_gMET_JwoJAOD, back_gMET_JwoJAOD), wBin);
+                back_hwBin_gMET_NCAOD->Fill(clampVal(back_hwBin_gMET_NCAOD,     back_gMET_NCAOD),   wBin);
+                back_hwBin_gMET_RmsAOD->Fill(clampVal(back_hwBin_gMET_RmsAOD,   back_gMET_RmsAOD),  wBin);
             }
             // 2D combined weighted histograms
             auto clamp2D_b = [&](double v) { return std::min(v, hi2D - 1e-9); };
@@ -1823,6 +2363,130 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             }
         }
 
+        // --- Rate normalization (see the note next to targetTotalRateHz) ---
+        // Applied here, once, to the weighted background histograms themselves, so that every
+        // rate number derived from them below starts from the same normalization: the rate
+        // curves, the 20/40/60/80 kHz thresholds, the rate-vs-efficiency curves and — through
+        // those thresholds — the turn-on curves. Each histogram is filled once per surviving
+        // event, so its integral is the rate at threshold 0 and also bin 1 of the cumulative.
+        //
+        // Each histogram is scaled by its OWN integral, so every curve starts at exactly
+        // targetTotalRateHz. The factors are identical for all of them except the AOD ones,
+        // which are filled only on events that carry resimulated gFEX MET. Any constant already
+        // in the weights cancels, so this is unaffected by HERNTupler's useRateNormalization
+        // setting — only the as-filled scale moves with that, not the normalized one.
+        //
+        // NOT scaled here: the JZ0-only histograms (back_hw_*_JZ0), which drawJZ0Comparison
+        // normalizes itself and compares against the as-filled all-JZ curve;
+        // back_hw_nPrimaryVertices, which is a distribution rather than a rate; and the
+        // binomial per-crossing histograms (back_hwBin_*), which are absolute per-crossing rates
+        // — rescaling those to targetTotalRateHz at threshold 0 would erase the saturation they
+        // exist to show. They are the per-crossing counterpart of the as-filled curve.
+        std::map<TH1*, double> appliedRateScale;   // histogram -> factor applied, for undoing it
+        auto normalizeRateHist = [&](TH1* h) -> double {
+            if (!h) return 1.0;
+            const double atZero = h->Integral();
+            const double scale  = (normalizeRateToTarget && atZero > 0.0)
+                                  ? targetTotalRateHz / atZero : 1.0;
+            if (scale != 1.0) h->Scale(scale);
+            appliedRateScale[h] = scale;
+            return scale;
+        };
+
+        const double rateAtZero        = back_hw_gMET->Integral();   // as filled, before scaling
+        const double rateToTargetScale = normalizeRateHist(back_hw_gMET);
+        const double sc_gMET_NC        = normalizeRateHist(back_hw_gMET_NC);
+        const double sc_gMET_Rms       = normalizeRateHist(back_hw_gMET_Rms);
+        const double sc_jMET           = normalizeRateHist(back_hw_jMET);
+        const double sc_JetMET         = normalizeRateHist(back_hw_JetMET);
+        const double sc_TowerMET       = normalizeRateHist(back_hw_TowerMET);
+        normalizeRateHist(back_hw_TotalMET);
+        if (hasSumJetET) normalizeRateHist(back_hw_SumJetET);   // H_T rate curve
+        normalizeRateHist(back_hw_gMET_JwoJAOD);
+        normalizeRateHist(back_hw_gMET_NCAOD);
+        normalizeRateHist(back_hw_gMET_RmsAOD);
+        // 2D histograms behind the combined (gFEX MET, GEP MET) rate-vs-efficiency scans.
+        normalizeRateHist(back_hw2_JwoJ_Jet);   normalizeRateHist(back_hw2_JwoJ_Tower);
+        normalizeRateHist(back_hw2_NC_Jet);     normalizeRateHist(back_hw2_NC_Tower);
+        normalizeRateHist(back_hw2_Rms_Jet);    normalizeRateHist(back_hw2_Rms_Tower);
+        // Per-JZ-slice rate curves get their parent MET type's factor rather than one of their
+        // own: the slices are meant to add up to the total, and normalizing each slice to
+        // targetTotalRateHz would throw away exactly the composition those plots exist to show.
+        for (unsigned int jz = 0; jz < nJZSlices_; ++jz) {
+            if (back_h_gMET_jz[jz])     back_h_gMET_jz[jz]->Scale(rateToTargetScale);
+            if (back_h_gMET_NC_jz[jz])  back_h_gMET_NC_jz[jz]->Scale(sc_gMET_NC);
+            if (back_h_gMET_Rms_jz[jz]) back_h_gMET_Rms_jz[jz]->Scale(sc_gMET_Rms);
+            if (back_h_jMET_jz[jz])     back_h_jMET_jz[jz]->Scale(sc_jMET);
+            if (back_h_JetMET_jz[jz])   back_h_JetMET_jz[jz]->Scale(sc_JetMET);
+            if (back_h_TowerMET_jz[jz]) back_h_TowerMET_jz[jz]->Scale(sc_TowerMET);
+        }
+
+        if (rateAtZero <= 0.0)
+            std::cout << "  [rate] WARNING: weighted background integral is zero — rate plots will be empty\n";
+        else if (normalizeRateToTarget)
+            std::cout << "  [rate] rate at threshold 0 = " << rateAtZero / 1e3 << " kHz as filled;"
+                      << " normalized to " << targetTotalRateHz / 1e6 << " MHz (x" << rateToTargetScale << ")\n";
+        else
+            std::cout << "  [rate] rate at threshold 0 = " << rateAtZero / 1e3 << " kHz;"
+                      << " normalizeRateToTarget = false, using the weights as filled\n";
+
+        if (h_binomialCorr) {
+            const double binRateAtZero = back_hwBin_gMET->Integral();
+            printf("  [binomial] per-crossing rate at threshold 0 = %.4g MHz (gFEX JwoJ)\n",
+                   binRateAtZero / 1e6);
+            if (binRateAtZero > kCrossingRateHz)
+                printf("  [binomial] WARNING: that is above the %.1f MHz crossing rate — the"
+                       " correction is not doing what it should\n", kCrossingRateHz / 1e6);
+        }
+
+        // --- Per-JZ-slice rate diagnostics ---
+        // The per-event weight is fixed in HERNTupler (xsec x filterEff x targetRate/sigma_ref
+        // / sumOfWeights), i.e. the 30 MHz target is normalized over the UNFILTERED sample. The
+        // HSTP filter is applied here, afterwards, so the surviving Sum(w) is whatever is left —
+        // it is not renormalized back to 30 MHz. This table shows how much rate each slice
+        // carries before and after the filter.
+        if (printJZRateDiagnostics) {
+            double totW = 0.0, totWHSTP = 0.0;
+            long   totN = 0,   totNHSTP = 0;
+            for (unsigned int jz = 0; jz < nJZSlices_; ++jz) {
+                totW += dbgSumW_jz[jz]; totWHSTP += dbgSumWHSTP_jz[jz];
+                totN += dbgNEvents_jz[jz]; totNHSTP += dbgNEventsHSTP_jz[jz];
+            }
+            std::cout << "\n  ===== JZ-slice rate diagnostics (" << labels[fileIt] << ") =====\n"
+                      << "  applyHSTPFilter = " << (applyHSTPFilter ? "true" : "false") << "\n"
+                      << "   JZ   NEvents   Sum(w) [kHz]   NEvt HSTP   Sum(w) HSTP [kHz]"
+                      << "   HSTP keep(w)   mean w [Hz]   max w [Hz]\n";
+            for (unsigned int jz = 0; jz < nJZSlices_; ++jz) {
+                double keep = dbgSumW_jz[jz] > 0.0 ? dbgSumWHSTP_jz[jz] / dbgSumW_jz[jz] : 0.0;
+                double meanW = dbgNEvents_jz[jz] > 0 ? dbgSumW_jz[jz] / dbgNEvents_jz[jz] : 0.0;
+                printf("   %2u %9ld %14.4g %11ld %19.4g %14.4f %13.4g %12.4g\n",
+                       jz, dbgNEvents_jz[jz], dbgSumW_jz[jz] * 1e-3, dbgNEventsHSTP_jz[jz],
+                       dbgSumWHSTP_jz[jz] * 1e-3, keep, meanW, dbgMaxW_jz[jz]);
+            }
+            printf("   ALL %8ld %14.4g %11ld %19.4g %14.4f\n",
+                   totN, totW * 1e-3, totNHSTP, totWHSTP * 1e-3,
+                   totW > 0.0 ? totWHSTP / totW : 0.0);
+            if (dbgNoSliceEvents > 0)
+                std::cout << "  WARNING: " << dbgNoSliceEvents
+                          << " background events had sampleJZSlice outside [0," << nJZSlices_
+                          << ") and were left out of the table\n";
+            if (dbgNoWeightEvents > 0)
+                std::cout << "  WARNING: " << dbgNoWeightEvents
+                          << " background events had an empty eventWeights vector and were left out"
+                          << " of the table and the JZ0 fills. These are only visible here because"
+                          << " this block runs before the HSTP filter.\n";
+            std::cout << "  Total rate before HSTP = " << totW * 1e-6 << " MHz"
+                      << " (HERNTupler targetRate is 30 MHz over the unfiltered sample;"
+                      << " a value well below that means only part of each slice was ntupled)\n"
+                      << "  Total rate after  HSTP = " << totWHSTP * 1e-3 << " kHz\n";
+            // Cross-check against the histograms feeding the rate curves (bin 1 = threshold 0).
+            printf("  Rate at threshold 0: all-JZ gFEX JwoJ = %.4g kHz (after the x%.4g rescale),"
+                   " JZ0-only no-HSTP = %.4g kHz (never rescaled)\n",
+                   back_hw_gMET->Integral() * 1e-3, rateToTargetScale,
+                   back_hw_gMET_JZ0->Integral() * 1e-3);
+            std::cout << "  =========================================================\n\n";
+        }
+
         // --- Threshold computation at 20 / 40 / 80 kHz ---
         double thr_gMET_20kHz      = findThreshold(back_hw_gMET,     20e3);
         double thr_gMET_40kHz      = findThreshold(back_hw_gMET,     40e3);
@@ -1864,6 +2528,21 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         double thr_gMET_RmsAOD_40kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsAOD,  40e3) : 0.0;
         double thr_gMET_RmsAOD_80kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsAOD,  80e3) : 0.0;
         double thr_gMET_RmsAOD_60kHz  = hasGFexSimMET ? findThreshold(back_hw_gMET_RmsAOD,  60e3) : 0.0;
+
+        // --- Rate-matched thresholds for the Z->mumu dimuon-p_{T} turn-ons ---
+        // Same weighted background histograms and same findThreshold as the block above, indexed
+        // through the MET-type table so the turn-on loop can stay generic. These are the
+        // normalized histograms (the rescale further up has already run), so the 40/60/80 kHz
+        // points mean the same thing as everywhere else in this macro.
+        TH1F* back_hw_byMETType[nMETTypes] = {
+            back_hw_gMET, back_hw_gMET_NC, back_hw_gMET_Rms, back_hw_jMET,
+            back_hw_JetMET, back_hw_TowerMET, back_hw_TotalMET
+        };
+        double thrMu[nMETTypes][nMuRates];
+        for (int iA = 0; iA < nMETTypes; ++iA)
+            for (int iR = 0; iR < nMuRates; ++iR)
+                thrMu[iA][iR] = findThreshold(back_hw_byMETType[iA], muRatesHz[iR]);
+
         if (hasGFexSimMET)
             std::cout << "  Thresholds [GeV] — gMET JwoJSim 20/40/80 kHz: "
                       << thr_gMET_JwoJAOD_20kHz << " / " << thr_gMET_JwoJAOD_40kHz << " / " << thr_gMET_JwoJAOD_80kHz << "\n"
@@ -2029,6 +2708,29 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             if (sig_TotalMET  > thr_TotalMET_40kHz)  h_turnOn_num_TotalMET_40kHz->Fill(truthMET);
             if (sig_TotalMET  > thr_TotalMET_80kHz)  h_turnOn_num_TotalMET_80kHz->Fill(truthMET);
             if (sig_TotalMET  > thr_TotalMET_60kHz)  h_turnOn_num_TotalMET_60kHz->Fill(truthMET);
+
+            // --- Z->mumu turn-on vs dimuon p_{T} ---
+            // Denominator and numerators are filled here, in the same pass, so both see exactly
+            // the same events. Events with fewer than two truth muons leave dimuonPt at its -1
+            // default and are dropped from both — they carry no dimuon system to bin them by.
+            if (isZmumuSample) {
+                eventInfoTreeSig->GetEntry(iEvt);
+                if (sig_dimuonPt >= 0.0) {
+                    const double dimuonPtCl = clampVal(h_turnOnMu_denom, sig_dimuonPt);
+                    h_turnOnMu_denom->Fill(dimuonPtCl);
+                    sig_h_dimuonPt->Fill(clampVal(sig_h_dimuonPt, sig_dimuonPt));
+                    sig_h_dimuonPt_coarse->Fill(std::min(sig_dimuonPt, 599.9));
+                    sig_h_dimuonMass->Fill(sig_dimuonMass);
+                    const double sigMETByType[nMETTypes] = {
+                        sig_gMET, sig_gMET_NC, sig_gMET_Rms, sig_jMET,
+                        sig_JetMet, sig_TowerMet, sig_TotalMET
+                    };
+                    for (int iA = 0; iA < nMETTypes; ++iA)
+                        for (int iR = 0; iR < nMuRates; ++iR)
+                            if (sigMETByType[iA] > thrMu[iA][iR])
+                                h_turnOnMu_num[iA][iR]->Fill(dimuonPtCl);
+                }
+            }
             if (hasGFexSimMET) {
                 gFexMETTreeSig->GetEntry(iEvt);          // AOD gFEX copies for the AOD-vs-Sim block
                 gFexMETNoiseCutTreeSig->GetEntry(iEvt);
@@ -2192,6 +2894,31 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             if (hasInTimeAntiKt4TruthJets && inTimeAntiKt4TruthJetsEtValuesBack)
                 for (double et : *inTimeAntiKt4TruthJetsEtValuesBack)
                     if (et > 15.0) nPileupJets++;
+
+            // --- <MET> vs jet multiplicity ---
+            // Jets from both truth collections count towards the same multiplicity: the hard
+            // scatter's AntiKt4 WZ-dressed jets and the in-time pileup overlay's AntiKt4 truth
+            // jets, each above kNJetMinEt. Counted here rather than reusing nTruthJets /
+            // nPileupJets above so the cut follows kNJetMinEt rather than those plots' own 15 GeV.
+            if (hasTruthAntiKt4WZDressed || hasInTimeAntiKt4TruthJets) {
+                int nJetsForProf = 0;
+                if (hasTruthAntiKt4WZDressed && truthAntiKt4WZDressedJetsEtValuesBack)
+                    for (double et : *truthAntiKt4WZDressedJetsEtValuesBack)
+                        if (et > kNJetMinEt) nJetsForProf++;
+                if (hasInTimeAntiKt4TruthJets && inTimeAntiKt4TruthJetsEtValuesBack)
+                    for (double et : *inTimeAntiKt4TruthJetsEtValuesBack)
+                        if (et > kNJetMinEt) nJetsForProf++;
+                // jFEX MET is not loaded by this pass's GetEntry block above, unlike the other
+                // six MET types, so pull its entry before reading back_jMET.
+                jFexMETTreeBack->GetEntry(iEvt);
+                const double backMETByType[nMETTypes] = {
+                    back_gMET, back_gMET_NC, back_gMET_Rms, back_jMET,
+                    back_JetMet, back_TowerMet, back_TotalMET
+                };
+                const double nJetsCl = std::min((double)nJetsForProf, nJetAxisMax - 1e-9);
+                for (int iA = 0; iA < nMETTypes; ++iA)
+                    back_prof_METvsNJets[iA]->Fill(nJetsCl, backMETByType[iA], w);
+            }
             // Per-selection TOB MET phi: Incl/JwoJ=gFEX JwoJ, NC, Rms, Jet, Tower
             /*double phi_TOBback[nSel80] = {
                 phi_gFEX,
@@ -2315,6 +3042,22 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* eff_gMET_RmsAOD_80kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsAOD_80kHz,  "eff_gMET_RmsAOD_80kHz_"+tag)  : nullptr;
         TH1F* eff_gMET_RmsAOD_60kHz  = hasGFexSimMET ? makeEff(h_turnOn_num_gMET_RmsAOD_60kHz,  "eff_gMET_RmsAOD_60kHz_"+tag)  : nullptr;
 
+        // Z->mumu dimuon-p_{T} efficiencies — same binomial division, against the dimuon
+        // denominator rather than the truth-MET one.
+        TH1F* effMu[nMETTypes][nMuRates] = {};
+        if (isZmumuSample) {
+            for (int iA = 0; iA < nMETTypes; ++iA)
+                for (int iR = 0; iR < nMuRates; ++iR) {
+                    TH1F* e = (TH1F*)h_turnOnMu_num[iA][iR]->Clone(
+                        (std::string("effMu_") + metTypeShort[iA] + "_" + muRateNames[iR] + "_" + tag).c_str());
+                    e->SetDirectory(0);
+                    e->Divide(h_turnOnMu_num[iA][iR], h_turnOnMu_denom, 1.0, 1.0, "B");
+                    effMu[iA][iR] = e;
+                }
+            std::cout << "  [Z->mumu] events with a dimuon system = "
+                      << (long long)h_turnOnMu_denom->GetEntries() << " of " << nSig << "\n";
+        }
+
         // --- Per-file signal vs background overlays ---
         // Extract signal tag from the emulation-output basename (includes config tags: N_Towers, jetEt, SK/OR)
         std::string sigPath = signalFiles[fileIt].second;
@@ -2327,6 +3070,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             ? signalNames[fileIt] : signalName;
         // Per-file plots show the process name at the top-right of the ATLAS label (not in legends).
         gProcLabel = fileSignalName;
+        // Quote the pileup of the sample actually being processed, not a hardcoded 200.
+        SetPileupFromPath(signalFiles[fileIt].first + " " + signalFiles[fileIt].second);
+        std::cout << "  Labelling plots as <PU> = " << gPileup << "\n";
 
         drawOverlay(sig_h_TotalMET,        back_h_TotalMET,        "Total MET (GEP)",      "Total MET (GEP) [GeV]",          fDir + "TotalMET.pdf");
         drawComponentOverlay(sig_h_TotalMETX, back_h_TotalMETX, "Total MET_{x} (GEP)", "Total MET_{x} (GEP) [GeV]",      fDir + "TotalMETx.pdf");
@@ -2368,28 +3114,28 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                            "MET [GeV]", fDir + "GEP_vs_gFEX_MET.pdf", "");
 
         // --- Per-file core term sig vs bkg overlays ---
-        drawOverlay(sig_h_coreEMTopo_SoftClus_MET,   back_h_coreEMTopo_SoftClus_MET,   "Core EMTopo SoftClus MET",   "Core EMTopo SoftClus MET [GeV]", fDir + "CoreEMTopo_SoftClus_MET.pdf");
-        drawOverlay(sig_h_coreEMTopo_PVSoftTrk_MET,  back_h_coreEMTopo_PVSoftTrk_MET,  "Core EMTopo PVSoftTrk MET",  "Core EMTopo PVSoftTrk MET [GeV]", fDir + "CoreEMTopo_PVSoftTrk_MET.pdf");
-        drawOverlay(sig_h_coreEMTopo_SoftClusEM_MET, back_h_coreEMTopo_SoftClusEM_MET, "Core EMTopo SoftClusEM MET", "Core EMTopo SoftClusEM MET [GeV]", fDir + "CoreEMTopo_SoftClusEM_MET.pdf");
-        drawOverlay(sig_h_coreEMPFlow_SoftClus_MET,  back_h_coreEMPFlow_SoftClus_MET,  "Core EMPFlow SoftClus MET",  "Core EMPFlow SoftClus MET [GeV]", fDir + "CoreEMPFlow_SoftClus_MET.pdf");
-        drawOverlay(sig_h_coreEMPFlow_PVSoftTrk_MET, back_h_coreEMPFlow_PVSoftTrk_MET, "Core EMPFlow PVSoftTrk MET", "Core EMPFlow PVSoftTrk MET [GeV]", fDir + "CoreEMPFlow_PVSoftTrk_MET.pdf");
+        // drawOverlay(sig_h_coreEMTopo_SoftClus_MET,   back_h_coreEMTopo_SoftClus_MET,   "Core EMTopo SoftClus MET",   "Core EMTopo SoftClus MET [GeV]", fDir + "CoreEMTopo_SoftClus_MET.pdf");
+        // drawOverlay(sig_h_coreEMTopo_PVSoftTrk_MET,  back_h_coreEMTopo_PVSoftTrk_MET,  "Core EMTopo PVSoftTrk MET",  "Core EMTopo PVSoftTrk MET [GeV]", fDir + "CoreEMTopo_PVSoftTrk_MET.pdf");
+        // drawOverlay(sig_h_coreEMTopo_SoftClusEM_MET, back_h_coreEMTopo_SoftClusEM_MET, "Core EMTopo SoftClusEM MET", "Core EMTopo SoftClusEM MET [GeV]", fDir + "CoreEMTopo_SoftClusEM_MET.pdf");
+        // drawOverlay(sig_h_coreEMPFlow_SoftClus_MET,  back_h_coreEMPFlow_SoftClus_MET,  "Core EMPFlow SoftClus MET",  "Core EMPFlow SoftClus MET [GeV]", fDir + "CoreEMPFlow_SoftClus_MET.pdf");
+        // drawOverlay(sig_h_coreEMPFlow_PVSoftTrk_MET, back_h_coreEMPFlow_PVSoftTrk_MET, "Core EMPFlow PVSoftTrk MET", "Core EMPFlow PVSoftTrk MET [GeV]", fDir + "CoreEMPFlow_PVSoftTrk_MET.pdf");
 
         // --- Multi-MET comparison: all types on one canvas, signal ---
-        drawMultiDist({sig_h_TotalMET, sig_h_gMET, sig_h_metTruthNonInt,
-                       sig_h_coreEMTopo_SoftClus_MET, sig_h_coreEMTopo_PVSoftTrk_MET, sig_h_coreEMTopo_SoftClusEM_MET,
-                       sig_h_coreEMPFlow_SoftClus_MET, sig_h_coreEMPFlow_PVSoftTrk_MET},
-                      {"GEP TotalMET", "gFEX MET", "Truth NonInt",
-                       "EMTopo SoftClus", "EMTopo PVSoftTrk", "EMTopo SoftClusEM",
-                       "EMPFlow SoftClus", "EMPFlow PVSoftTrk"},
+        drawMultiDist({sig_h_TotalMET, sig_h_gMET, sig_h_metTruthNonInt},
+                    // sig_h_coreEMTopo_SoftClus_MET, sig_h_coreEMTopo_PVSoftTrk_MET, sig_h_coreEMTopo_SoftClusEM_MET,
+                    // sig_h_coreEMPFlow_SoftClus_MET, sig_h_coreEMPFlow_PVSoftTrk_MET},
+                      {"GEP TotalMET", "gFEX MET", "Truth NonInt"},
+                    // "EMTopo SoftClus", "EMTopo PVSoftTrk", "EMTopo SoftClusEM",
+                    // "EMPFlow SoftClus", "EMPFlow PVSoftTrk"},
                       "MET comparison — signal", "MET [GeV]", fDir + "METComparison_sig.pdf");
 
         // --- Multi-MET comparison: all types on one canvas, background ---
-        drawMultiDist({back_h_TotalMET, back_h_gMET, back_h_metTruthNonInt,
-                       back_h_coreEMTopo_SoftClus_MET, back_h_coreEMTopo_PVSoftTrk_MET, back_h_coreEMTopo_SoftClusEM_MET,
-                       back_h_coreEMPFlow_SoftClus_MET, back_h_coreEMPFlow_PVSoftTrk_MET},
-                      {"GEP TotalMET", "gFEX MET", "Truth NonInt",
-                       "EMTopo SoftClus", "EMTopo PVSoftTrk", "EMTopo SoftClusEM",
-                       "EMPFlow SoftClus", "EMPFlow PVSoftTrk"},
+        drawMultiDist({back_h_TotalMET, back_h_gMET, back_h_metTruthNonInt},
+                    // back_h_coreEMTopo_SoftClus_MET, back_h_coreEMTopo_PVSoftTrk_MET, back_h_coreEMTopo_SoftClusEM_MET,
+                    // back_h_coreEMPFlow_SoftClus_MET, back_h_coreEMPFlow_PVSoftTrk_MET},
+                      {"GEP TotalMET", "gFEX MET", "Truth NonInt"},
+                    // "EMTopo SoftClus", "EMTopo PVSoftTrk", "EMTopo SoftClusEM",
+                    // "EMPFlow SoftClus", "EMPFlow PVSoftTrk"},
                       "MET comparison — background", "MET [GeV]", fDir + "METComparison_bkg.pdf");
 
         // --- Event properties per 80 kHz selection ---
@@ -2436,6 +3182,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 drawMultiDist(toVec(sig_sel_dPhi_jet1_MET), selLegLabels, "#Delta#phi(leading WTA-cone jet, GEP MET) — signal at 80 kHz sel.",             "|#Delta#phi(leading WTA-cone jet, GEP MET)| [rad]", selDir + "sig_sel_dPhi_jet1_MET.pdf", false, "rad");
             }
             // Background — fake-trigger topology
+            BkgProcLabel bkgProcSel;   // everything below this point in the block is background
             drawMultiDist(toVec(back_sel_truthMET),      selLegLabels, "Truth MET_{NonInt} — bkg at 80 kHz sel.",                       "Truth MET_{NonInt} [GeV]",                                           selDir + "back_sel_truthMET.pdf");
             drawMultiDist(toVec(back_sel_SumET),         selLegLabels, "GEP TOB #Sigma E_{T} — bkg at 80 kHz sel.",                     "GEP TOB #Sigma E_{T} [GeV]",                                         selDir + "back_sel_SumET.pdf");
             drawMultiDist(toVec(back_sel_gSumET),        selLegLabels, "gFEX TOB #Sigma E_{T} — bkg at 80 kHz sel.",                    "gFEX TOB #Sigma E_{T} [GeV]",                                        selDir + "back_sel_gSumET.pdf");
@@ -2467,15 +3214,39 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             }
         }
 
+        // --- Reconstructed primary vertices ---
+        if (hasNPrimaryVertices && back_h_nPrimaryVertices->GetEntries() > 0) {
+            BkgProcLabel bkgProc;   // background only
+            TCanvas cPV(("c_nPrimaryVertices_"+tag).c_str(), "Primary vertices", 700, 600);
+            gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
+            back_h_nPrimaryVertices->SetLineColor(kBlack);
+            back_h_nPrimaryVertices->SetLineWidth(2);
+            back_h_nPrimaryVertices->Draw("HIST");
+            cPV.cd(); DrawATLASLabel();
+            cPV.SaveAs((fDir + "back_nPrimaryVertices.pdf").c_str());
+
+            cPV.SetLogy();
+            back_hw_nPrimaryVertices->SetLineColor(kP10Blue);
+            back_hw_nPrimaryVertices->SetLineWidth(2);
+            back_hw_nPrimaryVertices->Draw("HIST");
+            cPV.cd(); DrawATLASLabel();
+            cPV.SaveAs((fDir + "back_nPrimaryVertices_weighted.pdf").c_str());
+            std::cout << "  [nPV] mean primary vertices = " << back_h_nPrimaryVertices->GetMean()
+                      << " (raw), " << back_hw_nPrimaryVertices->GetMean() << " (rate weighted)\n";
+        }
+
         // --- Per-JZ-slice MET distributions ---
         TString jzDir = (fDir + "JZSlices/").c_str();
         gSystem->mkdir(jzDir);
+        {
+        BkgProcLabel bkgProc;   // every JZ-slice distribution is background only
         OverlayAndSave(back_h_gMET_jz,     nJZSlices_, "c_gMET_jz",     jzDir + "gFEX_MET_JZSlices.pdf",        0);
         OverlayAndSave(back_h_gMET_NC_jz,  nJZSlices_, "c_gMET_NC_jz",  jzDir + "gFEX_NoiseCut_MET_JZSlices.pdf", 0);
         OverlayAndSave(back_h_gMET_Rms_jz, nJZSlices_, "c_gMET_Rms_jz", jzDir + "gFEX_RMS_MET_JZSlices.pdf",     0);
         OverlayAndSave(back_h_jMET_jz,     nJZSlices_, "c_jMET_jz",     jzDir + "jFEX_MET_JZSlices.pdf",        0);
         OverlayAndSave(back_h_JetMET_jz,   nJZSlices_, "c_JetMET_jz",   jzDir + "GEP_JetMET_JZSlices.pdf",     0);
         OverlayAndSave(back_h_TowerMET_jz, nJZSlices_, "c_TowerMET_jz", jzDir + "GEP_TowerMET_JZSlices.pdf",   0);
+        }
 
         // --- Per-JZ-slice rate vs threshold (points, kHz, up to 200 GeV) ---
         OverlayRateAndSave(back_h_gMET_jz,     nJZSlices_, "c_gMET_jz_rate",     jzDir + "gFEX_MET_JZSlices_Rate.pdf",       "gFEX JwoJ");
@@ -2485,6 +3256,106 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         OverlayRateAndSave(back_h_JetMET_jz,   nJZSlices_, "c_JetMET_jz_rate",   jzDir + "GEP_JetMET_JZSlices_Rate.pdf",     "GEP Jet MET");
         OverlayRateAndSave(back_h_TowerMET_jz, nJZSlices_, "c_TowerMET_jz_rate", jzDir + "GEP_TowerMET_JZSlices_Rate.pdf",   "GEP Tower MET");
 
+        // --- JZ0-only (no HSTP) vs all-JZ rate vs threshold, one plot per MET type ---
+        // (background only — the guard inside the block below labels these QCD dijet)
+        // hAllJZ is the HSTP-filtered sum over every JZ slice, and hJZ0 the JZ0 events with the
+        // HSTP requirement dropped.
+        {
+            BkgProcLabel bkgProc;
+            // One plot per MET type, four curves:
+            //   * all JZ slices (HSTP filtered), normalized so its rate at threshold 0 is
+            //     targetTotalRateHz,
+            //   * JZ0 alone with the HSTP requirement dropped, normalized the same way,
+            //   * all JZ slices (HSTP filtered) as filled, i.e. the collision rate the weights
+            //     actually carry, for reference against the two normalized curves,
+            //   * the same events with the truth-jet binomial correction applied per event, i.e.
+            //     the per-crossing counterpart of the as-filled curve (see the block that builds
+            //     h_binomialCorr). Drawn only when the truth jets were available.
+            // The as-filled JZ0 curve is deliberately not drawn: it sits ~180x above the
+            // normalized ones, which no single ratio panel can span.
+            auto drawJZ0Comparison = [&](TH1F* hAllJZ, TH1F* hJZ0, TH1F* hAllJZBinomial,
+                                         const std::string& algoName, const std::string& fileStem) {
+                if (!hAllJZ || !hJZ0) return;
+                const std::string hstpSuffix = applyHSTPFilter ? " (HSTP filtered)" : "";
+                const std::vector<Int_t> jz0Cols = { kBlack, kP10Red, kP10Blue, kP10Green };
+
+                TH1* cumAll = MakeCumulativeRateHist(hAllJZ, (std::string(hAllJZ->GetName()) + "_cumAll").c_str());
+                TH1* cumJZ0 = MakeCumulativeRateHist(hJZ0,   (std::string(hJZ0->GetName())   + "_cumJZ0").c_str());
+                if (!cumAll || !cumJZ0) return;
+
+                // Normalized copies: each scaled so its own first bin is targetTotalRateHz.
+                // hAllJZ was already normalized upstream, so normAll is a no-op scale on it and
+                // the as-filled reference curve is recovered by undoing the factor that was
+                // applied there. hJZ0 is never scaled upstream, so it is normalized here.
+                TH1* normAll = (TH1*)cumAll->Clone((std::string(hAllJZ->GetName()) + "_cumAllNorm").c_str());
+                TH1* normJZ0 = (TH1*)cumJZ0->Clone((std::string(hJZ0->GetName())   + "_cumJZ0Norm").c_str());
+                normAll->SetDirectory(nullptr); normJZ0->SetDirectory(nullptr);
+                const double allAtZero = cumAll->GetBinContent(1);
+                const double jz0AtZero = cumJZ0->GetBinContent(1);
+                if (allAtZero > 0.0) normAll->Scale(targetTotalRateHz / allAtZero);
+                if (jz0AtZero > 0.0) normJZ0->Scale(targetTotalRateHz / jz0AtZero);
+
+                const double appliedAll = appliedRateScale.count(hAllJZ) ? appliedRateScale[hAllJZ] : 1.0;
+                TH1* rawAll = (TH1*)cumAll->Clone((std::string(hAllJZ->GetName()) + "_cumAllRaw").c_str());
+                rawAll->SetDirectory(nullptr);
+                if (appliedAll > 0.0 && appliedAll != 1.0) rawAll->Scale(1.0 / appliedAll);
+                const double allAtZeroAsFilled = appliedAll > 0.0 ? allAtZero / appliedAll : allAtZero;
+
+                std::vector<TH1*> normCurves = { normAll, normJZ0, rawAll };
+                // Scale factors go to the log, not the legend — the factor on its own is
+                // unreadable, and the number worth having is where each curve started.
+                printf("  [norm] %-20s %-28s from %10.4g MHz at threshold 0, scaled by %.5g\n",
+                       algoName.c_str(), ("All JZ" + hstpSuffix).c_str(), allAtZeroAsFilled / 1e6,
+                       allAtZeroAsFilled > 0.0 ? targetTotalRateHz / allAtZeroAsFilled : 1.0);
+                printf("  [norm] %-20s %-28s from %10.4g MHz at threshold 0, scaled by %.5g\n",
+                       algoName.c_str(), "JZ0 only (no HSTP)", jz0AtZero / 1e6,
+                       jz0AtZero > 0.0 ? targetTotalRateHz / jz0AtZero : 1.0);
+
+                std::vector<std::string> normLabels;
+                normLabels.push_back("All JZ slices" + hstpSuffix + ", normalized");
+                normLabels.push_back("JZ0 only (no HSTP), normalized");
+                normLabels.push_back("All JZ slices" + hstpSuffix + ", not scaled");
+
+                // Per-crossing curve: the as-filled events re-weighted by c(E_T^lead truth jet).
+                if (h_binomialCorr && hAllJZBinomial) {
+                    TH1* cumBin = MakeCumulativeRateHist(hAllJZBinomial,
+                                                         (std::string(hAllJZBinomial->GetName()) + "_cumBin").c_str());
+                    if (cumBin) {
+                        normCurves.push_back(cumBin);
+                        normLabels.push_back(Form("All JZ slices%s, binomial correction"
+                                                  " (#mu=%.0f, f_{BX}=%.1f MHz)",
+                                                  hstpSuffix.c_str(), binomialPileup,
+                                                  kCrossingRateHz / 1e6));
+                        printf("  [binomial] %-20s %-28s %10.4g MHz at threshold 0"
+                               " (as filled %10.4g MHz)\n",
+                               algoName.c_str(), "All JZ, per crossing",
+                               cumBin->GetBinContent(1) / 1e6, allAtZeroAsFilled / 1e6);
+                    }
+                }
+
+                DrawRateCurvesWithRatio(normCurves, normLabels, jz0Cols,
+                                        /*refIndex=*/1, /*refShortName=*/"JZ0",
+                                        "MET threshold [GeV]", "Estimated Background Rate [kHz]",
+                                        algoName,
+                                        TString((fDir + "JZSlices/" + fileStem + "_JZ0_vs_AllJZ_Rate.pdf").c_str()),
+                                        /*yScale=*/1e-3, /*xMax=*/200.0, /*yMin=*/1e-3,
+                                        /*ratioMin=*/0.0, /*ratioMax=*/3.0);
+            };
+            drawJZ0Comparison(back_hw_gMET,     back_hw_gMET_JZ0,     back_hwBin_gMET,     "gFEX JwoJ",     "gFEX_MET");
+            drawJZ0Comparison(back_hw_gMET_NC,  back_hw_gMET_NC_JZ0,  back_hwBin_gMET_NC,  "gFEX NoiseCut", "gFEX_NoiseCut_MET");
+            drawJZ0Comparison(back_hw_gMET_Rms, back_hw_gMET_Rms_JZ0, back_hwBin_gMET_Rms, "gFEX Rms",      "gFEX_RMS_MET");
+            drawJZ0Comparison(back_hw_jMET,     back_hw_jMET_JZ0,     back_hwBin_jMET,     "jFEX",          "jFEX_MET");
+            drawJZ0Comparison(back_hw_JetMET,   back_hw_JetMET_JZ0,   back_hwBin_JetMET,   "GEP Jet MET",   "GEP_JetMET");
+            if (!hasOverlapRemoval)
+                drawJZ0Comparison(back_hw_TowerMET, back_hw_TowerMET_JZ0, back_hwBin_TowerMET, "GEP Tower MET", "GEP_TowerMET");
+            drawJZ0Comparison(back_hw_TotalMET, back_hw_TotalMET_JZ0, back_hwBin_TotalMET, "GEP Total MET", "GEP_TotalMET");
+            if (hasGFexSimMET) {
+                drawJZ0Comparison(back_hw_gMET_JwoJAOD, back_hw_gMET_JwoJAOD_JZ0, back_hwBin_gMET_JwoJAOD, "gFEX JwoJ (AOD)",     "gFEX_MET_AOD");
+                drawJZ0Comparison(back_hw_gMET_NCAOD,   back_hw_gMET_NCAOD_JZ0,   back_hwBin_gMET_NCAOD,   "gFEX NoiseCut (AOD)", "gFEX_NoiseCut_MET_AOD");
+                drawJZ0Comparison(back_hw_gMET_RmsAOD,  back_hw_gMET_RmsAOD_JZ0,  back_hwBin_gMET_RmsAOD,  "gFEX Rms (AOD)",      "gFEX_RMS_MET_AOD");
+            }
+        }
+
         // --- Per-file rate vs threshold plots ---
         drawRateVsThreshold(back_hw_TotalMET,  "Rate vs Emulated MET threshold",          "MET threshold [GeV]", fDir + "Rate_TotalMET.pdf");
         drawRateVsThreshold(back_hw_gMET,      "Rate vs gFEX MET threshold (JwoJ)",       "MET threshold [GeV]", fDir + "Rate_gFEX_MET_JwoJ.pdf");
@@ -2493,6 +3364,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         drawRateVsThreshold(back_hw_jMET,      "Rate vs jFEX MET threshold",              "MET threshold [GeV]", fDir + "Rate_jFEX_MET.pdf");
         drawRateVsThreshold(back_hw_JetMET,    "Rate vs GEP Jet MET threshold",           "MET threshold [GeV]", fDir + "Rate_JetMET.pdf");
         drawRateVsThreshold(back_hw_TowerMET,  "Rate vs GEP Tower MET threshold",         "MET threshold [GeV]", fDir + "Rate_TowerMET.pdf");
+        // H_T runs to 1040 GeV, well past the MET threshold cut-off, so it keeps its full range.
+        if (hasSumJetET)
+            drawRateVsThreshold(back_hw_SumJetET, "Rate vs GEP H_{T} threshold",
+                                "H_{T} threshold [GeV]", fDir + "Rate_SumJetET.pdf", /*xMax=*/-1.0);
 
         // --- Per-file signal efficiency vs threshold plots ---
         {
@@ -2574,11 +3449,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawTOBvsTruth(sig_h2_JetMET_TOBMet_vs_truthMET,   calDir + "sig_GEP_JetMET_TOBMet_vs_truthMET.pdf",   "GEP Jet");
             drawTOBvsTruth(sig_h2_TowerMET_TOBMet_vs_truthMET, calDir + "sig_GEP_TowerMET_TOBMet_vs_truthMET.pdf", "GEP Tower");
             // Background (lower z-floor to show high-MET tails; x capped at 300 GeV)
+            {
+            BkgProcLabel bkgProcCal;   // background calibration plots
             drawTOBvsTruth(back_h2_gJwoJ_TOBMet_vs_truthMET,    calDir + "back_gFEX_JwoJ_TOBMet_vs_truthMET.pdf",    "gFEX JwoJ",    1e-14, 300.0);
             drawTOBvsTruth(back_h2_gNC_TOBMet_vs_truthMET,      calDir + "back_gFEX_NoiseCut_TOBMet_vs_truthMET.pdf","gFEX NoiseCut",1e-14, 300.0);
             drawTOBvsTruth(back_h2_gRms_TOBMet_vs_truthMET,     calDir + "back_gFEX_Rms_TOBMet_vs_truthMET.pdf",     "gFEX Rms",     1e-14, 300.0);
             drawTOBvsTruth(back_h2_JetMET_TOBMet_vs_truthMET,   calDir + "back_GEP_JetMET_TOBMet_vs_truthMET.pdf",   "GEP Jet",      1e-14, 300.0);
             drawTOBvsTruth(back_h2_TowerMET_TOBMet_vs_truthMET, calDir + "back_GEP_TowerMET_TOBMet_vs_truthMET.pdf", "GEP Tower",    1e-14, 300.0);
+            }
 
             // 1D residual distributions, individual and overlaid
             // xLbl: x-axis label; yUnit: appended to y-axis bin-size string (e.g., "" or "GeV")
@@ -2733,6 +3611,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawRelResidual2D(sig_h2_JetMET_absResidual_vs_sumET,   calDir + "sig_GEP_JetMET_absResidual_vs_sumET.pdf",   "GEP #Sigma E_{T} [GeV]",          1e-5, 0.0, absYLbl);
             drawRelResidual2D(sig_h2_TowerMET_absResidual_vs_sumET, calDir + "sig_GEP_TowerMET_absResidual_vs_sumET.pdf", "GEP #Sigma E_{T} [GeV]",          1e-5, 0.0, absYLbl);
             // Background: relative residual vs truth NonInt MET (lower z-floor; x capped at 300 GeV)
+            BkgProcLabel bkgProcRes;   // everything below here in this block is background
             drawRelResidual2D(back_h2_gJwoJ_relResidual_vs_truthMET,    calDir + "back_gFEX_JwoJ_relResidual_vs_truthMET.pdf",    "Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
             drawRelResidual2D(back_h2_gNC_relResidual_vs_truthMET,      calDir + "back_gFEX_NoiseCut_relResidual_vs_truthMET.pdf","Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
             drawRelResidual2D(back_h2_gRms_relResidual_vs_truthMET,     calDir + "back_gFEX_Rms_relResidual_vs_truthMET.pdf",     "Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
@@ -2909,6 +3788,77 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             "GEP algorithm comparison — Turn-on at 60 kHz", fDir + "TurnOn_GEP_AlgoComparison_60kHz.pdf",
             gepTOThrs(thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz), "Rate = 60 kHz",
             sig_h_metTruthNonInt_coarse);
+
+        // --- Z->mumu turn-on curves vs dimuon p_{T}, rate matched to 40 / 60 / 80 kHz ---
+        // One canvas per rate point with every MET type overlaid, plus a GEP-only canvas.
+        if (isZmumuSample) {
+            std::string muDir = fDir + "ZmumuTurnOn/";
+            gSystem->mkdir(muDir.c_str(), true);
+            // Which MET types go on the overlays: all of them, minus Tower MET for OR configs
+            // where it carries no meaning (same convention as the GEP comparison plots above).
+            std::vector<int> muIdx;
+            for (int iA = 0; iA < nMETTypes; ++iA)
+                if (!(hasOverlapRemoval && iA == towerMETTypeIdx)) muIdx.push_back(iA);
+            for (int iR = 0; iR < nMuRates; ++iR) {
+                std::vector<TH1F*>       effs, gepEffs;
+                std::vector<std::string> lbls, gepLbls;
+                std::vector<double>      thrs, gepThrs;
+                for (int iA : muIdx) {
+                    effs.push_back(effMu[iA][iR]);
+                    lbls.push_back(metTypeLabel[iA]);
+                    thrs.push_back(thrMu[iA][iR]);
+                }
+                for (int g = 0; g < nGEPMETTypes; ++g) {
+                    const int iA = gepMETTypeIdx[g];
+                    if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                    gepEffs.push_back(effMu[iA][iR]);
+                    gepLbls.push_back(metTypeLabel[iA]);
+                    gepThrs.push_back(thrMu[iA][iR]);
+                }
+                const std::string rateLbl = std::string("Rate = ") + muRateNames[iR];
+                drawTurnOnOverlay(effs, lbls,
+                                  std::string("Z #rightarrow #mu#mu turn-on at ") + muRateNames[iR],
+                                  muDir + "TurnOn_dimuonPt_" + muRateNames[iR] + ".pdf",
+                                  thrs, rateLbl, sig_h_dimuonPt_coarse, 0.52, 0.15,
+                                  "Dimuon p_{T} [GeV]");
+                drawTurnOnOverlay(gepEffs, gepLbls,
+                                  std::string("GEP algorithm comparison — Z #rightarrow #mu#mu turn-on at ") + muRateNames[iR],
+                                  muDir + "TurnOn_dimuonPt_GEP_AlgoComparison_" + muRateNames[iR] + ".pdf",
+                                  gepThrs, rateLbl, sig_h_dimuonPt_coarse, 0.45, 0.15,
+                                  "Dimuon p_{T} [GeV]");
+            }
+            // The dimuon system itself, as a cross-check that it looks like a Z.
+            drawMultiDist({sig_h_dimuonPt}, {"Dimuon system"},
+                          "Dimuon p_{T}", "Dimuon p_{T} [GeV]", muDir + "dimuonPt.pdf");
+            drawMultiDist({sig_h_dimuonMass}, {"Dimuon system"},
+                          "Dimuon mass", "m_{#mu#mu} [GeV]", muDir + "dimuonMass.pdf", false);
+        }
+
+        // --- Background <MET> vs jet multiplicity ---
+        if (hasTruthAntiKt4WZDressed || hasInTimeAntiKt4TruthJets) {
+            BkgProcLabel bkgProc;   // background-only plot
+            const std::string nJetXLabel =
+                Form("N_{truth jets} (E_{T} > %.0f GeV, hard scatter + in-time pileup)", kNJetMinEt);
+            std::vector<TProfile*>   allProfs;
+            std::vector<std::string> allLbls;
+            std::vector<TProfile*>   gepProfs;
+            std::vector<std::string> gepLbls;
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                allProfs.push_back(back_prof_METvsNJets[iA]);
+                allLbls.push_back(metTypeLabel[iA]);
+            }
+            for (int g = 0; g < nGEPMETTypes; ++g) {
+                const int iA = gepMETTypeIdx[g];
+                if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                gepProfs.push_back(back_prof_METvsNJets[iA]);
+                gepLbls.push_back(metTypeLabel[iA]);
+            }
+            drawProfileOverlay(allProfs, allLbls, nJetXLabel, "#LTMET#GT [GeV]",
+                               fDir + "MET_vs_NJets_bkg.pdf");
+            drawProfileOverlay(gepProfs, gepLbls, nJetXLabel, "#LTMET#GT [GeV]",
+                               fDir + "MET_vs_NJets_GEP_bkg.pdf");
+        }
 
         // --- Combined gFEX+GEP turn-on curves at best thresholds ---
         std::string comboDir = fDir + "Combined/";
@@ -3217,6 +4167,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_hw_jMET_vec.push_back(cloneDetached(back_hw_jMET));
         back_hw_JetMET_vec.push_back(cloneDetached(back_hw_JetMET));
         back_hw_TowerMET_vec.push_back(cloneDetached(back_hw_TowerMET));
+        if (hasSumJetET) back_hw_SumJetET_vec.push_back(cloneDetached(back_hw_SumJetET));
         eff_gMET_80kHz_vec.push_back(cloneDetached(eff_gMET_80kHz));
         eff_gMET_60kHz_vec.push_back(cloneDetached(eff_gMET_60kHz));
         eff_gMET_NC_80kHz_vec.push_back(cloneDetached(eff_gMET_NC_80kHz));
@@ -3246,6 +4197,27 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         thr_TotalMET_80kHz_vec.push_back(thr_TotalMET_80kHz);
         thr_TotalMET_60kHz_vec.push_back(thr_TotalMET_60kHz);
         sig_h_metTruthNonInt_unscaled_vec.push_back(cloneDetached(sig_h_metTruthNonInt_coarse));
+        // Z->mumu turn-ons and the background jet-multiplicity profiles keep their own label
+        // vectors: the former only exists for Zmumu inputs, the latter only when at least one
+        // truth jet collection was present, so neither is guaranteed parallel to labels.
+        if (isZmumuSample) {
+            zmumuLabels.push_back(labels[fileIt]);
+            sig_h_dimuonPt_coarse_vec.push_back(cloneDetached(sig_h_dimuonPt_coarse));
+            for (int iA = 0; iA < nMETTypes; ++iA)
+                for (int iR = 0; iR < nMuRates; ++iR) {
+                    effMu_vec[iA][iR].push_back(cloneDetached(effMu[iA][iR]));
+                    thrMu_vec[iA][iR].push_back(thrMu[iA][iR]);
+                }
+        }
+        if (hasTruthAntiKt4WZDressed || hasInTimeAntiKt4TruthJets) {
+            nJetProfLabels.push_back(labels[fileIt]);
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                TProfile* p = (TProfile*)back_prof_METvsNJets[iA]->Clone(
+                    (std::string("back_prof_METvsNJets_multi_") + metTypeShort[iA] + "_" + tag).c_str());
+                p->SetDirectory(0);
+                back_prof_METvsNJets_vec[iA].push_back(p);
+            }
+        }
         if (hasGFexSimMET) {
             sig_h_gMET_JwoJAOD_vec.push_back(cloneDetached(sig_h_gMET_JwoJAOD));
             back_h_gMET_JwoJAOD_vec.push_back(cloneDetached(back_h_gMET_JwoJAOD));
@@ -3299,6 +4271,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         drawRateVsThresholdMulti(back_hw_jMET_vec,      labels, "Rate vs jFEX MET threshold",            "MET threshold [GeV]", mDir + "Rate_jFEX_MET.pdf",        signalName);
         drawRateVsThresholdMulti(back_hw_JetMET_vec,    labels, "Rate vs GEP Jet MET threshold",         "MET threshold [GeV]", mDir + "Rate_JetMET.pdf",           signalName);
         drawRateVsThresholdMulti(back_hw_TowerMET_vec,  labels, "Rate vs GEP Tower MET threshold",       "MET threshold [GeV]", mDir + "Rate_TowerMET.pdf",         signalName);
+        if (!back_hw_SumJetET_vec.empty())
+            drawRateVsThresholdMulti(back_hw_SumJetET_vec, labels, "Rate vs GEP H_{T} threshold",       "H_{T} threshold [GeV]", mDir + "Rate_SumJetET.pdf",        signalName,
+                                     "Rate [Hz]", /*xMax=*/-1.0);
 
         // --- Multi-file signal efficiency vs threshold ---
         drawEffVsThresholdMulti(sig_h_TotalMET_vec,  labels, "Signal Efficiency vs GEP Total MET Threshold",    "MET threshold [GeV]", mDir + "SigEff_vs_Threshold_TotalMET.pdf",   signalName);
@@ -3310,22 +4285,41 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         drawEffVsThresholdMulti(sig_h_TowerMet_vec,  labels, "Signal Efficiency vs GEP Tower MET Threshold",    "MET threshold [GeV]", mDir + "SigEff_vs_Threshold_TowerMET.pdf",  signalName);
 
         // --- Rate vs Efficiency multi-file overlays ---
+        // One canvas per MET type, one curve per config: the GEP types and the FEX types, so
+        // every algorithm that gets a Rate_*.pdf overlay above also gets a rate-vs-efficiency one.
         {
             std::vector<TGraph*> rveJet, rveTower, rveTotal;
+            std::vector<TGraph*> rveGMET, rveGMET_NC, rveGMET_Rms, rveJMET;
             for (unsigned int i = 0; i < labels.size(); i++) {
                 auto outJ = MakeRateVsEff(sig_h_JetMet_vec[i],   back_hw_JetMET_vec[i]);
                 auto outT = MakeRateVsEff(sig_h_TowerMet_vec[i], back_hw_TowerMET_vec[i]);
                 auto outTot = MakeRateVsEff(sig_h_TotalMET_vec[i], back_hw_TotalMET_vec[i]);
+                auto outG   = MakeRateVsEff(sig_h_gMET_vec[i],     back_hw_gMET_vec[i]);
+                auto outGNC = MakeRateVsEff(sig_h_gMET_NC_vec[i],  back_hw_gMET_NC_vec[i]);
+                auto outGRms= MakeRateVsEff(sig_h_gMET_Rms_vec[i], back_hw_gMET_Rms_vec[i]);
+                auto outjM  = MakeRateVsEff(sig_h_jMET_vec[i],     back_hw_jMET_vec[i]);
                 rveJet.push_back((TGraph*)outJ.gRate_vsEff->Clone(Form("rve_JetMET_%u",   i)));
                 rveTower.push_back((TGraph*)outT.gRate_vsEff->Clone(Form("rve_TowerMET_%u", i)));
                 rveTotal.push_back((TGraph*)outTot.gRate_vsEff->Clone(Form("rve_TotalMET_%u", i)));
+                rveGMET.push_back((TGraph*)outG.gRate_vsEff->Clone(Form("rve_gMET_%u",     i)));
+                rveGMET_NC.push_back((TGraph*)outGNC.gRate_vsEff->Clone(Form("rve_gMET_NC_%u",  i)));
+                rveGMET_Rms.push_back((TGraph*)outGRms.gRate_vsEff->Clone(Form("rve_gMET_Rms_%u", i)));
+                rveJMET.push_back((TGraph*)outjM.gRate_vsEff->Clone(Form("rve_jMET_%u",     i)));
             }
             drawRateVsEffOverlay(rveJet,   labels, mDir + "RateVsEff_JetMET_multi.pdf",   signalName);
             drawRateVsEffOverlay(rveTower, labels, mDir + "RateVsEff_TowerMET_multi.pdf",  signalName);
             drawRateVsEffOverlay(rveTotal, labels, mDir + "RateVsEff_TotalMET_multi.pdf",  signalName);
+            drawRateVsEffOverlay(rveGMET,     labels, mDir + "RateVsEff_gFEX_MET_JwoJ_multi.pdf",     signalName);
+            drawRateVsEffOverlay(rveGMET_NC,  labels, mDir + "RateVsEff_gFEX_MET_NoiseCut_multi.pdf", signalName);
+            drawRateVsEffOverlay(rveGMET_Rms, labels, mDir + "RateVsEff_gFEX_MET_Rms_multi.pdf",      signalName);
+            drawRateVsEffOverlay(rveJMET,     labels, mDir + "RateVsEff_jFEX_MET_multi.pdf",          signalName);
             for (auto* g : rveJet)   delete g;
             for (auto* g : rveTower) delete g;
             for (auto* g : rveTotal) delete g;
+            for (auto* g : rveGMET)     delete g;
+            for (auto* g : rveGMET_NC)  delete g;
+            for (auto* g : rveGMET_Rms) delete g;
+            for (auto* g : rveJMET)     delete g;
         }
 
         // --- GEP vs gFEX comparison, one canvas per config ---
@@ -3417,6 +4411,36 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                           mDir + "TurnOn_60kHz_TotalMET_multi.pdf",
                           thr_TotalMET_60kHz_vec, "Rate = 60 kHz", truthOverlay, 0.38, 0.18);
 
+        // --- Z->mumu dimuon-p_{T} turn-on across configs, one canvas per MET type per rate ---
+        if (zmumuLabels.size() > 1) {
+            auto makeZmumuLabels = [&](const std::string& algoName) {
+                std::vector<std::string> v;
+                for (const auto& lbl : zmumuLabels) v.push_back(algoName + " (" + lbl + ")");
+                return v;
+            };
+            TH1F* dimuonOverlay = sig_h_dimuonPt_coarse_vec.empty() ? nullptr : sig_h_dimuonPt_coarse_vec[0];
+            for (int iA = 0; iA < nMETTypes; ++iA)
+                for (int iR = 0; iR < nMuRates; ++iR)
+                    drawTurnOnOverlay(effMu_vec[iA][iR], makeZmumuLabels(metTypeLabel[iA]),
+                                      std::string(metTypeLabel[iA]) + " Z #rightarrow #mu#mu turn-on at " + muRateNames[iR],
+                                      mDir + "TurnOn_dimuonPt_" + muRateNames[iR] + "_" + metTypeShort[iA] + "_multi.pdf",
+                                      thrMu_vec[iA][iR],
+                                      std::string("Rate = ") + muRateNames[iR], dimuonOverlay,
+                                      0.45, 0.18, "Dimuon p_{T} [GeV]");
+        }
+
+        // --- Background <MET> vs jet multiplicity across configs, one canvas per MET type ---
+        if (nJetProfLabels.size() > 1) {
+            BkgProcLabel bkgProc;   // background-only plots: label as QCD dijet, not the signal
+            const std::string nJetXLabel =
+                Form("N_{truth jets} (E_{T} > %.0f GeV, hard scatter + in-time pileup)", kNJetMinEt);
+            for (int iA = 0; iA < nMETTypes; ++iA)
+                drawProfileOverlay(back_prof_METvsNJets_vec[iA], nJetProfLabels,
+                                   nJetXLabel,
+                                   Form("#LT%s#GT [GeV]", metTypeLabel[iA]),
+                                   mDir + "MET_vs_NJets_" + metTypeShort[iA] + "_multi.pdf");
+        }
+
         // Standalone multi-file overlays of the AOD gFEX (the *_*Sim histograms now hold AOD,
         // since nominal gFEX was promoted to resim above). Labelled AOD accordingly.
         if (!sig_h_gMET_JwoJAOD_vec.empty()) {
@@ -3467,7 +4491,23 @@ void metAnalysisAndRates() {
     const std::string sigInput  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ZvvHbb_v4/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     const std::string sigInputTtbarSemilep = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_semilep_v4/mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     const std::string sigInputTtbarDilep   = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
-    const std::string backInput = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    // Z->mumu: the sample the dimuon-p_{T} turn-ons need. HERNTupler only retrieves TruthMuons
+    // (and so only fills dimuonPt) for this sample, and analyze_files keys the dimuon plots off
+    // "Zmumu" appearing in the path — so this input must be used, not a copy under another name.
+    const std::string sigInputZmumu = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/Zmumu_v4/mc21_14TeV_Zmumu_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    // Glob over the ten per-slice ntuples rather than a hadd'd combination: the merged
+    // file would exceed ROOT's 100 GB TTree::fgMaxTreeSize and come out truncated.
+    // ChainSource turns this into one TChain per tree (see chainSource.h).
+    const std::string backInput = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/QCD_Dijet_JZ*_v4/mc21_14TeV_jj_JZ*_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    // PU140 counterparts of the inputs above: same samples in the ntuples_PU140 mirror tree,
+    // r16129 in place of r16130 (see submit_all_ntupler.sh --pu 140). An r16129 emulator output
+    // MUST be paired with the r16129 input here — pairing it with the PU200 input silently
+    // compares the PU140 emulation against PU200 truth/AOD quantities.
+    const std::string sigInputPU140  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/ZvvHbb_v4/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
+    const std::string sigInputTtbarSemilepPU140 = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/ttbar_semilep_v4/mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
+    const std::string sigInputTtbarDilepPU140   = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
+    const std::string sigInputZmumuPU140 = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/Zmumu_v4/mc21_14TeV_Zmumu_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
+    const std::string backInputPU140 = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/QCD_Dijet_JZ*_v4/mc21_14TeV_jj_JZ*_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
     const std::string emuDir    = "/data/larsonma/GEPMET/outputNTuplesDev_METv2/";
 
     // The trailing _twrSF{x}_jetSF{y} tag encodes the (tower, jet) scale factors
@@ -3497,7 +4537,48 @@ void metAnalysisAndRates() {
 
         //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
 
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+
+        // For new OR studies 08122026
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF0p5.root"   },
+
+        // For new PU studies 08132026
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+
+        // PU 200 + varying tower coefficient studies 08182026
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+
+        // PU 200 + varying tower coefficient studies 08182026
+        /*{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },*/
+
+        // Z->mumu, same four configs as the PU study above (PU140/PU200 x NoSK/EtaSK). This is
+        // the sample the dimuon-p_{T} turn-ons come from — they are only produced for inputs
+        // with "Zmumu" in the path, since HERNTupler only fills dimuonPt for this sample.
+        // Uncomment these (and the matching labels / signalName / signalNames below) to run it.
+        //{ sigInputZmumuPU140, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputZmumuPU140, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputZmumu,      emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputZmumu,      emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+
         //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root" },
         //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
 
@@ -3537,7 +4618,38 @@ void metAnalysisAndRates() {
         //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
         //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
 
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        // For new OR studies 08122026
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF0p5.root"   },
+
+        // For new PU studies 08132026
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        // The Z->mumu block above pairs with these same four background entries — the emulator
+        // configs and the pileup scenarios line up one for one, so nothing changes on this side.
+
+        // PU 200 + varying tower coefficient studies 08182026
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
+
+        // PU 140 + varying tower coefficient studies 08182026
+        /*{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },*/
 
         //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         // ttbar semileptonic — same dijet background (process-independent), matching emu config
@@ -3571,9 +4683,22 @@ void metAnalysisAndRates() {
         "J15_T2_EtaSK_OR_TC0.4_JC1",
         "J20_T2_EtaSK_OR_TC1_JC1",
         "J20_T2_EtaSK_OR_TC0.4_JC1",*/
+        //"NoOR_TC1_JC1",
+        //"OR_TC1_JC1",
+        //"NoOR_TC1_JC0.5",
 
-        "J15_T2_EtaSK_NoOR_TC1_JC1",
+        //"J15_T1_NoSK_NoOR_PU140",
+        //"J15_T1_EtaSK_NoOR_PU140",
+        //"J15_T1_NoSK_NoOR_PU200",
+        //"J15_T1_EtaSK_NoOR_PU200",
 
+        "TC_JC",
+
+        // Labels for the commented-out Z->mumu block above (same four configs).
+        //"Zmumu_J15_T1_NoSK_NoOR_PU140",
+        //"Zmumu_J15_T1_EtaSK_NoOR_PU140",
+        //"Zmumu_J15_T1_NoSK_NoOR_PU200",
+        //"Zmumu_J15_T1_EtaSK_NoOR_PU200",
         //"J10_EtaSK",
         //"J15_EtaSK",
         //"J20_EtaSK",
@@ -3603,15 +4728,18 @@ void metAnalysisAndRates() {
     };
 
     std::string signalName = "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}";
+    //std::string signalName = "Z #rightarrow #mu#mu";     // Z->mumu block above
     // Per-file legend header (parallel to signalFiles/labels) so each signal process gets
     // its own label on per-file plots. Falls back to signalName for any unset entry.
     std::vector<std::string> signalNames = {
         "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+        //"Z #rightarrow #mu#mu",
         //"t#bar{t} semileptonic decay",
         //"t#bar{t} dileptonic decay",
     };
     std::string outputDir  = "metAnalysisPlots/";
-    std::string overlayDir = "multiFileOverlay_MET_gFEX_1File_OR_NoORComparison/";
+    std::string overlayDir = "multiFileOverlay_MET_CoeffComparison_ZvvHbb_PU200/";
+    //std::string overlayDir = "multiFileOverlay_MET_Zmumu_PUComparison/";   // Z->mumu block above
     gSystem->mkdir(outputDir.c_str(), true);
 
     analyze_files(signalFiles, backgroundFiles, labels, outputDir, signalName, overlayDir, signalNames);

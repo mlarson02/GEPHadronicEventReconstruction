@@ -55,9 +55,35 @@ inline unsigned int digitizedDeltaR2(unsigned int eta1, unsigned int phi1, unsig
     return uDeltaEta * uDeltaEta + uDeltaPhi * uDeltaPhi;
 }
 
-// Compute LUT index from wrapped absolute (deltaEta, deltaPhi) components
+// Compute LUT index from wrapped absolute (deltaEta, deltaPhi) components.
+// The row stride is the number of distinct |deltaPhi| codes, phi_range_ / 2 (a
+// wrapped deltaPhi never exceeds pi), which is what the LUT writer lays the
+// table out with. It is deliberately not 1 << (phi_bit_length_ - 1): that only
+// coincides with the row stride when every code of the phi field is used, which
+// is false for the wider v2 phi field.
 inline unsigned int calcLutIndex(unsigned int uDeltaEta, unsigned int uDeltaPhi) {
-    return uDeltaEta * (1u << (phi_bit_length_ - 1)) + uDeltaPhi;
+    constexpr unsigned int nDeltaPhiCodes = phi_range_ / 2;
+    // deltaPhi == pi exactly (code phi_range_/2) is the one wrapped value with no
+    // row of its own; it shares the last entry. Nothing that far apart passes any
+    // radius cut, so the LSB of slack there is irrelevant -- unlike running off
+    // the end of the row, which would return a neighbouring deltaEta's distance.
+    if (uDeltaPhi >= nDeltaPhiCodes) uDeltaPhi = nDeltaPhiCodes - 1;
+    return uDeltaEta * nDeltaPhiCodes + uDeltaPhi;
+}
+
+// Digitize phi onto the tower grid.
+//
+// Kept separate from digitize() because phi is periodic while eta/Et are not:
+// the generic function saturates at range - 1, which is wrong at both ends of
+// the phi axis. A value in the top half tower (phi within pi/64 of +pi) belongs
+// in code 0, not in a code one past the end of the range -- which would not even
+// fit the 6-bit v3 field. The code count is phi_range_ rather than
+// 1 << phi_bit_length_ so that the wider v2 phi field keeps the same pi/32
+// granularity and the same dynamic range, with its top 3 bits left as padding.
+inline unsigned int digitize_phi(double phi) {
+    const int nPhi = static_cast<int>(phi_range_);
+    const int code = static_cast<int>(std::lround((phi - phi_min_) / phi_granularity_));
+    return static_cast<unsigned int>(((code % nPhi) + nPhi) % nPhi);
 }
 
 unsigned int digitize(double value, int bit_length, double min_val, double max_val, unsigned int altRange = 0) {
@@ -103,24 +129,26 @@ unsigned int index_of_min(unsigned int (&in)[nPreSeeds_]) { // FIXME can't use a
     return min_idx;
 }
 
+// Size of the truncated (deltaEta, deltaPhi) LUTs: the index just past the last
+// pair that can pass the cut. Indexed exactly like the tables it sizes -- rows of
+// eta_range code counts, each phi_range / 2 wide, since a wrapped |deltaPhi|
+// never exceeds pi. Driven by the code counts and not by the field widths, so
+// the wider v2 fields do not inflate the tables past what the grid can produce.
 unsigned int calculate_lut_max_size(double cut,
-                                    unsigned int eta_bit_length,
-                                    unsigned int phi_bit_length,
+                                    unsigned int eta_range,
+                                    unsigned int phi_range,
                                     double eta_granularity,
                                     double phi_granularity,
-                                    bool deltaR2orDeltaRBool // true == computing for DeltaR2, false for DeltaR 
+                                    bool deltaR2orDeltaRBool // true == computing for DeltaR2, false for DeltaR
                                     )
 {
     unsigned int last_one_index = 0;
     unsigned int idx = 0;
 
-    // Changed to now map pairs of deltaEta, deltaPhi --> deltaR 
-    // So now looping through deltaEta up to 20.0
-    // deltaPhi up to 6.4 (which is wrapped in this computation, to avoid doing in FW)
-    for (unsigned int etaIt = 0; etaIt < (1u << (eta_bit_length)); ++etaIt) {
-        for (unsigned int phiIt = 0; phiIt < (1u << (phi_bit_length)); ++phiIt) {
+    for (unsigned int etaIt = 0; etaIt < eta_range; ++etaIt) {
+        for (unsigned int phiIt = 0; phiIt < (phi_range / 2); ++phiIt) {
             //std::cout << "etaIt: " << etaIt << " , phiIt: " << phiIt << "\n";
-            double deltaPhiWrapped = wrapSym_dbl(phiIt * phi_granularity); 
+            double deltaPhiWrapped = wrapSym_dbl(phiIt * phi_granularity);
             double etaSquared = std::pow(etaIt * eta_granularity, 2);
             double phiSquared = std::pow(deltaPhiWrapped, 2);
             //std::cout << "etaSquared: " << etaSquared << " , phiSquared: " << phiSquared << "\n";
@@ -148,11 +176,29 @@ unsigned int calculate_lut_max_size(double cut,
     return lut_max_size;
 }
 
+// The reconstruction tag encodes the pileup scenario: PU200 samples are r16130,
+// PU140 samples r16129 (HERNTupler stamps this into the ntuple names). Carrying it
+// through to the emulation outputs is what keeps the two scenarios distinguishable
+// by file name alone, since both land in the same output directory.
+// For the makeInputFileName fallback the ntuple directory is switched as well,
+// PU140 ntuples living in the parallel ntuples_PU140 tree.
+inline std::string applyPileupTags(std::string path, unsigned int pileup) {
+    if (pileup != 140) return path;
+    auto replaceFirst = [&path](const std::string& from, const std::string& to) {
+        size_t pos = path.find(from);
+        if (pos != std::string::npos) path.replace(pos, from.size(), to);
+    };
+    replaceFirst("_r16130_", "_r16129_");
+    replaceFirst("/ntuples/", "/ntuples_PU140/");
+    return path;
+}
+
 // Returns input NTuple file name given parameters
 std::string makeInputFileName(bool signalBool, std::string signalString,
-                              std::string inputRootFilePath = "/home/larsonma/GEPHadronicEventReconstruction/data/inputNTuples/") {
+                              std::string inputRootFilePath = "/home/larsonma/GEPHadronicEventReconstruction/data/inputNTuples/",
+                              unsigned int pileup = 200) {
     std::ostringstream ss;
-    
+
     if (signalBool) {
         if(signalString == "VBF_hh_bbbb_cvv0") ss << inputRootFilePath << "mc21_14TeV_hh_bbbb_vbf_novhh_cvv0_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if(signalString == "VBF_hh_bbbb_cvv1") ss << inputRootFilePath << "mc21_14TeV_hh_bbbb_vbf_novhh_cvv1_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
@@ -166,7 +212,7 @@ std::string makeInputFileName(bool signalBool, std::string signalString,
     } else {
         ss << inputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     }
-    return ss.str();
+    return applyPileupTags(ss.str(), pileup);
 }
 
 // Returns output NTuple file name given parameters
@@ -184,8 +230,9 @@ std::string makeOutputFileName(double rMergeCut,
                                bool enableEtWeightedMidpoint = false,
                                bool minEtSeedPosOptimization = true,
                                double minEtSeedPosOptimizationCut = 20.0,
-                               std::string outputRootFilePath = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/",
-                               bool useEtaSKObjects = false) {
+                               std::string outputRootFilePath = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/",
+                               bool useEtaSKObjects = false,
+                               unsigned int pileup = 200) {
     gSystem->mkdir(outputRootFilePath.c_str());
     std::string usePUSuppress;
     if(useEtaSKObjects){
@@ -222,7 +269,7 @@ std::string makeOutputFileName(double rMergeCut,
        << "_mec" << static_cast<int>(minEtSeedPosOptimizationCut) << "GeV"
        << "_v" << algoVersion << ".root";
 
-    return ss.str();
+    return applyPileupTags(ss.str(), pileup);
 }
 
 std::string makeOutputTextFileName(double rMergeCut,
@@ -236,7 +283,8 @@ std::string makeOutputTextFileName(double rMergeCut,
                                bool useSKObjects,
                                unsigned int algoVersion,
                                std::string outputTextFilePath = "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsEmulation/",
-                               bool useEtaSKObjects = false) {
+                               bool useEtaSKObjects = false,
+                               unsigned int pileup = 200) {
     std::string usePUSuppress;
     if(useEtaSKObjects){
         usePUSuppress = "EtaSK";
@@ -266,7 +314,7 @@ std::string makeOutputTextFileName(double rMergeCut,
        << "Seeds_" << nSeeds << "_"
        << "R2_" << std::setprecision(3) << RSquaredCut << "_IO_" << inputObjectType << "_Seed_" << seedObjectType << "_" << usePUSuppress << "_v" << algoVersion << ".dat";
 
-    return ss.str();
+    return applyPileupTags(ss.str(), pileup);
 }
 
 // Returns LUT file name given parameters. Files are split into a per-algoVersion subdirectory
@@ -310,9 +358,10 @@ void write_constants_header(const std::string& header_path,
                             unsigned int nProtoSeeds, // up to 6, used for seed position optimization
                             unsigned int total_bits_, // 64 for basic, adv for now.. 
                             unsigned int et_bit_length_, // 13 for basic & adv
-                            unsigned int eta_bit_length_, // 10 for basic (standard TOB format), 7 for adv (allows 0.1 x 0.1 tower granularity)
-                            unsigned int eta_range_, // 784 for basic (4.9 - -4.9 / 0.0125) to match phi granularity of 0.0125, 98 for adv (4.9 - -4.9 / 0.1) to match phi granularity of 0.1
-                            unsigned int phi_bit_length_, // 9 for basic (standard TOB format), 6 for adv (allows 0.1 x 0.1 tower granularity)
+                            unsigned int eta_bit_length_, // 10 for basic (standard TOB format), 7 for adv - field width only, see eta_range_
+                            unsigned int eta_range_, // 98 for both: the GEP tower grid, (4.9 - -4.9) / 0.1
+                            unsigned int phi_bit_length_, // 9 for basic (standard TOB format), 6 for adv - field width only, see phi_range_
+                            unsigned int phi_range_, // 64 for both: the GEP tower grid, 2*pi / (pi/32)
                             unsigned int max_R_8b_lut_size_, // 8, only needed for advanced algorithm, provides 2 * R_cut / 256 = ~0.09 granularity in deltaR
                             unsigned int substruct_0_bit_length_, // number of subjets for large-R jet - ALREADY IMPLEMENTED IN HLS
                             unsigned int substruct_1_bit_length_, // TBD - for now LRJ 1 subjetiness (tau_1)
@@ -356,19 +405,31 @@ void write_constants_header(const std::string& header_path,
     out << "constexpr unsigned int deltaR_lut_length_ = 8;\n"; // maybe this shouldn't be hard-coded? 
     out << "constexpr unsigned int padded_zeroes_length_ = 64 - et_bit_length_ - eta_bit_length_ - phi_bit_length_ - num_subjets_length_;\n"; // For now only include substruct 0 - only this is included in HLS currently!
     out << "constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + num_subjets_length_ + et_bit_length_ + eta_bit_length_ + phi_bit_length_;\n";
-    out << "constexpr double phi_min_ = -3.2;\n";
-    out << "constexpr double phi_max_ = 3.2;\n";
+    // ---- digitization grid ----
+    // Both versions describe the same physical grid, the GEP tower grid: 98 eta
+    // towers of 0.1 spanning |eta| < 4.9 and 64 phi towers of pi/32 spanning the
+    // full 2*pi. They differ only in the width of the fields the codes are packed
+    // into, so the dynamic range and granularity come from the code counts
+    // eta_range_ / phi_range_, never from eta_bit_length_ / phi_bit_length_; the
+    // unused high bits of the wider v2 fields are zero padding.
+    // eta_min_ / phi_min_ are the first tower centre and *_max_ one LSB past the
+    // last, matching Athena's CaloTowerContainer::configureGrid(98,-4.9,4.9,64),
+    // so a tower centre digitizes to an integer code with no round-half tie and
+    // undigitize_eta / undigitize_phi return the centre it came from.
+    out << "constexpr unsigned int eta_range_ = " << eta_range_ << ";\n";
+    out << "constexpr unsigned int phi_range_ = " << phi_range_ << ";\n";
+    out << "constexpr double eta_granularity_ = 0.1;\n";
     out << "constexpr double eta_min_ = -4.85;\n";
-    out << "constexpr double eta_max_ = 4.95;\n";
+    out << "constexpr double eta_max_ = eta_min_ + eta_range_ * eta_granularity_;\n";
+    out << "constexpr double phi_granularity_ = (2 * M_PI) / double(phi_range_);\n"; // pi/32
+    out << "constexpr double phi_min_ = -M_PI + phi_granularity_ / 2;\n";
+    out << "constexpr double phi_max_ = phi_min_ + phi_range_ * phi_granularity_;\n";
+    out << "constexpr unsigned int pi_digitized_in_phi_ = phi_range_ / 2;\n"; // 32
+    out << "const int PI_D     =  int(pi_digitized_in_phi_);\n"; // 32
+    out << "const int TWO_PI_D =  int(phi_range_);\n"; // wrap period: the full circle is phi_range_ codes
     out << "constexpr unsigned int et_min_ = 0;\n";
-    out << "constexpr unsigned int et_max_ = 1024;\n";
-    out << "constexpr double phi_granularity_ = (phi_max_ - phi_min_) / (1 << (phi_bit_length_));\n";
-    out << "constexpr unsigned int pi_digitized_in_phi_ = (M_PI) / (phi_granularity_);\n";
-    out << "const int PI_D     =  int(pi_digitized_in_phi_);\n"; // 31
-    out << "const int TWO_PI_D =  2 * pi_digitized_in_phi_ + 1;\n"; // wrap period (63 for 6 bits)
-    out << "constexpr unsigned int eta_range_ = (eta_max_ - eta_min_) / (phi_granularity_);\n"; // basically enforcing that eta granularity matches phi granularity 
-    out << "constexpr double eta_granularity_ = (eta_max_ - eta_min_) / double(eta_range_);\n";
-    out << "constexpr double et_granularity_ = (et_max_ - et_min_) / double((1 << et_bit_length_));\n";
+    out << "constexpr unsigned int et_max_ = 2048;\n";
+    out << "constexpr double et_granularity_ = (et_max_ - et_min_) / double((1 << et_bit_length_));\n"; // 0.25 GeV
     out << "constexpr double deltaR_granularity_ = (2 * rCut_) / double((1 << deltaR_lut_length_));\n"; 
     out << "constexpr double psi_R_granularity_ = (2 * rCut_) / double((1 << deltaR_lut_length_)) ;\n";
     out << "constexpr double massApproxRawLSB_GeV_  = et_granularity_ * deltaR_granularity_ ;\n";
@@ -378,8 +439,12 @@ void write_constants_header(const std::string& header_path,
     out << "constexpr unsigned int massApproxDivisor_ = static_cast<unsigned int>(massApproxScaleFactor_ + 0.5);\n"; // rounded
     out << "constexpr double mass_approx_granularity_ = massApprox_max_ / (1 << mass_approx_bit_length_);\n"; // 2 GeV
     out << "constexpr double N_subjetiness_granularity_ = (1.0) / (1 << N_subjetiness_bit_length_) ;\n"; // FIXME replace these with correct values! 
-    out << "constexpr double phi_range_ = phi_max_ - phi_min_;\n";
-    out << "constexpr double deltaR2_granularity_ = eta_granularity_ * eta_granularity_;\n"; // should be the same as phi_granularity_ squared too
+    // The arithmetic (non-LUT) deltaR^2 path adds deltaEta and deltaPhi code
+    // counts in quadrature, so it has to assume one LSB for both axes. On the
+    // real tower grid they differ by 1.9% (0.1 vs pi/32), which makes that path
+    // read the cone as 1.9% tighter in phi than in eta. The deltaR2Cut / deltaR
+    // LUTs use the two granularities separately and do not have this bias.
+    out << "constexpr double deltaR2_granularity_ = eta_granularity_ * eta_granularity_;\n";
     out << "constexpr unsigned int digitized_delta_R2Cut_ = static_cast<unsigned int>(r2Cut_/deltaR2_granularity_ + 0.5);\n";
     out << "constexpr unsigned int digitized_d_search_squared_ = static_cast<unsigned int>(((rMergeCut_) * (rMergeCut_))/deltaR2_granularity_ + 0.5);\n";
     out << "constexpr unsigned int total_bits_ = padded_zeroes_length_ + num_subjets_length_ + et_bit_length_ + eta_bit_length_ + phi_bit_length_;\n";

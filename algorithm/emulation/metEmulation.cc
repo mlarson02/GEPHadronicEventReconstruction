@@ -236,7 +236,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
         for (unsigned int iJet = 0; iJet < jetsProcessed; iJet++) {
             if(jetPtVec->at(iJet) <= jetEtThreshold) continue;
             unsigned int jetEt  = digitize(jetPtVec->at(iJet),  et_bit_length_,  static_cast<double>(et_min_),  static_cast<double>(et_max_));
-            unsigned int jetPhi = digitize(jetPhiVec->at(iJet), phi_bit_length_, phi_min_, phi_max_);
+            unsigned int jetPhi = digitize_phi(jetPhiVec->at(iJet));
             unsigned int jetEta = digitize(jetEtaVec->at(iJet), eta_bit_length_, eta_min_, eta_max_);
 
             jetPhiOverlapVec.push_back(jetPhi);
@@ -266,7 +266,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
             //std::cout << "towerET (GeV): " << towerEtVec->at(iTower) << "\n";
             //std::cout << "towerPhi (undigi): " << towerPhiVec->at(iTower) << "\n";
             unsigned int towerEt  = digitize(towerEtVec->at(iTower),  et_bit_length_,  static_cast<double>(et_min_),  static_cast<double>(et_max_));
-            unsigned int towerPhi = digitize(towerPhiVec->at(iTower), phi_bit_length_, phi_min_, phi_max_);
+            unsigned int towerPhi = digitize_phi(towerPhiVec->at(iTower));
             unsigned int towerEta = digitize(towerEtaVec->at(iTower), eta_bit_length_, eta_min_, eta_max_);
             // Check for overlap between jets and towers, if towers overlap, remove from computation of tower MET
            
@@ -389,13 +389,14 @@ void metEmulation(bool signalBool,                 // true = signal sample, fals
                   std::string explicitInputPath = "",        // When non-empty, overrides makeInputFileName (used for per-file Condor parallelism)
                   int fileIndex = -1,                        // When >= 0, appended as _fileN to output name to avoid collisions across parallel jobs
                   double towerScaleFactor = 1.0,             // Scalar weight applied to tower MET in the totalMET sum (future: eta-binned, calibrated)
-                  double jetScaleFactor = 1.0                // Scalar weight applied to jet MET in the totalMET sum (future: eta-binned, calibrated)
+                  double jetScaleFactor = 1.0,               // Scalar weight applied to jet MET in the totalMET sum (future: eta-binned, calibrated)
+                  unsigned int pileup = 200                  // Pileup scenario of the input sample; tags the output name (r16130 = PU200, r16129 = PU140)
                   ) {
 
     if (signalBool) std::cout << "Processing signal: " << signalString << "\n";
 
-    auto infile  = explicitInputPath.empty() ? makeInputFileName(signalBool, signalString) : explicitInputPath;
-    auto outfile = makeOutputMETFileName(maxTowersConsidered_, signalBool, signalString, useSKObjects, jetEtThreshold, towerEtThreshold, doJetTowerOverlapRemoval, "/data/larsonma/GEPMET/outputNTuplesDev_METv2/", useEtaSKObjects, towerScaleFactor, jetScaleFactor);
+    auto infile  = explicitInputPath.empty() ? makeInputFileName(signalBool, signalString, "/data/larsonma/GEPHadronicEventReconstruction/ntuples/", pileup) : explicitInputPath;
+    auto outfile = makeOutputMETFileName(maxTowersConsidered_, signalBool, signalString, useSKObjects, jetEtThreshold, towerEtThreshold, doJetTowerOverlapRemoval, "/data/larsonma/GEPMET/outputNTuplesDev_METv2/", useEtaSKObjects, towerScaleFactor, jetScaleFactor, pileup);
     if (fileIndex >= 0) {
         size_t pos = outfile.rfind(".root");
         if (pos != std::string::npos)
@@ -408,4 +409,365 @@ void metEmulation(bool signalBool,                 // true = signal sample, fals
     gSystem->RedirectOutput("debuglog_MET.log", "w");
     std::cout << "Calling event loop\n";
     eventLoop(infile, outfile, useSKObjects, jetEtThreshold, towerEtThreshold, doJetTowerOverlapRemoval, useEtaSKObjects, towerScaleFactor, jetScaleFactor);
+}
+
+
+// =====================================================================================
+// ===                        MET baseline validation path                           ===
+// =====================================================================================
+// Text-file in, text-file out. Reads the HERNTupler memory prints for towers and jets,
+// runs the same digitized MET arithmetic the event loop above runs, and writes the
+// result back out in the same memory-print format so an HLS C-sim testbench can be
+// diffed against it object-for-object.
+//
+// Nothing here reads a ROOT file. The memory prints are already digitized, so the
+// digitize() / digitize_phi() calls of the event loop are deliberately absent: the
+// codes on disk are used as-is. That is the point of the path -- it isolates the MET
+// arithmetic from the digitization, so a disagreement with the firmware can only come
+// from the arithmetic.
+//
+// The baseline configuration is fixed on purpose and is not exposed as a parameter:
+// no tower E_T threshold, no jet E_T threshold, no jet/tower overlap removal, and unit
+// scale factors on both tower and jet MET. Anything else would make the reference
+// vectors depend on a tuning choice that the firmware does not know about.
+// =====================================================================================
+
+// Set to true to print the per-event digitized quantities while writing the vectors.
+constexpr bool met_baseline_debug_ = false;
+
+const std::string met_baseline_mem_prints_path_ = "/eos/home-m/mlarson/TransferMemPrintsLUTs/data/MemPrints_v3/";
+const std::string met_baseline_output_subdir_   = "METBaselineValidation/";
+const std::string met_baseline_tower_output_suffix_ = "_METBaselineTower.dat";
+const std::string met_baseline_jet_output_suffix_   = "_METBaselineJet.dat";
+const std::string met_baseline_tower_subdir_    = "GEPCellsTowersSK/";
+const std::string met_baseline_tower_suffix_    = "_gepcellstowerssk.dat";
+const std::string met_baseline_jet_subdir_      = "GEPConeJetsCellsTowersSK/";
+const std::string met_baseline_jet_suffix_      = "_gepconejetscellstowerssk.dat";
+const std::string met_baseline_log_prefix_      = "debuglog_METBaselineValidation_";
+const std::string met_baseline_log_suffix_      = ".log";
+
+// Output word, 64 bits, laid out to match the Jet MET TOB map in the firmware
+// (MET_Engine.v), MSB -> LSB:
+//
+//   [63:58]  reserved       6 bits, zero
+//   [57:45]  ey_total      13 bits, signed accumulated Y component
+//   [44:32]  ex_total      13 bits, signed accumulated X component
+//   [31:23]  phi_reserved   9 bits, zero (reserved for phi_missing)
+//   [22:13]  eta_reserved  10 bits, zero
+//   [12:0]   et_missing    13 bits, MET after the square root
+//
+// The three reserved fields are written as zero but are still emitted in the binary
+// column so a line reads the same way as the firmware word. Their widths are the
+// firmware's, not this emulator's: the 9-bit phi and 10-bit eta of the TOB are wider
+// than the phi_bit_length_ / eta_bit_length_ codes used on the GEP tower grid, so they
+// are spelled out here rather than derived, and must not be swapped for the grid widths.
+//
+// ex_total / ey_total are sign-magnitude over signed_et_bit_length_ bits, matching
+// pack_signed_et in the event loop above and what undigitize_signed_et expects.
+//
+// NOTE: the field layout is the firmware's but the Ex/Ey *encoding* is not -- MET_Engine.v
+// carries them as two's complement. Sign-magnitude is the deliberate choice here so the
+// validation path and the ROOT path agree with each other; a consumer diffing these
+// vectors against firmware or C-sim output has to convert negative components first
+// (-59 is 0x103B here, 0x1FC5 in the firmware). Positive values are identical either way.
+constexpr unsigned int met_baseline_et_missing_width_   = et_bit_length_;        // 13
+constexpr unsigned int met_baseline_eta_reserved_width_ = 10;
+constexpr unsigned int met_baseline_phi_reserved_width_ = 9;
+constexpr unsigned int met_baseline_ex_total_width_     = signed_et_bit_length_; // 13
+constexpr unsigned int met_baseline_ey_total_width_     = signed_et_bit_length_; // 13
+constexpr unsigned int met_baseline_reserved_width_     = 6;
+
+constexpr unsigned int met_baseline_et_missing_low_   = 0;
+constexpr unsigned int met_baseline_eta_reserved_low_ = met_baseline_et_missing_low_   + met_baseline_et_missing_width_;
+constexpr unsigned int met_baseline_phi_reserved_low_ = met_baseline_eta_reserved_low_ + met_baseline_eta_reserved_width_;
+constexpr unsigned int met_baseline_ex_total_low_     = met_baseline_phi_reserved_low_ + met_baseline_phi_reserved_width_;
+constexpr unsigned int met_baseline_ey_total_low_     = met_baseline_ex_total_low_     + met_baseline_ex_total_width_;
+constexpr unsigned int met_baseline_reserved_low_     = met_baseline_ey_total_low_     + met_baseline_ey_total_width_;
+constexpr unsigned int met_baseline_total_bits_       = met_baseline_reserved_low_     + met_baseline_reserved_width_;
+static_assert(met_baseline_total_bits_ == 64, "MET baseline output word must be exactly 64 bits");
+
+// One object as it appears in a memory-print line: already-digitized codes.
+struct MemPrintObject {
+    unsigned int phi = 0;
+    unsigned int eta = 0;
+    unsigned int et  = 0;
+};
+
+// Read a whole memory-print file into a per-event list of objects.
+//
+// The binary column is treated as authoritative rather than the trailing hex word, for
+// the same reason extract_values_from_file in fileRead.h does: it is the column that
+// carries the field boundaries. Events are taken in file order, so index i of the
+// returned vector is the i-th "Event :" block.
+inline std::vector<std::vector<MemPrintObject>> readMemPrintFile(const std::string& fileName) {
+    std::vector<std::vector<MemPrintObject>> eventObjects;
+
+    std::ifstream inFile(fileName);
+    if (!inFile.is_open()) {
+        std::cerr << "Error: Could not open memory-print file " << fileName << std::endl;
+        return eventObjects;
+    }
+
+    std::string line;
+    while (std::getline(inFile, line)) {
+        if (line.find("Event") != std::string::npos) {
+            eventObjects.emplace_back();
+            continue;
+        }
+        if (eventObjects.empty()) continue; // stray line before the first event header
+
+        std::stringstream ss(line);
+        std::string index, bin, hexWord;
+        if (!(ss >> index >> bin >> hexWord)) continue; // blank or short line
+
+        size_t firstPipe  = bin.find('|');
+        size_t secondPipe = bin.rfind('|');
+        if (firstPipe == std::string::npos || secondPipe == std::string::npos || firstPipe == secondPipe) {
+            std::cerr << "Error: Malformed memory-print line -> " << line << std::endl;
+            continue;
+        }
+
+        // Binary column is written MSB -> LSB as phi | eta | et
+        MemPrintObject object;
+        object.phi = static_cast<unsigned int>(std::stoul(bin.substr(0, firstPipe), nullptr, 2));
+        object.eta = static_cast<unsigned int>(std::stoul(bin.substr(firstPipe + 1, secondPipe - firstPipe - 1), nullptr, 2));
+        object.et  = static_cast<unsigned int>(std::stoul(bin.substr(secondPipe + 1), nullptr, 2));
+        eventObjects.back().push_back(object);
+    }
+
+    inFile.close();
+    return eventObjects;
+}
+
+// Physics part of the memory-print file name, shared by the tower and jet inputs and by
+// the validation output. Mirrors fileName_ in fileRead.h so the testbench and this
+// emulator name the same sample the same way.
+inline std::string makeMemPrintBaseName(bool signalBool, std::string signalString, unsigned int jzSlice) {
+    if (signalBool) {
+        if (signalString == "ggF_hh_bbbb") return "mc21_14TeV_HHbbbb_HLLHC";
+        std::cerr << "Error: no memory-print base name known for signal " << signalString << std::endl;
+        return "";
+    }
+    if (jzSlice == 2) return "mc21_14TeV_jj_JZ2";
+    if (jzSlice == 3) return "mc21_14TeV_jj_JZ3";
+    if (jzSlice == 4) return "mc21_14TeV_jj_JZ4";
+    std::cerr << "Error: no memory-print base name known for JZ slice " << jzSlice << std::endl;
+    return "";
+}
+
+// Sign-magnitude packing, same convention as pack_signed_et in the event loop above.
+inline uint64_t packSignedEtMemPrint(int value) {
+    uint64_t sign = (value < 0) ? 1u : 0u;
+    uint64_t mag  = static_cast<uint64_t>(std::abs(value)) & maskN(signed_et_bit_length_ - 1);
+    return (sign << (signed_et_bit_length_ - 1)) | mag;
+}
+
+// Accumulate one collection of already-digitized objects into MET components.
+// Identical arithmetic to the tower and jet loops of eventLoop: the sine lookup is
+// indexed by the phi code, cosine is the same table read half_pi_digitized_in_phi_
+// codes along, and the product is brought back to E_T counts by an integer divide by
+// 1 << (sin_bit_length_ - 1). MET is the negative of the vector E_T sum.
+inline void accumulateMemPrintMet(const std::vector<MemPrintObject>& objects,
+                                  unsigned int maxObjects,
+                                  int& metX, int& metY, unsigned int& met) {
+    int etXSum = 0;
+    int etYSum = 0;
+
+    unsigned int objectsProcessed = maxObjects;
+    if (objectsProcessed > objects.size()) objectsProcessed = objects.size();
+
+    // No E_T threshold and no overlap removal by design -- every object in the memory
+    // print contributes.
+    for (unsigned int iObject = 0; iObject < objectsProcessed; iObject++) {
+        const MemPrintObject& object = objects.at(iObject);
+
+        int cosPhi = sinLUT_[wrapPhiUnsigned(object.phi + half_pi_digitized_in_phi_)];
+        int sinPhi = sinLUT_[object.phi];
+
+        etXSum += (static_cast<int>(object.et) * cosPhi) / (1 << (sin_bit_length_ - 1));
+        etYSum += (static_cast<int>(object.et) * sinPhi) / (1 << (sin_bit_length_ - 1));
+    }
+
+    metX = -etXSum;
+    metY = -etYSum;
+    met  = static_cast<unsigned int>(std::sqrt(static_cast<double>(metX) * metX + static_cast<double>(metY) * metY));
+}
+
+// Write one memory-print line: index, the six binary fields of the TOB word, and the
+// packed hex word. The reserved fields are all zero and contribute nothing to the hex,
+// but are printed so the binary column mirrors the firmware layout field for field.
+inline void writeMetBaselineLine(std::ofstream& outFile, unsigned int index,
+                                 int metX, int metY, unsigned int met) {
+    uint64_t exPacked      = packSignedEtMemPrint(metX);
+    uint64_t eyPacked      = packSignedEtMemPrint(metY);
+    uint64_t etMissingBits = static_cast<uint64_t>(met & maskN(met_baseline_et_missing_width_));
+
+    std::bitset<met_baseline_reserved_width_>     reserved_bitset(0);
+    std::bitset<met_baseline_ey_total_width_>     ey_total_bitset(eyPacked);
+    std::bitset<met_baseline_ex_total_width_>     ex_total_bitset(exPacked);
+    std::bitset<met_baseline_phi_reserved_width_> phi_reserved_bitset(0);
+    std::bitset<met_baseline_eta_reserved_width_> eta_reserved_bitset(0);
+    std::bitset<met_baseline_et_missing_width_>   et_missing_bitset(etMissingBits);
+
+    uint64_t combined_value =
+        (eyPacked      << met_baseline_ey_total_low_)   |
+        (exPacked      << met_baseline_ex_total_low_)   |
+        (etMissingBits << met_baseline_et_missing_low_);
+
+    std::stringstream hex_stream;
+    hex_stream << std::hex << std::nouppercase << std::setfill('0') << std::setw(met_baseline_total_bits_ / 4) << combined_value;
+
+    outFile << "0x" << std::hex << std::setw(2) << std::setfill('0') << index << std::dec << std::setfill(' ')
+            << " " << reserved_bitset.to_string()
+            << "|" << ey_total_bitset.to_string()
+            << "|" << ex_total_bitset.to_string()
+            << "|" << phi_reserved_bitset.to_string()
+            << "|" << eta_reserved_bitset.to_string()
+            << "|" << et_missing_bitset.to_string()
+            << " 0x" << hex_stream.str() << std::endl;
+}
+
+// MET baseline validation entry point.
+//
+// Use:
+//   root -b -l
+//   root [0] .L metEmulation.cc+
+//   root [1] metBaselineValidation(true, "ggF_hh_bbbb")
+//
+// Writes two files per sample to met_baseline_output_subdir_, one for tower MET and one
+// for jet MET, each with a single 0x00 line per event. Kept apart rather than as two
+// lines of one file so each converts on its own to whatever the consumer wants without
+// having to demultiplex by object index.
+//
+// Total MET is not written: with unit scale factors it is just the component-wise sum of
+// the tower and jet words, so writing it would bake a redundant value into the reference.
+//
+// Per-event printouts go to met_baseline_log_prefix_ + sample + met_baseline_log_suffix_
+// in the working directory; only the paths and the closing summary reach the terminal.
+void metBaselineValidation(bool signalBool = true,          // true = signal sample, false = dijet background
+                           std::string signalString = "ggF_hh_bbbb", // Which signal sample (memory prints exist for ggF_hh_bbbb)
+                           unsigned int jzSlice = 3,        // JZ slice, used only when signalBool is false
+                           int maxEvents = -1) {            // Process at most this many events; < 0 processes all
+
+    std::string baseName = makeMemPrintBaseName(signalBool, signalString, jzSlice);
+    if (baseName.empty()) return;
+
+    std::string towerFile       = met_baseline_mem_prints_path_ + met_baseline_tower_subdir_ + baseName + met_baseline_tower_suffix_;
+    std::string jetFile         = met_baseline_mem_prints_path_ + met_baseline_jet_subdir_   + baseName + met_baseline_jet_suffix_;
+    std::string outputPath      = met_baseline_mem_prints_path_ + met_baseline_output_subdir_;
+    std::string towerOutputFile = outputPath + baseName + met_baseline_tower_output_suffix_;
+    std::string jetOutputFile   = outputPath + baseName + met_baseline_jet_output_suffix_;
+    // Log stays in the working directory rather than next to the vectors on eos: it is a
+    // run artifact, not a reference artifact, and it is rewritten on every run.
+    std::string logFile         = met_baseline_log_prefix_ + baseName + met_baseline_log_suffix_;
+
+    std::cout << "tower memory print: " << towerFile       << "\n";
+    std::cout << "jet memory print:   " << jetFile         << "\n";
+    std::cout << "tower output:       " << towerOutputFile << "\n";
+    std::cout << "jet output:         " << jetOutputFile   << "\n";
+
+    std::vector<std::vector<MemPrintObject>> towerEvents = readMemPrintFile(towerFile);
+    std::vector<std::vector<MemPrintObject>> jetEvents   = readMemPrintFile(jetFile);
+
+    if (towerEvents.empty() || jetEvents.empty()) {
+        std::cerr << "Error: no events read, nothing written" << std::endl;
+        return;
+    }
+    if (towerEvents.size() != jetEvents.size()) {
+        // Not fatal, but the two prints are supposed to come from the same HERNTupler
+        // pass over the same events, so a mismatch means they are not the same sample.
+        std::cerr << "Warning: tower print has " << towerEvents.size() << " events, jet print has "
+                  << jetEvents.size() << "; processing the overlap only" << std::endl;
+    }
+
+    unsigned int eventsToProcess = static_cast<unsigned int>(std::min(towerEvents.size(), jetEvents.size()));
+    if (maxEvents >= 0 && static_cast<unsigned int>(maxEvents) < eventsToProcess)
+        eventsToProcess = static_cast<unsigned int>(maxEvents);
+
+    gSystem->mkdir(outputPath.c_str(), true);
+    std::ofstream towerOutFile(towerOutputFile);
+    if (!towerOutFile.is_open()) {
+        std::cerr << "Error: Could not open file " << towerOutputFile << std::endl;
+        return;
+    }
+    std::ofstream jetOutFile(jetOutputFile);
+    if (!jetOutFile.is_open()) {
+        std::cerr << "Error: Could not open file " << jetOutputFile << std::endl;
+        return;
+    }
+
+    // Send the per-event printouts to a log rather than the terminal.
+    //
+    // The handle form is what makes this restorable: RedirectOutput saves the current
+    // stdout/stderr into redirectHandle, and the paired call below with a null name and
+    // the same handle puts them back. Redirecting without a handle -- as the ROOT path in
+    // metEmulation above does -- leaves the rest of the session writing into the log file,
+    // which is why nothing printed after it ever reaches the terminal.
+    //
+    // The redirect brackets the event loop only. Every early return sits above it, so
+    // there is no path that leaves stdout redirected.
+    RedirectHandle_t redirectHandle;
+    gSystem->RedirectOutput(logFile.c_str(), "w", &redirectHandle);
+
+    std::cout << "MET baseline validation: " << baseName << "\n";
+    std::cout << "tower memory print: " << towerFile       << "\n";
+    std::cout << "jet memory print:   " << jetFile         << "\n";
+    std::cout << "tower output:       " << towerOutputFile << "\n";
+    std::cout << "jet output:         " << jetOutputFile   << "\n";
+    std::cout << "events:             " << std::dec << eventsToProcess << "\n";
+
+    for (unsigned int iEvt = 0; iEvt < eventsToProcess; iEvt++) {
+        towerOutFile << "Event : " << std::dec << iEvt << std::endl;
+        jetOutFile   << "Event : " << std::dec << iEvt << std::endl;
+
+        int towerMETx = 0, towerMETy = 0;
+        unsigned int towerMET = 0;
+        accumulateMemPrintMet(towerEvents.at(iEvt), maxTowersConsidered_, towerMETx, towerMETy, towerMET);
+
+        int jetMETx = 0, jetMETy = 0;
+        unsigned int jetMET = 0;
+        accumulateMemPrintMet(jetEvents.at(iEvt), maxJetsConsidered_, jetMETx, jetMETy, jetMET);
+
+        // Echo exactly the quantities that go into the output words, in digitized counts
+        // with the GeV equivalent alongside, so a line of the .dat can be read back
+        // without decoding it by hand.
+        std::cout << "iEvt: " << std::dec << iEvt
+                  << "  towers: " << towerEvents.at(iEvt).size()
+                  << "  jets: "   << jetEvents.at(iEvt).size() << "\n";
+        std::cout << "  tower  Ex: " << towerMETx << " (" << towerMETx * et_granularity_ << " GeV)"
+                  << "  Ey: "        << towerMETy << " (" << towerMETy * et_granularity_ << " GeV)"
+                  << "  MET: "       << towerMET  << " (" << towerMET  * et_granularity_ << " GeV)\n";
+        std::cout << "  jet    Ex: " << jetMETx   << " (" << jetMETx   * et_granularity_ << " GeV)"
+                  << "  Ey: "        << jetMETy   << " (" << jetMETy   * et_granularity_ << " GeV)"
+                  << "  MET: "       << jetMET    << " (" << jetMET    * et_granularity_ << " GeV)\n";
+
+        if (met_baseline_debug_) {
+            for (unsigned int iObject = 0; iObject < towerEvents.at(iEvt).size(); iObject++) {
+                const MemPrintObject& object = towerEvents.at(iEvt).at(iObject);
+                std::cout << "    tower " << iObject << " phi: " << object.phi
+                          << " eta: " << object.eta << " et: " << object.et
+                          << "  sin: " << sinLUT_[object.phi]
+                          << "  cos: " << sinLUT_[wrapPhiUnsigned(object.phi + half_pi_digitized_in_phi_)] << "\n";
+            }
+            for (unsigned int iObject = 0; iObject < jetEvents.at(iEvt).size(); iObject++) {
+                const MemPrintObject& object = jetEvents.at(iEvt).at(iObject);
+                std::cout << "    jet   " << iObject << " phi: " << object.phi
+                          << " eta: " << object.eta << " et: " << object.et
+                          << "  sin: " << sinLUT_[object.phi]
+                          << "  cos: " << sinLUT_[wrapPhiUnsigned(object.phi + half_pi_digitized_in_phi_)] << "\n";
+            }
+        }
+
+        writeMetBaselineLine(towerOutFile, 0, towerMETx, towerMETy, towerMET);
+        writeMetBaselineLine(jetOutFile,   0, jetMETx,   jetMETy,   jetMET);
+    }
+
+    // Restore stdout/stderr before the summary, so the summary lands on the terminal.
+    gSystem->RedirectOutput(nullptr, "", &redirectHandle);
+
+    towerOutFile.close();
+    jetOutFile.close();
+    std::cout << "Wrote " << std::dec << eventsToProcess << " events to " << towerOutputFile << "\n";
+    std::cout << "Wrote " << std::dec << eventsToProcess << " events to " << jetOutputFile   << "\n";
+    std::cout << "Per-event printouts in " << logFile << "\n";
 }

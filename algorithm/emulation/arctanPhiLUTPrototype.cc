@@ -65,9 +65,10 @@ static unsigned int g_reduceBits = 8;
 static unsigned int g_reduceMask = (1u << 5) - 1;
 
 // Output phi_missing word width for this prototype. This is intentionally an
-// independent quantity from phi_bit_length_ in constants.h (which digitizes
-// tower/jet phi over [-3.2, 3.2]); the MET phi_missing word spans the full
-// 0..2pi and is kept fully configurable here for prototyping.
+// independent quantity from phi_range_ in constants.h (which digitizes tower/jet
+// phi into 64 tower codes of pi/32); the MET phi_missing word spans the full
+// 0..2pi at its own granularity and is kept fully configurable here for
+// prototyping.
 constexpr unsigned int DEFAULT_PHI_MISSING_BITS = 8;
 
 // phi-domain constants, all derived from the phi_missing word width and

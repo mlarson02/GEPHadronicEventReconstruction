@@ -52,13 +52,14 @@ src_cc="/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/jetTag
 
 # helper function to generate correct LUT names for each algorithm configuration
 make_input_LUT_file_name() {
-  local rMerge="$1" r2="$2" type="$3"
-  local base="${4:-/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/LUTs/}"
+  local rMerge="$1" r2="$2" type="$3" vers="$4"
+  local base="${5:-/home/larsonma/GEPHadronicEventReconstruction/algorithm/emulation/LUT_Constants_Generation/LUTs/}"
   # match C++: setprecision(4) for rMerge, setprecision(3) for R2 (no std::fixed)
   local rMergeFmt r2Fmt
   rMergeFmt=$(printf "%.4g" "$rMerge")
   r2Fmt=$(printf "%.3g" "$r2")
-  printf "%sLUT_%s_rMerge_%s_R2_%s.h" "$base" "$type" "$rMergeFmt" "$r2Fmt"
+  # LUTs are written per algorithm version into LUTs/v<algoVersion>/ (see makeInputLUTFileName)
+  printf "%sv%s/LUT_%s_rMerge_%s_R2_%s.h" "$base" "$vers" "$type" "$rMergeFmt" "$r2Fmt"
 }
 
 # helper function to generate correct constants file names for each algorithm configuration
@@ -86,7 +87,7 @@ if [[ "$trigGepPerfValidation" == true ]]; then
     vRMerge=2;     vR2=1.21; vIOs=512; vSeeds=2; vVers=3; vEwm=false;  vMep=true
   fi
   vConstants=$(make_input_constants_file_name "$vRMerge" "$vIOs" "$vSeeds" "$vR2" "$vVers" "$constants_base")
-  vLutR8b=$(make_input_LUT_file_name "$vRMerge" "$vR2" "deltaR_8b" "$inputLUTFilePath")
+  vLutR8b=$(make_input_LUT_file_name "$vRMerge" "$vR2" "deltaR_8b" "$vVers" "$inputLUTFilePath")
   echo "[trigGepPerfValidation] v${vVers} constants: $vConstants"
   echo "[trigGepPerfValidation] v${vVers} LUT:       $vLutR8b"
   cp -f "$vConstants" "$dest_dir/constants.h"
@@ -113,9 +114,9 @@ for rMerge in "${rMergeCuts[@]}"; do
           # Build filenames
           constants_file=$(make_input_constants_file_name "$rMerge" "$ios" "$seeds" "$r2" "$algoVersion" "$constants_base")
 
-          #lut_output_path=$(make_input_LUT_file_name "$rMerge" "$r2" "deltaR2Cut" "$inputLUTFilePath")
-          #lutR_output_path=$(make_input_LUT_file_name "$rMerge" "$r2" "deltaR" "$inputLUTFilePath")
-          lutR_8b_output_path=$(make_input_LUT_file_name "$rMerge" "$r2" "deltaR_8b" "$inputLUTFilePath")
+          #lut_output_path=$(make_input_LUT_file_name "$rMerge" "$r2" "deltaR2Cut" "$algoVersion" "$inputLUTFilePath")
+          #lutR_output_path=$(make_input_LUT_file_name "$rMerge" "$r2" "deltaR" "$algoVersion" "$inputLUTFilePath")
+          lutR_8b_output_path=$(make_input_LUT_file_name "$rMerge" "$r2" "deltaR_8b" "$algoVersion" "$inputLUTFilePath")
 
           echo "Config: rMerge=$rMerge r2=$r2 nIOs=$ios nSeeds=$seeds"
           echo "  constants: $constants_file"

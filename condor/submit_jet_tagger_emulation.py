@@ -8,11 +8,12 @@ dict maps each sample name to the directory containing its HERNTupler output
 files; all *.root files found there become separate jobs.
 
 Usage:
-  python3 submit_jet_tagger_emulation.py [--dry-run] [--max-jobs N] [--label LABEL]
+  python3 submit_jet_tagger_emulation.py [--dry-run] [--max-jobs N] [--label LABEL] [--pu 140]
 
   --dry-run    print the .sub file without submitting
   --max-jobs N limit to first N jobs (useful for testing)
   --label STR  override the auto-generated label
+  --pu N       pileup scenario (200 = default, 140 = the ntuples_PU140 mirrors)
 """
 
 import argparse
@@ -27,25 +28,31 @@ WRAPPER = Path(__file__).parent / "run_jet_tagger_emulation_job.sh"
 # ---------------------------------------------------------------------------
 # Parameter grid — edit these to match jetTaggerConfigLocal.sh
 # ---------------------------------------------------------------------------
-ALGO_VERSIONS  = [3]
-R_MERGE_CUTS   = [2, 0.001]
+ALGO_VERSIONS  = [2]
+R_MERGE_CUTS   = [0.001]
 R_SQUARED_CUTS = [1.21]
-N_IOS          = [128]
+N_IOS          = [8]
 N_SEEDS        = [2]
 SIGNALS        = [True, False]
-SIGNAL_STRINGS = ["ggF_hh_bbbb", "Zprime_ttbar_allhad_flatpT", "ttbar_allhad"]   # only used when signal=True
+SIGNAL_STRINGS = ["ggF_hh_bbbb", "VBF_hh_bbbb", "Zprime_ttbar_allhad_flatpT", "ttbar_allhad"]   # only used when signal=True
 INPUT_OBJECTS  = ["gepCellsTowers"]
+#SEED_OBJECTS   = ["gepWTAConeCellsTowersJets", "jFEXSRJ", "gFEXSRJ"]
 SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
 PU_SUPPRESSION = [True]
 ETA_SK_OBJECTS = [False]   # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
 ET_WEIGHTED_MIDPOINTS      = [False]
 MIN_ET_SEED_POS_OPT        = [True]
-MIN_ET_SEED_POS_OPT_CUTS   = [20.0]
 
 SUBJET_ET_BY_SEED = {
-    "gFEXSRJ":                   25,
-    "jFEXSRJ":                   35,
+    #"gFEXSRJ":                   25,
+    #"jFEXSRJ":                   35,
     "gepWTAConeCellsTowersJets":  25,
+}
+
+MIN_ET_SEED_POS_OPT_CUT_BY_SEED = {
+    #"gFEXSRJ":                   20.0,
+    #"jFEXSRJ":                   30.0,
+    "gepWTAConeCellsTowersJets":  20.0,
 }
 
 # Directories containing HERNTupler output ntuples for each sample.
@@ -54,8 +61,18 @@ SUBJET_ET_BY_SEED = {
 # Values may be a single path string or a list of paths (used for the
 # 10 JZ dijet slices, which are pooled together under "BACKGROUND").
 _NTUPLE_BASE = "/data/larsonma/GEPHadronicEventReconstruction/ntuples"
+# PU140 ntuples live in a parallel directory tree with identical sample
+# subdirectory names (see submit_all_ntupler.sh --pu 140). Selected with --pu 140;
+# every INPUT_DIRS path below is remapped onto this base by ntuple_dir().
+_NTUPLE_BASE_BY_PU = {
+    200: _NTUPLE_BASE,
+    140: "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140",
+}
+# Pileup scenario for this submission; set from --pu in main().
+PILEUP = 200
 INPUT_DIRS = {
     "ggF_hh_bbbb":                f"{_NTUPLE_BASE}/ggF_HHbbbb_v4/",
+    "VBF_hh_bbbb":                f"{_NTUPLE_BASE}/VBF_HHbbbb_v4/",
     "ZvvHbb":                     f"{_NTUPLE_BASE}/ZvvHbb_v4/",
     "Zprime_ttbar_allhad_flatpT": f"{_NTUPLE_BASE}/Zprime_ttbar_allhad_flatpT_v4/",
     "ttbar_allhad":               f"{_NTUPLE_BASE}/ttbar_allhad_v4/",
@@ -80,6 +97,10 @@ def subjet_et(seed_obj: str) -> int:
     return SUBJET_ET_BY_SEED.get(seed_obj, 25)
 
 
+def min_et_seed_pos_opt_cut(seed_obj: str) -> float:
+    return MIN_ET_SEED_POS_OPT_CUT_BY_SEED.get(seed_obj, 20.0)
+
+
 def fmt_rmerge(v: float) -> str:
     return f"{v:.4g}"
 
@@ -92,14 +113,29 @@ def bool_str(b: bool) -> str:
     return "true" if b else "false"
 
 
+def ntuple_dir(path: str) -> str:
+    """Remap an INPUT_DIRS path (written for PU200) onto the selected pileup's
+    ntuple base. PU140 mirrors the PU200 tree, so only the base differs."""
+    base = _NTUPLE_BASE_BY_PU[PILEUP]
+    return path.replace(_NTUPLE_BASE, base, 1) if path.startswith(_NTUPLE_BASE) else path
+
+
+def sample_dirs(sample: str) -> list[str]:
+    """Directories to search for the given sample, for the selected pileup."""
+    entry = INPUT_DIRS.get(sample)
+    if not entry:
+        return []
+    dirs = [entry] if isinstance(entry, str) else entry
+    return [ntuple_dir(d) for d in dirs]
+
+
 def find_input_files(sample: str) -> list[str]:
     """Return sorted list of *.root files for the given sample.
     Accepts a single directory or a list of directories (used for JZ slices)."""
-    entry = INPUT_DIRS.get(sample)
-    if not entry:
+    dirs = sample_dirs(sample)
+    if not dirs:
         print(f"[warn] No INPUT_DIRS entry for sample '{sample}', skipping file discovery")
         return []
-    dirs = [entry] if isinstance(entry, str) else entry
     files = []
     for d in dirs:
         p = Path(d)
@@ -120,9 +156,8 @@ def print_file_index_map(samples: list[str]) -> None:
     Use it to verify alignment between input ntuple numbering and output numbering.
     """
     for sample in samples:
-        entry = INPUT_DIRS.get(sample)
-        dirs = [entry] if isinstance(entry, str) else (entry or [])
-        print(f"\n=== Sample: {sample} ===")
+        dirs = sample_dirs(sample)
+        print(f"\n=== Sample: {sample} (PU{PILEUP}) ===")
         if not dirs:
             print("  [no INPUT_DIRS entry]")
             continue
@@ -156,7 +191,9 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
         '+queue                = "short"',
         "getenv                = false",
         "",
-        "arguments = $(RMRG) $(R2) $(NIOS) $(NSEEDS) $(ALGOV) $(SIG) $(SIGSTR) $(PUSUP) $(INOBJ) $(SEEDOBJ) $(SJETT) $(ETWM) $(MINETO) $(MINETC) $(INFILE) $(FIDX) $(ETASK)",
+        # pileup is fixed for the whole submission, so it goes in the header rather
+        # than the per-job ItemData.
+        f"arguments = $(RMRG) $(R2) $(NIOS) $(NSEEDS) $(ALGOV) $(SIG) $(SIGSTR) $(PUSUP) $(INOBJ) $(SEEDOBJ) $(SJETT) $(ETWM) $(MINETO) $(MINETC) $(INFILE) $(FIDX) $(ETASK) {PILEUP}",
         "log       = $(LOG)",
         "output    = $(OUT)",
         "error     = $(ERR)",
@@ -185,8 +222,9 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
             continue
         for inobj, seedobj in itertools.product(INPUT_OBJECTS, SEED_OBJECTS):
             sjett = subjet_et(seedobj)
-            for etwm, mineto, minetc in itertools.product(
-                    ET_WEIGHTED_MIDPOINTS, MIN_ET_SEED_POS_OPT, MIN_ET_SEED_POS_OPT_CUTS):
+            minetc = min_et_seed_pos_opt_cut(seedobj)
+            for etwm, mineto in itertools.product(
+                    ET_WEIGHTED_MIDPOINTS, MIN_ET_SEED_POS_OPT):
                 for signal in SIGNALS:
                     sig_list = SIGNAL_STRINGS if signal else ["BACKGROUND"]
                     for sigstr in sig_list:
@@ -257,7 +295,13 @@ def main():
                         help="Print the fidx→filename mapping for every sample and exit")
     parser.add_argument("--lookup-fidx", type=int, nargs="+", metavar="N",
                         help="Look up which input file(s) correspond to the given output _fileN number(s) and exit")
+    parser.add_argument("--pu", type=int, default=200, choices=[140, 200], metavar="PILEUP",
+                        help="Pileup scenario (default: 200). 140 reads the ntuples_PU140 "
+                             "mirror tree instead of ntuples.")
     args = parser.parse_args()
+
+    global PILEUP
+    PILEUP = args.pu
 
     all_samples = list(SIGNAL_STRINGS) + ["BACKGROUND"]
 
@@ -277,6 +321,13 @@ def main():
                 for fidx in sorted(hits):
                     print(f"  fidx {fidx:5d}  ->  {hits[fidx]}")
         return
+
+    # Tag non-default pileup so PU140 logs/itemdata/sub files don't collide with PU200.
+    if args.pu != 200:
+        args.label += f"_PU{args.pu}"
+        print(f"[pileup] PU{args.pu}: reading inputs from {_NTUPLE_BASE_BY_PU[args.pu]}")
+        print(f"[pileup] Outputs are tagged r16129 (PU140) instead of r16130 (PU200), "
+              "so they sit alongside the PU200 ones without overwriting them.")
 
     log_dir = str(Path.home() / "condor_logs" / args.label)
     os.makedirs(log_dir, exist_ok=True)

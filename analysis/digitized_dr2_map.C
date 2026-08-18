@@ -27,11 +27,11 @@ void digitized_dr2_map(double R2cut = 1.21, const char* outPdf = "digitized_dr2_
     const int    nEta    = 98;//(1 << etaBits);    // 256
     const double etaStep = 0.1;//(etaMax - etaMin) / nEta; // 10/256 = 0.0390625
 
-    const double phiMin = -3.2;
-    const double phiMax =  3.2;
-    const int    phiBits = 6;                 // 1<<6 = 64 codes
-    const int    nPhi    = (1 << phiBits);    // 64
-    const double phiStep = (phiMax - phiMin) / nPhi; // 6.4/64 = 0.1
+    const int    phiBits = 6;                 // field width; the grid below is what matters
+    const int    nPhi    = 64;                // 64 phi towers over the full 2*pi
+    const double phiStep = (2 * M_PI) / nPhi; // pi/32
+    const double phiMin  = -M_PI + phiStep / 2; // first tower centre
+    const double phiMax  = phiMin + nPhi * phiStep;
 
     // -----------------------------
     // Histogram: x = Δη, y = Δφ

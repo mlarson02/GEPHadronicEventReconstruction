@@ -8,11 +8,12 @@ dict maps each sample name to the directory containing its HERNTupler output
 files; all *.root files found there become separate jobs.
 
 Usage:
-  python3 submit_met_emulation.py [--dry-run] [--max-jobs N] [--label LABEL]
+  python3 submit_met_emulation.py [--dry-run] [--max-jobs N] [--label LABEL] [--pu 140]
 
   --dry-run    print the .sub file without submitting
   --max-jobs N limit to first N jobs (useful for testing)
   --label STR  override the auto-generated label
+  --pu N       pileup scenario (200 = default, 140 = the ntuples_PU140 mirrors)
 """
 
 import argparse
@@ -28,17 +29,17 @@ WRAPPER = Path(__file__).parent / "run_met_emulation_job.sh"
 # Parameter grid — edit these to match metEmulationConfigLocal.sh
 # ---------------------------------------------------------------------------
 SIGNALS        = [True, False]
-SIGNAL_STRINGS = ["ZvvHbb", "ttbar_semilep", "ttbar_dilep"]   # only used when signal=True
+SIGNAL_STRINGS = ["ZvvHbb", "ttbar_semilep", "ttbar_dilep", "Zmumu"]   # only used when signal=True
 PU_SUPPRESSION = [True]
 JET_ET_THRESHOLDS        = [15.0]
-DO_JET_TOWER_OR          = [True, False]
+DO_JET_TOWER_OR          = [True]
 TOWER_ET_THRESHOLDS      = [2.0]
 ETA_SK_OBJECTS           = [True]
 # (towerScaleFactor, jetScaleFactor) pairs applied in the totalMET sum.
-# Default (1.0, 1.0); test pair (1.0, 0.4) to down-weight jet contribution.
-# TODO: replace with eta-binned, calibrated factors derived to match truth MET.
-SCALE_FACTOR_PAIRS       = [(1.0, 1.0), (0.4, 1.0)]
-
+# Default (1.0, 1.0); test pair (0.4, 1.0) to down-weight tower contribution.
+#SCALE_FACTOR_PAIRS       = [(1.0, 1.0), (1.0, 0.5), (0.2, 0.5), (0.4, 1.0)]
+#SCALE_FACTOR_PAIRS       = [(0.4, 1.0),(0.3, 1.0),(0.2, 1.0),(0.6, 1.0),(0.1, 1.0),(0.7, 1.0)]
+SCALE_FACTOR_PAIRS       = [(0.5, 1.0)]
 # Number of input HERNTupler ntuples processed per Condor job.
 # Each job hadds its assigned inputs on the worker (preserving the sorted
 # order) and runs metEmulation once on the merged input — this amortises
@@ -58,10 +59,20 @@ FILES_PER_JOB            = 5
 # All *.root files found there become separate parallel jobs.
 # Key must match a signal string from SIGNAL_STRINGS, or "BACKGROUND".
 _NTUPLE_BASE = "/data/larsonma/GEPHadronicEventReconstruction/ntuples"
+# PU140 ntuples live in a parallel directory tree with identical sample
+# subdirectory names (see submit_all_ntupler.sh --pu 140). Selected with --pu 140;
+# every INPUT_DIRS path below is remapped onto this base by ntuple_dir().
+_NTUPLE_BASE_BY_PU = {
+    200: _NTUPLE_BASE,
+    140: "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140",
+}
+# Pileup scenario for this submission; set from --pu in main().
+PILEUP = 200
 INPUT_DIRS = {
     "ZvvHbb":        f"{_NTUPLE_BASE}/ZvvHbb_v4/",
     "ttbar_semilep": f"{_NTUPLE_BASE}/ttbar_semilep_v4/",
     "ttbar_dilep":   f"{_NTUPLE_BASE}/ttbar_dilep_v4/",
+    "Zmumu":         f"{_NTUPLE_BASE}/Zmumu_v4/",
     "BACKGROUND": [
         f"{_NTUPLE_BASE}/QCD_Dijet_JZ0_v4/",
         f"{_NTUPLE_BASE}/QCD_Dijet_JZ1_v4/",
@@ -97,14 +108,29 @@ def bool_str(b: bool) -> str:
     return "true" if b else "false"
 
 
+def ntuple_dir(path: str) -> str:
+    """Remap an INPUT_DIRS path (written for PU200) onto the selected pileup's
+    ntuple base. PU140 mirrors the PU200 tree, so only the base differs."""
+    base = _NTUPLE_BASE_BY_PU[PILEUP]
+    return path.replace(_NTUPLE_BASE, base, 1) if path.startswith(_NTUPLE_BASE) else path
+
+
+def sample_dirs(sample: str) -> list[str]:
+    """Directories to search for the given sample, for the selected pileup."""
+    entry = INPUT_DIRS.get(sample)
+    if not entry:
+        return []
+    dirs = [entry] if isinstance(entry, str) else entry
+    return [ntuple_dir(d) for d in dirs]
+
+
 def find_input_files(sample: str) -> list[str]:
     """Return sorted list of *.root files for the given sample.
     Accepts a single directory or a list of directories (used for JZ slices)."""
-    entry = INPUT_DIRS.get(sample)
-    if not entry:
+    dirs = sample_dirs(sample)
+    if not dirs:
         print(f"[warn] No INPUT_DIRS entry for sample '{sample}', skipping file discovery")
         return []
-    dirs = [entry] if isinstance(entry, str) else entry
     files = []
     for d in dirs:
         p = Path(d)
@@ -121,9 +147,8 @@ def find_input_files(sample: str) -> list[str]:
 def print_file_index_map(samples: list[str]) -> None:
     """Print the fidx → input file mapping for each sample."""
     for sample in samples:
-        entry = INPUT_DIRS.get(sample)
-        dirs = [entry] if isinstance(entry, str) else (entry or [])
-        print(f"\n=== Sample: {sample} ===")
+        dirs = sample_dirs(sample)
+        print(f"\n=== Sample: {sample} (PU{PILEUP}) ===")
         if not dirs:
             print("  [no INPUT_DIRS entry]")
             continue
@@ -161,7 +186,9 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
         # jobs reliably finish well under 4 h, to access the larger short-queue slot pool.
         "getenv                = false",
         "",
-        "arguments = $(SIG) $(PUSUP) $(SIGSTR) $(JETET) $(JTOR) $(TOWERET) $(ETASK) $(INFILE) $(FIDX) $(TWRSF) $(JETSF)",
+        # pileup is fixed for the whole submission, so it goes in the header rather
+        # than the per-job ItemData.
+        f"arguments = $(SIG) $(PUSUP) $(SIGSTR) $(JETET) $(JTOR) $(TOWERET) $(ETASK) $(INFILE) $(FIDX) $(TWRSF) $(JETSF) {PILEUP}",
         "log       = $(LOG)",
         "output    = $(OUT)",
         "error     = $(ERR)",
@@ -256,7 +283,13 @@ def main():
                         help="Print the fidx→filename mapping for every sample and exit")
     parser.add_argument("--lookup-fidx", type=int, nargs="+", metavar="N",
                         help="Look up which input file(s) correspond to the given output _fileN number(s) and exit")
+    parser.add_argument("--pu", type=int, default=200, choices=[140, 200], metavar="PILEUP",
+                        help="Pileup scenario (default: 200). 140 reads the ntuples_PU140 "
+                             "mirror tree instead of ntuples.")
     args = parser.parse_args()
+
+    global PILEUP
+    PILEUP = args.pu
 
     all_samples = list(SIGNAL_STRINGS) + ["BACKGROUND"]
 
@@ -276,6 +309,13 @@ def main():
                 for fidx in sorted(hits):
                     print(f"  fidx {fidx:5d}  ->  {hits[fidx]}")
         return
+
+    # Tag non-default pileup so PU140 logs/itemdata/sub files don't collide with PU200.
+    if args.pu != 200:
+        args.label += f"_PU{args.pu}"
+        print(f"[pileup] PU{args.pu}: reading inputs from {_NTUPLE_BASE_BY_PU[args.pu]}")
+        print(f"[pileup] Outputs are tagged r16129 (PU140) instead of r16130 (PU200), "
+              "so they sit alongside the PU200 ones without overwriting them.")
 
     log_dir = str(Path.home() / "condor_logs" / args.label)
     os.makedirs(log_dir, exist_ok=True)

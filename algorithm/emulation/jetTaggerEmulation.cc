@@ -98,23 +98,17 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     std::vector<double>* gepWTAConeCellsTowersEtaSKJetsPhiValues = nullptr;
     std::vector<unsigned int>* gepWTAConeCellsTowersEtaSKJetsNConstituentsValues = nullptr;
 
-    // gFEX small radius jets
+    // gFEX small radius jets (resimulated)
     std::vector<unsigned int>* gFexSRJEtIndexValues = nullptr;
     std::vector<double>* gFexSRJEtValues = nullptr;
     std::vector<double>* gFexSRJEtaValues = nullptr;
     std::vector<double>* gFexSRJPhiValues = nullptr;
 
-    // jFEX small radius jets
+    // jFEX small radius jets (resimulated)
     std::vector<unsigned int>* jFexSRJEtIndexValues = nullptr;
     std::vector<double>* jFexSRJEtValues = nullptr;
     std::vector<double>* jFexSRJEtaValues = nullptr;
     std::vector<double>* jFexSRJPhiValues = nullptr;
-
-    // jFEX small radius jets (resimulated) — used by the "jFEXSRJSim" seed option
-    std::vector<unsigned int>* jFexSRJSimEtIndexValues = nullptr;
-    std::vector<double>* jFexSRJSimEtValues = nullptr;
-    std::vector<double>* jFexSRJSimEtaValues = nullptr;
-    std::vector<double>* jFexSRJSimPhiValues = nullptr;
 
     // Output JetTagger large radius jets
     std::vector<double>* jetTaggerLRJPsi_RValues = nullptr;
@@ -194,9 +188,9 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     TTree* gepWTAConeCellsTowersSKJetsTree = (TTree*)inputFile->Get("gepWTAConeCellsTowersSKJetsTree");
     TTree* gepCellsTowersEtaSKTree = (TTree*)inputFile->Get("gepCellsTowersEtaSKTree");
     TTree* gepWTAConeCellsTowersEtaSKJetsTree = (TTree*)inputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree");
-    TTree* gFexSRJTree = (TTree*)inputFile->Get("gFexSRJTree");
-    TTree* jFexSRJTree = (TTree*)inputFile->Get("jFexSRJTree"); // Note that jFEX, gFEX trees are pre-sorted by Et in LRJNTupler.cc
-    TTree* jFexSRJSimTree = (TTree*)inputFile->Get("jFexSRJSimTree"); // resimulated jFEX SRJ seeds (may be null in older ntuples)
+    // jFEX/gFEX SRJ seeds are always taken from the resimulated trees (the AOD trees are not used for seeding)
+    TTree* gFexSRJTree = (TTree*)inputFile->Get("gFexSRJSimTree");
+    TTree* jFexSRJTree = (TTree*)inputFile->Get("jFexSRJSimTree"); // Note that jFEX, gFEX trees are pre-sorted by Et in LRJNTupler.cc
     TTree* eventInfoTreeIn = (TTree*)inputFile->Get("eventInfoTree");
     eventInfoTreeIn->SetBranchAddress("gepRunNumberOut",   &gepRunNumberIn);
     eventInfoTreeIn->SetBranchAddress("gepEventNumberOut", &gepEventNumberIn);
@@ -293,24 +287,20 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     gepWTAConeCellsTowersEtaSKJetsTree->SetBranchAddress("Phi",          &gepWTAConeCellsTowersEtaSKJetsPhiValues);
     gepWTAConeCellsTowersEtaSKJetsTree->SetBranchAddress("NConstituents",&gepWTAConeCellsTowersEtaSKJetsNConstituentsValues);
 
-    // === gFexSRJTree ===
-    gFexSRJTree->SetBranchAddress("EtIndex", &gFexSRJEtIndexValues);
-    gFexSRJTree->SetBranchAddress("Et", &gFexSRJEtValues);
-    gFexSRJTree->SetBranchAddress("Eta", &gFexSRJEtaValues);
-    gFexSRJTree->SetBranchAddress("Phi", &gFexSRJPhiValues);
-
-    // === jFexSRJTree ===
-    jFexSRJTree->SetBranchAddress("EtIndex", &jFexSRJEtIndexValues);
-    jFexSRJTree->SetBranchAddress("Et", &jFexSRJEtValues);
-    jFexSRJTree->SetBranchAddress("Eta", &jFexSRJEtaValues);
-    jFexSRJTree->SetBranchAddress("Phi", &jFexSRJPhiValues);
+    // === gFexSRJSimTree (resimulated) === guarded: only present in newer ntuples
+    if(gFexSRJTree){
+        gFexSRJTree->SetBranchAddress("EtIndex", &gFexSRJEtIndexValues);
+        gFexSRJTree->SetBranchAddress("Et", &gFexSRJEtValues);
+        gFexSRJTree->SetBranchAddress("Eta", &gFexSRJEtaValues);
+        gFexSRJTree->SetBranchAddress("Phi", &gFexSRJPhiValues);
+    }
 
     // === jFexSRJSimTree (resimulated) === guarded: only present in newer ntuples
-    if(jFexSRJSimTree){
-        jFexSRJSimTree->SetBranchAddress("EtIndex", &jFexSRJSimEtIndexValues);
-        jFexSRJSimTree->SetBranchAddress("Et", &jFexSRJSimEtValues);
-        jFexSRJSimTree->SetBranchAddress("Eta", &jFexSRJSimEtaValues);
-        jFexSRJSimTree->SetBranchAddress("Phi", &jFexSRJSimPhiValues);
+    if(jFexSRJTree){
+        jFexSRJTree->SetBranchAddress("EtIndex", &jFexSRJEtIndexValues);
+        jFexSRJTree->SetBranchAddress("Et", &jFexSRJEtValues);
+        jFexSRJTree->SetBranchAddress("Eta", &jFexSRJEtaValues);
+        jFexSRJTree->SetBranchAddress("Phi", &jFexSRJPhiValues);
     }
 
     std::ofstream f_output(outputTextFilePath);
@@ -390,17 +380,18 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         gepEventNumberOut = gepEventNumberIn;
 
         if(seedObjectType == "jFEXSRJ"){
-            jFexSRJTree->GetEntry(iEvt); // get seed data
-        }
-        else if(seedObjectType == "jFEXSRJSim"){
-            if(!jFexSRJSimTree){
-                std::cerr << "ERROR: seedObjectType=jFEXSRJSim requested but jFexSRJSimTree is missing from the input ntuple!\n";
+            if(!jFexSRJTree){
+                std::cerr << "ERROR: seedObjectType=jFEXSRJ requested but jFexSRJSimTree is missing from the input ntuple!\n";
                 return;
             }
-            jFexSRJSimTree->GetEntry(iEvt); // get resimulated seed data
+            jFexSRJTree->GetEntry(iEvt); // get resimulated seed data
         }
         else if(seedObjectType == "gFEXSRJ"){
-            gFexSRJTree->GetEntry(iEvt); // get seed data
+            if(!gFexSRJTree){
+                std::cerr << "ERROR: seedObjectType=gFEXSRJ requested but gFexSRJSimTree is missing from the input ntuple!\n";
+                return;
+            }
+            gFexSRJTree->GetEntry(iEvt); // get resimulated seed data
         }
         else if(seedObjectType == "gepWTAConeCellsTowersJets"){
             if(useEtaSKObjects){
@@ -470,21 +461,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 seedValuesOriginal[iSeed].et = digitize(jFexSRJEtValues->at(iSeed), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                 seedValuesOriginal[iSeed].eta = digitize(jFexSRJEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                seedValuesOriginal[iSeed].phi = digitize(jFexSRJPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
-            }
-            else if(seedObjectType == "jFEXSRJSim"){
-                if(jFexSRJSimEtValues->size() < nSeedsInput_){
-                    if(iSeed >= jFexSRJSimEtValues->size()){
-                        seedValuesOriginal[iSeed].et = 0;
-                        seedValuesOriginal[iSeed].eta = 0;
-                        seedValuesOriginal[iSeed].phi = 0;
-                        continue;
-                    }
-                }
-                seedValuesOriginal[iSeed].et = digitize(jFexSRJSimEtValues->at(iSeed), et_bit_length_,
-                                static_cast<double>(et_min_), static_cast<double>(et_max_));
-                seedValuesOriginal[iSeed].eta = digitize(jFexSRJSimEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                seedValuesOriginal[iSeed].phi = digitize(jFexSRJSimPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
+                seedValuesOriginal[iSeed].phi = digitize_phi(jFexSRJPhiValues->at(iSeed));
             }
             else if(seedObjectType == "gFEXSRJ"){
                 if(gFexSRJEtValues->size() < nSeedsInput_){
@@ -498,7 +475,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 seedValuesOriginal[iSeed].et = digitize(gFexSRJEtValues->at(iSeed), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                 seedValuesOriginal[iSeed].eta = digitize(gFexSRJEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                seedValuesOriginal[iSeed].phi = digitize(gFexSRJPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
+                seedValuesOriginal[iSeed].phi = digitize_phi(gFexSRJPhiValues->at(iSeed));
             }
             else if(seedObjectType == "gepWTAConeCellsTowersJets"){
                 if(useEtaSKObjects){
@@ -513,7 +490,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersEtaSKJetsEtValues->at(iSeed), et_bit_length_,
                                     static_cast<double>(et_min_), static_cast<double>(et_max_));
                     seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersEtaSKJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    seedValuesOriginal[iSeed].phi = digitize(gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
+                    seedValuesOriginal[iSeed].phi = digitize_phi(gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iSeed));
                 }
                 else if(useSKObjects){
                     //std::cout << " seedobject type is correct" << "\n";
@@ -529,7 +506,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersSKJetsEtValues->at(iSeed), et_bit_length_,
                                     static_cast<double>(et_min_), static_cast<double>(et_max_));
                     seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersSKJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    seedValuesOriginal[iSeed].phi = digitize(gepWTAConeCellsTowersSKJetsPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
+                    seedValuesOriginal[iSeed].phi = digitize_phi(gepWTAConeCellsTowersSKJetsPhiValues->at(iSeed));
                 }
                 else{
                     //std::cout << " seedobject type is correct" << "\n";
@@ -545,7 +522,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersJetsEtValues->at(iSeed), et_bit_length_,
                                     static_cast<double>(et_min_), static_cast<double>(et_max_));
                     seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    seedValuesOriginal[iSeed].phi = digitize(gepWTAConeCellsTowersJetsPhiValues->at(iSeed), phi_bit_length_, phi_min_, phi_max_);
+                    seedValuesOriginal[iSeed].phi = digitize_phi(gepWTAConeCellsTowersJetsPhiValues->at(iSeed));
                 }
             }
         }
@@ -668,13 +645,13 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     inputObjectValues[iIO].et = digitize(gepBasicClustersSKEtValues->at(iIO), et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepBasicClustersSKEtaValues->at(iIO), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize(gepBasicClustersSKPhiValues->at(iIO), phi_bit_length_, phi_min_, phi_max_);
+                    inputObjectValues[iIO].phi = digitize_phi(gepBasicClustersSKPhiValues->at(iIO));
                 }
                 else{
                     inputObjectValues[iIO].et = digitize(gepBasicClustersEtValues->at(iIO), et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepBasicClustersEtaValues->at(iIO), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize(gepBasicClustersPhiValues->at(iIO), phi_bit_length_, phi_min_, phi_max_);
+                    inputObjectValues[iIO].phi = digitize_phi(gepBasicClustersPhiValues->at(iIO));
                 }
             }
             else if(inputObjectType == "gepCellsTowers"){
@@ -682,19 +659,19 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     inputObjectValues[iIO].et = digitize(gepCellsTowersEtaSKEtValues->at(iIO), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepCellsTowersEtaSKEtaValues->at(iIO), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize(gepCellsTowersEtaSKPhiValues->at(iIO), phi_bit_length_, phi_min_, phi_max_);
+                    inputObjectValues[iIO].phi = digitize_phi(gepCellsTowersEtaSKPhiValues->at(iIO));
                 }
                 else if(useSKObjects){
                     inputObjectValues[iIO].et = digitize(gepCellsTowersSKEtValues->at(iIO), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepCellsTowersSKEtaValues->at(iIO), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize(gepCellsTowersSKPhiValues->at(iIO), phi_bit_length_, phi_min_, phi_max_);
+                    inputObjectValues[iIO].phi = digitize_phi(gepCellsTowersSKPhiValues->at(iIO));
                 }
                 else{
                     inputObjectValues[iIO].et = digitize(gepCellsTowersEtValues->at(iIO), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepCellsTowersEtaValues->at(iIO), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize(gepCellsTowersPhiValues->at(iIO), phi_bit_length_, phi_min_, phi_max_);
+                    inputObjectValues[iIO].phi = digitize_phi(gepCellsTowersPhiValues->at(iIO));
                 }
             }
             else if(inputObjectType == "gepWTAConeCellsTowersJets"){
@@ -703,19 +680,19 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersEtaSKJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersEtaSKJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize(gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iIO + nSeedsOutput_), phi_bit_length_, phi_min_, phi_max_);
+                    inputObjectValues[iIO].phi = digitize_phi(gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iIO + nSeedsOutput_));
                 }
                 else if(useSKObjects){
                     inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersSKJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersSKJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize(gepWTAConeCellsTowersSKJetsPhiValues->at(iIO + nSeedsOutput_), phi_bit_length_, phi_min_, phi_max_);
+                    inputObjectValues[iIO].phi = digitize_phi(gepWTAConeCellsTowersSKJetsPhiValues->at(iIO + nSeedsOutput_));
                 }
                 else{
                     inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
                     inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize(gepWTAConeCellsTowersJetsPhiValues->at(iIO + nSeedsOutput_), phi_bit_length_, phi_min_, phi_max_);
+                    inputObjectValues[iIO].phi = digitize_phi(gepWTAConeCellsTowersJetsPhiValues->at(iIO + nSeedsOutput_));
                 }
             }
 
@@ -835,9 +812,12 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 int eta1 = seedValues[iSeed].eta - (1 << (eta_bit_length_ - 1));
                 int eta2 = seedValues[indices[iSeed] + nSeedsOutput_].eta - (1 << (eta_bit_length_ - 1));
 
-                // Convert phi to signed integers centered at 0
-                int phi1s = seedValues[iSeed].phi - (1 << (phi_bit_length_ - 1));
-                int phi2s = seedValues[indices[iSeed] + nSeedsOutput_].phi - (1 << (phi_bit_length_ - 1));
+                // Convert phi to signed integers centered at 0. The bias is half the
+                // *grid*, phi_range_ / 2, not half the field: the two only agree when
+                // every code of the phi field is a real tower, which is false for the
+                // wider v2 field, and wrapSym below works in code units either way.
+                int phi1s = seedValues[iSeed].phi - (phi_range_ / 2);
+                int phi2s = seedValues[indices[iSeed] + nSeedsOutput_].phi - (phi_range_ / 2);
                 //std::cout << "phi1s: " << phi1s << " , phi2s: " << phi2s << "\n";
                 // --- Shortest-arc midpoint (unweighted) ---
                 int dphi = phi2s - phi1s;
@@ -872,11 +852,11 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                               << " eta1=" << eta1 << " eta2=" << eta2 << " dphi=" << dphi
                               << " eta_mid=" << eta_mid << " phi_mid=" << phi_mid
                               << " -> eta=" << (eta_mid + (1 << (eta_bit_length_ - 1)))
-                              << " phi=" << (phi_mid + (1 << (phi_bit_length_ - 1))) << "\n";
+                              << " phi=" << (phi_mid + (phi_range_ / 2)) << "\n";
 
                 // --- Convert midpoints back to digitized unsigned format ---
                 unsigned int eta_mid_digitized = eta_mid + (1 << (eta_bit_length_ - 1));
-                unsigned int phi_mid_digitized = phi_mid + (1 << (phi_bit_length_ - 1));
+                unsigned int phi_mid_digitized = phi_mid + (phi_range_ / 2);
                 //std::cout << "phi_mid_digitized: " << phi_mid_digitized << "\n";
 
                 seedValues[iSeed].eta = eta_mid_digitized; // FIXME replace 1, 2 with etaIndexInput, phiIndexInput - fine for now
@@ -1270,7 +1250,7 @@ void jetTaggerEmulation(double rMergeCut, // Distance in r-phi plane to look for
                         bool useSKObjects, // Whether to use PU-suppressed (with SoftKiller) objects
                         std::string signalString, // Which signal sample being used (functionality for: VBF_hh_bbbb, ggF_hh_bbbb, ZvvHbb, ttbar_had, Zprime_ttbar)
                         std::string inputObjectType = "gepCellsTowers", // Possibilities: "gepCellsTowers", "gepWTAConeCellsTowersJets", "gepBasicClusters"
-                        std::string seedObjectType = "gepWTAConeCellsTowersJets", // Possibilities: "gepWTAConeCellsTowersJets" or "jFEXSRJ"
+                        std::string seedObjectType = "gepWTAConeCellsTowersJets", // Possibilities: "gepWTAConeCellsTowersJets", "jFEXSRJ" or "gFEXSRJ" (jFEX/gFEX seeds are always resimulated)
                         double subjetEtThreshold = 25.0, // Nominally 25 GeV for gepWTAConeCellsTowersJets, 50 GeV for jFEX SRJ, 35 GeV for gFEX SRJ based on their respective energy scales, not fully optimized
                         bool enableEtWeightedMidpoint = false, // Whether use E_T weighted midpoint calculation for seed optimization
                         bool minEtSeedPosOptimization = false, // Whether require a minimum E_T to allow a proto-seed to be considered for seed optimization
@@ -1279,19 +1259,20 @@ void jetTaggerEmulation(double rMergeCut, // Distance in r-phi plane to look for
                         std::string explicitInputPath = "", // When non-empty, overrides makeInputFileName (used for per-file Condor parallelism)
                         int fileIndex = -1, // When >= 0, appended as _fileN to output name to avoid collisions across parallel jobs
                         bool useEtaSKObjects = false, // Whether to use EtaSK PU-suppressed objects (gepCellsTowers and WTAConeJets only)
-                        bool trigGepPerfValidation = false // Validate against Athena TrigGepPerf: read HERNTupler validation output, write fixed output
+                        bool trigGepPerfValidation = false, // Validate against Athena TrigGepPerf: read HERNTupler validation output, write fixed output
+                        unsigned int pileup = 200 // Pileup scenario of the input sample; tags the output name (r16130 = PU200, r16129 = PU140)
                         ){
     if(signalBool) std::cout << "Processing signal of: " << signalString  << "\n";
     // Construct input and output ntuple, LUT paths based on configuration type
-    auto infile = explicitInputPath.empty() ? makeInputFileName(signalBool, signalString) : explicitInputPath;
-    auto outntuplefile = makeOutputFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, subjetEtThreshold, enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut, "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/", useEtaSKObjects);
+    auto infile = explicitInputPath.empty() ? makeInputFileName(signalBool, signalString, "/home/larsonma/GEPHadronicEventReconstruction/data/inputNTuples/", pileup) : explicitInputPath;
+    auto outntuplefile = makeOutputFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, subjetEtThreshold, enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut, "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/", useEtaSKObjects, pileup);
     if (fileIndex >= 0) {
         size_t pos = outntuplefile.rfind(".root");
         if (pos != std::string::npos)
             outntuplefile = outntuplefile.substr(0, pos) + "_file" + std::to_string(fileIndex) + ".root";
     }
     auto outtextfile = writeMemPrints
-        ? makeOutputTextFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsEmulation/", useEtaSKObjects)
+        ? makeOutputTextFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsEmulation/", useEtaSKObjects, pileup)
         : std::string("/dev/null");
     // TrigGepPerf validation override: read the HERNTupler validation ntuple and
     // write a fixed output alongside it (one per version, keyed off algoVersion_).

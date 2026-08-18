@@ -16,6 +16,12 @@
 #include "TH2F.h"
 #include "analysisHelperFunctions.h"
 
+// Satisfies the declaration in analysisHelperFunctions.h, which that header's rate-vs-threshold
+// helpers call but leave for each including macro to define. The ntupler draws no ATLAS-labelled
+// plots, so this is a no-op stub; the real implementations live in largeRJetAnalysisAndRates.C
+// and metAnalysisAndRates.C.
+void DrawATLASLabel(double /*x*/, double /*y*/, const char* /*status*/) {}
+
 
 // Ntupler functions
 // Used for digitized data writing
@@ -42,6 +48,10 @@ const unsigned int nJZSlices = 10;
 // In barns^-1 - 7.5*10^34 cm^-2 s^-1 * 1 s (HL-LHC 200 PU inst. lumi * 1 second) - use 1 second to make rates plots easy
 const double reweightLuminosity = 7.5e10;
 
+// PU140 counterpart: nominal HL-LHC 140 PU instantaneous luminosity 5.0*10^34 cm^-2 s^-1 * 1 s.
+// Used in luminosity mode when pileup == 140. Verify against the value assumed for your samples.
+const double reweightLuminosity_PU140 = 5.0e10;
+
 // Filter efficiencies from AMI
 const double filterEffienciesByJZSlice[nJZSlices] = {0.9716436,    // JZ0
                                                      0.03777559,   // JZ1
@@ -66,23 +76,92 @@ const double crossSectionsByJZSlice[nJZSlices] = {0.07893,      // JZ0
                                                   9.2995e-13,   // JZ8
                                                   3.4519e-14};  // JZ9
 
-// From CutBookkeeper printed from python script
-const double sumOfEventWeightsByJZSlice[nJZSlices] = {100000.0,                // JZ0
-                                                      4692.711304682304,      // JZ1
-                                                      40.668641448125456,     // JZ2
-                                                      0.812919741273701,    // JZ3
-                                                      0.012162432307614823,  // JZ4
-                                                      0.00094489973084666, // JZ5
-                                                      0.0001659370012750544,  // JZ6
-                                                      4.6604455941866296e-05,  // JZ7 
-                                                      1.3833386023877348e-05, // JZ8
-                                                      3.292773754935112e-08}; // JZ9 
+// PU200 sum of weights, from getSumOfWeights.C over the PU200 ntuples
+// (sumOfWeights.txt). Selected when pileup == 200.
+const double sumOfEventWeightsByJZSlice[nJZSlices] = {100000.0,      // JZ0
+                                                      9493.89,       // JZ1
+                                                      40.6686,       // JZ2
+                                                      0.81292,       // JZ3
+                                                      0.0126565,     // JZ4
+                                                      0.000982199,   // JZ5
+                                                      0.000164118,   // JZ6
+                                                      4.75189e-05,   // JZ7
+                                                      1.42645e-05,   // JZ8
+                                                      3.27642e-08};  // JZ9
+
+// PU140 counterpart of sumOfEventWeightsByJZSlice, from the CutBookkeeper of the
+// PU140 samples. Selected when pileup == 140.
+// FIXME: PLACEHOLDER values (copied from the PU200 array so weights stay finite) —
+// replace each entry with the PU140 CutBookkeeper sum-of-weights once the samples
+// are downloaded. Until then, PU140 normalization is NOT correct.
+const double sumOfEventWeightsByJZSlice_PU140[nJZSlices] = {100000.0,                // JZ0
+                                                           9497.47,      // JZ1
+                                                           40.6686,     // JZ2
+                                                           0.814425,    // JZ3
+                                                           0.0113906,  // JZ4
+                                                           0.000933323, // JZ5
+                                                           0.000152669,  // JZ6
+                                                           4.76259e-05,  // JZ7
+                                                           1.39203e-05, // JZ8
+                                                           6.56804e-08}; // JZ9
+
+// --- Reweighting normalization mode --------------------------------------
+// The per-event histogram weight can be normalized in one of two ways:
+//   * Luminosity mode: weights sum to the expected event count for an
+//     integrated luminosity of reweightLuminosity (in b^-1). This is the
+//     original behavior.
+//   * Rate mode:       weights are scaled so that the total rate summed over
+//     all JZ slices equals targetRate (in Hz), using an effective luminosity
+//     L_eff = targetRate / totalEffectiveCrossSection.
+// Set useRateNormalization to choose between them.
+const bool useRateNormalization = false;   // false = luminosity mode, true = rate mode
+
+// --- Athena JetTaggerLRJ passthrough tree --------------------------------
+// When true, the Athena JetTaggerLRJ output branches of the GEP ntuple
+// (JetTaggerLRJGEPCellsTowerEtaSKJets_*) are read and written out as
+// athenaJetTaggerLRJTree. Only needed for the trigGepPerfValidation
+// round-trip (compareValidation.py); off for normal ntupling runs.
+const bool write_athena_jet_tagger_lrj_tree_ = false;
+
+// Target total rate for rate mode, in Hz (e.g. 30e6 for 30 MHz).
+const double targetRate = 30.9e6;
+
+// Sum of (cross section x filter efficiency) over all JZ slices, in b. Used as
+// the reference cross section sigma_ref that converts targetRate into an
+// effective luminosity in rate mode.
+const double totalEffectiveCrossSection = [] {
+    double sum = 0.0;
+    for (unsigned int i = 0; i < nJZSlices; ++i)
+        sum += crossSectionsByJZSlice[i] * filterEffienciesByJZSlice[i];
+    return sum;
+}();
+
+// Select the per-slice sum of event weights (from the CutBookkeeper) for the
+// requested pileup scenario. PU200 is the default; PU140 uses its own samples.
+inline double sumOfEventWeightsForPU(int jzSlice, unsigned int pileup) {
+    return (pileup == 140) ? sumOfEventWeightsByJZSlice_PU140[jzSlice]
+                           : sumOfEventWeightsByJZSlice[jzSlice];
+}
+
+// Effective luminosity (b^-1) for the requested pileup, used in luminosity mode.
+inline double reweightLuminosityForPU(unsigned int pileup) {
+    return (pileup == 140) ? reweightLuminosity_PU140 : reweightLuminosity;
+}
+
+// Normalization actually applied to each event weight: a fixed luminosity
+// (luminosity mode) or targetRate / sigma_ref (rate mode). Rate mode is
+// pileup-independent because the cross sections and filter efficiencies do
+// not depend on pileup; only the sum-of-weights denominator does.
+inline double reweightNormalizationForPU(unsigned int pileup) {
+    return useRateNormalization ? targetRate / totalEffectiveCrossSection
+                                : reweightLuminosityForPU(pileup);
+}
 
 // Helper to construct memprint / test vector filenames
 inline OutputFiles makeMemPrintFilenames(std::string signalString, bool signalBool, int jzSlice, unsigned int algoVersion) {
     std::string base = "/data/larsonma/LargeRadiusJets/MemPrints";
-    if(algoVersion == 2) base = "/data/larsonma/LargeRadiusJets/MemPrints_v2/";
-    else if(algoVersion == 3) base = "/data/larsonma/LargeRadiusJets/MemPrints_v3/";
+    if(algoVersion == 2) base = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/MemPrints_v2/";
+    else if(algoVersion == 3) base = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/MemPrints_v3/";
      
     std::cout << "BASE BEING USED FOR MEMPRINTS: " << base << "\n";
     std::string tag;
@@ -99,6 +178,8 @@ inline OutputFiles makeMemPrintFilenames(std::string signalString, bool signalBo
         else if (signalString == "ttbar_dilep") tag = "mc21_14TeV_ttbar_hdamp258p75_dilep";
         else if (signalString == "displaced_dark_photon") tag = "mc21_14TeV_HAHM_ZdZd4e_110_30_10ns";
         else if (signalString == "emerging_jets") tag = "mc21_14TeV_Zprime2EJs_Ld20_rho40_pi10_Zp1500_l50";
+        else if (signalString == "Zmumu") tag = "mc21_14TeV_Zmumu";
+        else if (signalString == "StauStauLLP_500_0_10ns") tag = "mc21_14TeV_StauStauLLP_500_0_10ns";
     } else {
         // generic: works for all slices 0..9 etc
         tag = "mc21_14TeV_jj_JZ" + std::to_string(jzSlice);
@@ -140,6 +221,8 @@ std::string makeFileDir(std::string signalString, bool signalBool, int jzSlice) 
         else if (signalString == "ttbar_dilep") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/ttbar_dilep";
         else if (signalString == "displaced_dark_photon") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/displaced_dark_photon";
         else if (signalString == "emerging_jets") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/emerging_jets";
+        else if (signalString == "Zmumu") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/Zmumu";
+        else if (signalString == "StauStauLLP_500_0_10ns") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/StauStauLLP_500_0_10ns";
     }
 
     // background path
@@ -149,8 +232,9 @@ std::string makeFileDir(std::string signalString, bool signalBool, int jzSlice) 
     return kRoot + "/DAOD_TrigGepPerf/Background_jj_JZ" + std::to_string(jzSlice);
 }
 
-// Helper function to get output ntuple file name
-TString makeOutputFileName(std::string signalString, bool signalBool, int jzSlice, unsigned int algoVersion, bool specialJZ0 = false, std::string outputDirOverride = "", std::string fileSuffix = "") {
+// Base (PU200) output ntuple name. PU140 differs only in the reconstruction tag,
+// applied by makeOutputFileName below.
+TString makeOutputFileNamePU200(std::string signalString, bool signalBool, int jzSlice, unsigned int algoVersion, bool specialJZ0 = false, std::string outputDirOverride = "", std::string fileSuffix = "") {
     TString outDir;
     if (!outputDirOverride.empty()) {
         outDir = TString(outputDirOverride);
@@ -174,6 +258,8 @@ TString makeOutputFileName(std::string signalString, bool signalBool, int jzSlic
         else if (signalString == "ttbar_dilep") return outDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
         else if (signalString == "displaced_dark_photon") return outDir + "mc21_14TeV_HAHM_ZdZd4e_110_30_10ns_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
         else if (signalString == "emerging_jets") return outDir + "mc21_14TeV_Zprime2EJs_Ld20_rho40_pi10_Zp1500_l50_e8532_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "Zmumu") return outDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "StauStauLLP_500_0_10ns") return outDir + "mc21_14TeV_StauStauLLP_500_0_10ns_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
         else return "";
     }
     else {
@@ -189,7 +275,18 @@ TString makeOutputFileName(std::string signalString, bool signalBool, int jzSlic
 
 }
 
-unsigned int digitize(double value, int bit_length, double min_val, double max_val, unsigned int altRange = 0, bool verbose = true) {
+// Helper function to get output ntuple file name.
+// The reconstruction tag encodes the pileup scenario: PU200 samples are r16130,
+// PU140 samples r16129. Keeping it in the filename is what makes the two ntuple
+// sets distinguishable downstream, where the emulation and analysis stages key
+// off the file name rather than the directory it sits in.
+TString makeOutputFileName(std::string signalString, bool signalBool, int jzSlice, unsigned int algoVersion, bool specialJZ0 = false, std::string outputDirOverride = "", std::string fileSuffix = "", unsigned int pileup = 200) {
+    TString name = makeOutputFileNamePU200(signalString, signalBool, jzSlice, algoVersion, specialJZ0, outputDirOverride, fileSuffix);
+    if (pileup == 140) name.ReplaceAll("_r16130_", "_r16129_");
+    return name;
+}
+
+unsigned int digitize(double value, int bit_length, double min_val, double max_val, unsigned int altRange = 0, bool verbose = false) {
     unsigned int range = (altRange == 0) ? (1u << bit_length) : altRange;
     double scale = double(range) / (max_val - min_val);
     if (verbose) {
@@ -249,12 +346,39 @@ void find_non_higgs_daughters(const xAOD::TruthParticle* particle,
 
 
 // Main function
-void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange, unsigned int algoVersion, unsigned int jzSlice = 3, bool specialJZ0Bool = false, std::string outputDirOverride = "", bool writeDatFiles = true, std::string specificDaodFile = "", std::string specificGepFile = "", std::string fileSuffix = "", bool trigGepPerfValidation = false) {
+void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange, unsigned int algoVersion, unsigned int jzSlice = 3, bool specialJZ0Bool = false, std::string outputDirOverride = "", bool writeDatFiles = false, std::string specificDaodFile = "", std::string specificGepFile = "", std::string fileSuffix = "", bool trigGepPerfValidation = false, unsigned int pileup = 200) {
     //ServiceHandle<StoreGateSvc> inputMetaStore("StoreGateSvc/InputMetaDataStore","");
     // Setup file paths based on whether processing signal or background, and vbf production or ggF production
 
     std::string fileDir =  makeFileDir(signalString, signalBool, jzSlice);
     std::cout << "fileDir: " << fileDir << "\n";
+
+    if (pileup == 140) {
+        std::cout << "[pileup] Using PU140 reweighting constants (sum-of-weights + luminosity).\n"
+                  << "[pileup] NOTE: verify sumOfEventWeightsByJZSlice_PU140 has been filled from the PU140 CutBookkeeper.\n";
+    } else {
+        std::cout << "[pileup] Using PU200 (default) reweighting constants.\n";
+    }
+
+    // Normalization summary — the per-event weight is built from these numbers, so print them
+    // once per job to make a wrong rate scale obvious in the log.
+    {
+        std::cout << "[norm] mode = " << (useRateNormalization ? "rate" : "luminosity")
+                  << ", normalization = " << reweightNormalizationForPU(pileup) << " b^-1";
+        if (useRateNormalization)
+            std::cout << " (targetRate " << targetRate / 1e6 << " MHz / sigma_ref "
+                      << totalEffectiveCrossSection << " b)";
+        std::cout << "\n";
+        if (!signalBool) {
+            const double sliceRate = crossSectionsByJZSlice[jzSlice] * filterEffienciesByJZSlice[jzSlice]
+                                     * reweightNormalizationForPU(pileup);
+            std::cout << "[norm] JZ" << jzSlice
+                      << ": xsec x filterEff = " << crossSectionsByJZSlice[jzSlice] * filterEffienciesByJZSlice[jzSlice] << " b"
+                      << ", sumOfWeights = " << sumOfEventWeightsForPU(jzSlice, pileup) << "\n"
+                      << "[norm] JZ" << jzSlice << " expected sum of weights over all events = "
+                      << sliceRate << " Hz\n";
+        }
+    }
     //xAOD::Init().ignore();
 
     // ------------------------------------------------------------------
@@ -269,11 +393,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         const std::string runDir = "/home/larsonma/DevelopingTriggerSimulation/run/";
         // Athena TrigGepPerf output ntuple, one per algorithm version (v2 = basic, v3 = advanced).
         specificGepFile  = runDir + (algoVersion == 2
-            ? "outputGEPNtuple_WithJetTagger_v2Algo_Samplev1.root"
-            : "outputGEPNtuple_WithJetTagger_v3Algo_Samplev2.root");
+            ? "outputGEPNtuple_WithJetTagger_v2Algo_Sample_ValidLayers_TestgTowers_MR_v2_Constituents.root"
+            : "outputGEPNtuple_WithJetTagger_v2Algo_Sample_ValidLayers_TestgTowers_MR_v2_Constituents.root");
         // DAOD_JETM42 paired with the same sample.
         specificDaodFile = "/data/larsonma/TrigGepPerfValidation/mc21_14TeV.603277.PhPy8EG_PDF4LHC21_HHbbbb_HLLHC_chhh1p0.recon.AOD.e8564_s4422_r16130/DAOD_JETM42.merged_HHbbbb_1kEvent_TrigGepPerf_Validation_DAOD.root";
-        writeDatFiles    = false;
+        writeDatFiles    = true;
         std::cout << "[trigGepPerfValidation] v" << algoVersion
                   << "  DAOD=" << specificDaodFile
                   << "  GEP="  << specificGepFile << "\n";
@@ -309,7 +433,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         }
     }
 
-    TString outputFileName = makeOutputFileName(signalString, signalBool, jzSlice, algoVersion, specialJZ0Bool, outputDirOverride, fileSuffix);
+    TString outputFileName = makeOutputFileName(signalString, signalBool, jzSlice, algoVersion, specialJZ0Bool, outputDirOverride, fileSuffix, pileup);
     if (trigGepPerfValidation) {
         // Fixed output consumed by jetTaggerEmulation's trigGepPerfValidation mode (one per version).
         outputFileName = TString::Format(
@@ -324,7 +448,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     // event-aligned with the emulation input. Uses the const=Towers,
     // seed=WTACone, EtaSK collection (JetTaggerLRJGEPCellsTowerEtaSKJets). Vectors
     // are pre-allocated so a missing branch leaves an empty (not null) vector.
-    // Always written; the tree is simply empty if the GEP file has no JetTagger.
+    // Only built when write_athena_jet_tagger_lrj_tree_ is set; the tree is simply
+    // empty if the GEP file has no JetTagger.
     // ------------------------------------------------------------------
     std::vector<float>* athLRJ_Et   = new std::vector<float>();
     std::vector<float>* athLRJ_eta  = new std::vector<float>();
@@ -339,20 +464,23 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     std::vector<float>* athLRJ_subjet_Et  = new std::vector<float>();
     std::vector<float>* athLRJ_subjet_eta = new std::vector<float>();
     std::vector<float>* athLRJ_subjet_phi = new std::vector<float>();
-    TTree* athenaJetTaggerLRJTree = new TTree("athenaJetTaggerLRJTree", "Athena JetTaggerLRJ output passthrough");
-    athenaJetTaggerLRJTree->Branch("Et",         &athLRJ_Et);
-    athenaJetTaggerLRJTree->Branch("Eta",        &athLRJ_eta);
-    athenaJetTaggerLRJTree->Branch("Phi",        &athLRJ_phi);
-    athenaJetTaggerLRJTree->Branch("M",          &athLRJ_m);
-    athenaJetTaggerLRJTree->Branch("NSubjets",   &athLRJ_nSubjets);
-    athenaJetTaggerLRJTree->Branch("Psi_R",      &athLRJ_psi_R);
-    athenaJetTaggerLRJTree->Branch("Tau_1",      &athLRJ_tau_1);
-    athenaJetTaggerLRJTree->Branch("Tau_2",      &athLRJ_tau_2);
-    athenaJetTaggerLRJTree->Branch("Tau_21",     &athLRJ_tau_21);
-    athenaJetTaggerLRJTree->Branch("MassApprox", &athLRJ_massApprox);
-    athenaJetTaggerLRJTree->Branch("SubjetEt",   &athLRJ_subjet_Et);
-    athenaJetTaggerLRJTree->Branch("SubjetEta",  &athLRJ_subjet_eta);
-    athenaJetTaggerLRJTree->Branch("SubjetPhi",  &athLRJ_subjet_phi);
+    TTree* athenaJetTaggerLRJTree = nullptr;
+    if (write_athena_jet_tagger_lrj_tree_) {
+        athenaJetTaggerLRJTree = new TTree("athenaJetTaggerLRJTree", "Athena JetTaggerLRJ output passthrough");
+        athenaJetTaggerLRJTree->Branch("Et",         &athLRJ_Et);
+        athenaJetTaggerLRJTree->Branch("Eta",        &athLRJ_eta);
+        athenaJetTaggerLRJTree->Branch("Phi",        &athLRJ_phi);
+        athenaJetTaggerLRJTree->Branch("M",          &athLRJ_m);
+        athenaJetTaggerLRJTree->Branch("NSubjets",   &athLRJ_nSubjets);
+        athenaJetTaggerLRJTree->Branch("Psi_R",      &athLRJ_psi_R);
+        athenaJetTaggerLRJTree->Branch("Tau_1",      &athLRJ_tau_1);
+        athenaJetTaggerLRJTree->Branch("Tau_2",      &athLRJ_tau_2);
+        athenaJetTaggerLRJTree->Branch("Tau_21",     &athLRJ_tau_21);
+        athenaJetTaggerLRJTree->Branch("MassApprox", &athLRJ_massApprox);
+        athenaJetTaggerLRJTree->Branch("SubjetEt",   &athLRJ_subjet_Et);
+        athenaJetTaggerLRJTree->Branch("SubjetEta",  &athLRJ_subjet_eta);
+        athenaJetTaggerLRJTree->Branch("SubjetPhi",  &athLRJ_subjet_phi);
+    }
 
     // Create TTrees - commented out trees that cannot be filled with DAOD information.
     //TTree* truthParticleTree = new TTree("truthParticleTree", "Tree storing event-wise information about truth particles");
@@ -421,8 +549,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     TTree* gFexMETNoiseCutTree     = new TTree("gFexMETNoiseCutTree",     "Tree storing event-wise gFEX MET quantities (NoiseCut)");
     TTree* gFexMETRmsTree          = new TTree("gFexMETRmsTree",          "Tree storing event-wise gFEX MET quantities (Rms)");
     TTree* metTruthTree            = new TTree("metTruthTree",            "Tree storing event-wise truth MET quantities");
-    TTree* metCoreAntiKt4EMTopoTree  = new TTree("metCoreAntiKt4EMTopoTree",  "Tree storing event-wise reco core MET quantities (AntiKt4EMTopo)");
-    TTree* metCoreAntiKt4EMPFlowTree = new TTree("metCoreAntiKt4EMPFlowTree", "Tree storing event-wise reco core MET quantities (AntiKt4EMPFlow)");
+    // TTree* metCoreAntiKt4EMTopoTree  = new TTree("metCoreAntiKt4EMTopoTree",  "Tree storing event-wise reco core MET quantities (AntiKt4EMTopo)");
+    // TTree* metCoreAntiKt4EMPFlowTree = new TTree("metCoreAntiKt4EMPFlowTree", "Tree storing event-wise reco core MET quantities (AntiKt4EMPFlow)");
     // Sim gFEX/jFEX trees (from TrigGepPerf ntuple)
     TTree* jFexSRJSimTree = new TTree("jFexSRJSimTree", "Tree storing event-wise Et, Eta, Phi (sim jFEX SR jets)");
     TTree* jFexLeadingSRJSimTree = new TTree("jFexLeadingSRJSimTree", "Tree storing event-wise Et, Eta, Phi (sim jFEX SR jets)");
@@ -468,6 +596,16 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     // read from the paired GEP file where it is computed from the BunchCrossing
     // conditions data. -1 when unavailable.
     int distFrontBunchTrain = -1, distTailBunchTrain = -1;
+
+    // Z->mumu reference: dimuon system built from the two leading truth muons
+    // (TruthMuons container). Used as a well-measured proxy for the invisible
+    // momentum in MET performance studies (muons are ~invisible to the calo).
+    // Defaults (-1) when fewer than two truth muons are present.
+    double dimuonPt = -1.0, dimuonPhi = -999.0, dimuonMass = -1.0;
+    int    nTruthMuons = 0;
+    // Number of reconstructed primary vertices (PrimaryVertices with >= 2 tracks),
+    // for binning MET resolution vs pileup. -1 when the container is unavailable.
+    int    nPrimaryVertices = -1;
 
     // Truth Particle vectors
     //std::vector<int> truthParticlePDGId, truthParticleStatus; 
@@ -677,12 +815,12 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     double metTruthIntMuonsX = 0.0, metTruthIntMuonsY = 0.0;   // MET_Truth["IntMuons"]
     double metTruthIntMuonsSumET = 0.0, metTruthIntMuons = 0.0;
     // MET_Core_AntiKt4EMTopo — one set of variables per term
-    double metCoreEMTopo_SoftClus_X = 0.0,   metCoreEMTopo_SoftClus_Y = 0.0,   metCoreEMTopo_SoftClus_SumET = 0.0,   metCoreEMTopo_SoftClus_MET = 0.0;
-    double metCoreEMTopo_PVSoftTrk_X = 0.0,  metCoreEMTopo_PVSoftTrk_Y = 0.0,  metCoreEMTopo_PVSoftTrk_SumET = 0.0,  metCoreEMTopo_PVSoftTrk_MET = 0.0;
-    double metCoreEMTopo_SoftClusEM_X = 0.0, metCoreEMTopo_SoftClusEM_Y = 0.0, metCoreEMTopo_SoftClusEM_SumET = 0.0, metCoreEMTopo_SoftClusEM_MET = 0.0;
+    // double metCoreEMTopo_SoftClus_X = 0.0,   metCoreEMTopo_SoftClus_Y = 0.0,   metCoreEMTopo_SoftClus_SumET = 0.0,   metCoreEMTopo_SoftClus_MET = 0.0;
+    // double metCoreEMTopo_PVSoftTrk_X = 0.0,  metCoreEMTopo_PVSoftTrk_Y = 0.0,  metCoreEMTopo_PVSoftTrk_SumET = 0.0,  metCoreEMTopo_PVSoftTrk_MET = 0.0;
+    // double metCoreEMTopo_SoftClusEM_X = 0.0, metCoreEMTopo_SoftClusEM_Y = 0.0, metCoreEMTopo_SoftClusEM_SumET = 0.0, metCoreEMTopo_SoftClusEM_MET = 0.0;
     // MET_Core_AntiKt4EMPFlow — one set of variables per term
-    double metCoreEMPFlow_SoftClus_X = 0.0,  metCoreEMPFlow_SoftClus_Y = 0.0,  metCoreEMPFlow_SoftClus_SumET = 0.0,  metCoreEMPFlow_SoftClus_MET = 0.0;
-    double metCoreEMPFlow_PVSoftTrk_X = 0.0, metCoreEMPFlow_PVSoftTrk_Y = 0.0, metCoreEMPFlow_PVSoftTrk_SumET = 0.0, metCoreEMPFlow_PVSoftTrk_MET = 0.0;
+    // double metCoreEMPFlow_SoftClus_X = 0.0,  metCoreEMPFlow_SoftClus_Y = 0.0,  metCoreEMPFlow_SoftClus_SumET = 0.0,  metCoreEMPFlow_SoftClus_MET = 0.0;
+    // double metCoreEMPFlow_PVSoftTrk_X = 0.0, metCoreEMPFlow_PVSoftTrk_Y = 0.0, metCoreEMPFlow_PVSoftTrk_SumET = 0.0, metCoreEMPFlow_PVSoftTrk_MET = 0.0;
     // Sim gFEX/jFEX MET quantities (from TrigGepPerf ntuple)
     double gFexMETJwoJSim = 0.0, gFexMETPhiJwoJSim = 0.0, gFexSumETJwoJSim = 0.0;
     double gFexMETNoiseCutSim = 0.0, gFexMETPhiNoiseCutSim = 0.0, gFexSumETNoiseCutSim = 0.0;
@@ -723,6 +861,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     eventInfoTree->Branch("passHSTP", &passHSTP);
     eventInfoTree->Branch("distFrontBunchTrain", &distFrontBunchTrain);
     eventInfoTree->Branch("distTailBunchTrain", &distTailBunchTrain);
+    eventInfoTree->Branch("dimuonPt", &dimuonPt);
+    eventInfoTree->Branch("dimuonPhi", &dimuonPhi);
+    eventInfoTree->Branch("dimuonMass", &dimuonMass);
+    eventInfoTree->Branch("nTruthMuons", &nTruthMuons);
+    eventInfoTree->Branch("nPrimaryVertices", &nPrimaryVertices);
 
     // truthbTree
     truthbTree->Branch("higgsIndex", &higgsIndexValues);
@@ -1419,27 +1562,27 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     metTruthTree->Branch("metTruthIntMuonsSumET", &metTruthIntMuonsSumET);
     metTruthTree->Branch("metTruthIntMuons",      &metTruthIntMuons);
 
-    metCoreAntiKt4EMTopoTree->Branch("SoftClus_X",     &metCoreEMTopo_SoftClus_X);
-    metCoreAntiKt4EMTopoTree->Branch("SoftClus_Y",     &metCoreEMTopo_SoftClus_Y);
-    metCoreAntiKt4EMTopoTree->Branch("SoftClus_SumET", &metCoreEMTopo_SoftClus_SumET);
-    metCoreAntiKt4EMTopoTree->Branch("SoftClus_MET",   &metCoreEMTopo_SoftClus_MET);
-    metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_X",     &metCoreEMTopo_PVSoftTrk_X);
-    metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_Y",     &metCoreEMTopo_PVSoftTrk_Y);
-    metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_SumET", &metCoreEMTopo_PVSoftTrk_SumET);
-    metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_MET",   &metCoreEMTopo_PVSoftTrk_MET);
-    metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_X",     &metCoreEMTopo_SoftClusEM_X);
-    metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_Y",     &metCoreEMTopo_SoftClusEM_Y);
-    metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_SumET", &metCoreEMTopo_SoftClusEM_SumET);
-    metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_MET",   &metCoreEMTopo_SoftClusEM_MET);
+    // metCoreAntiKt4EMTopoTree->Branch("SoftClus_X",     &metCoreEMTopo_SoftClus_X);
+    // metCoreAntiKt4EMTopoTree->Branch("SoftClus_Y",     &metCoreEMTopo_SoftClus_Y);
+    // metCoreAntiKt4EMTopoTree->Branch("SoftClus_SumET", &metCoreEMTopo_SoftClus_SumET);
+    // metCoreAntiKt4EMTopoTree->Branch("SoftClus_MET",   &metCoreEMTopo_SoftClus_MET);
+    // metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_X",     &metCoreEMTopo_PVSoftTrk_X);
+    // metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_Y",     &metCoreEMTopo_PVSoftTrk_Y);
+    // metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_SumET", &metCoreEMTopo_PVSoftTrk_SumET);
+    // metCoreAntiKt4EMTopoTree->Branch("PVSoftTrk_MET",   &metCoreEMTopo_PVSoftTrk_MET);
+    // metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_X",     &metCoreEMTopo_SoftClusEM_X);
+    // metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_Y",     &metCoreEMTopo_SoftClusEM_Y);
+    // metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_SumET", &metCoreEMTopo_SoftClusEM_SumET);
+    // metCoreAntiKt4EMTopoTree->Branch("SoftClusEM_MET",   &metCoreEMTopo_SoftClusEM_MET);
 
-    metCoreAntiKt4EMPFlowTree->Branch("SoftClus_X",     &metCoreEMPFlow_SoftClus_X);
-    metCoreAntiKt4EMPFlowTree->Branch("SoftClus_Y",     &metCoreEMPFlow_SoftClus_Y);
-    metCoreAntiKt4EMPFlowTree->Branch("SoftClus_SumET", &metCoreEMPFlow_SoftClus_SumET);
-    metCoreAntiKt4EMPFlowTree->Branch("SoftClus_MET",   &metCoreEMPFlow_SoftClus_MET);
-    metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_X",     &metCoreEMPFlow_PVSoftTrk_X);
-    metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_Y",     &metCoreEMPFlow_PVSoftTrk_Y);
-    metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_SumET", &metCoreEMPFlow_PVSoftTrk_SumET);
-    metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_MET",   &metCoreEMPFlow_PVSoftTrk_MET);
+    // metCoreAntiKt4EMPFlowTree->Branch("SoftClus_X",     &metCoreEMPFlow_SoftClus_X);
+    // metCoreAntiKt4EMPFlowTree->Branch("SoftClus_Y",     &metCoreEMPFlow_SoftClus_Y);
+    // metCoreAntiKt4EMPFlowTree->Branch("SoftClus_SumET", &metCoreEMPFlow_SoftClus_SumET);
+    // metCoreAntiKt4EMPFlowTree->Branch("SoftClus_MET",   &metCoreEMPFlow_SoftClus_MET);
+    // metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_X",     &metCoreEMPFlow_PVSoftTrk_X);
+    // metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_Y",     &metCoreEMPFlow_PVSoftTrk_Y);
+    // metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_SumET", &metCoreEMPFlow_PVSoftTrk_SumET);
+    // metCoreAntiKt4EMPFlowTree->Branch("PVSoftTrk_MET",   &metCoreEMPFlow_PVSoftTrk_MET);
 
     // gFexMETJwoJSimTree branches
     gFexMETJwoJSimTree->Branch("gMET",    &gFexMETJwoJSim);
@@ -1800,19 +1943,21 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
         // Athena JetTaggerLRJ output branches (const=Towers, seed=WTACone, EtaSK).
         // Harmless no-ops if the GEP file has no JetTagger branches.
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_Et",         1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_Et",         &athLRJ_Et);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_eta",        1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_eta",        &athLRJ_eta);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_phi",        1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_phi",        &athLRJ_phi);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_m",          1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_m",          &athLRJ_m);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_nSubjets",   1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_nSubjets",   &athLRJ_nSubjets);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_psi_R",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_psi_R",      &athLRJ_psi_R);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_1",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_1",      &athLRJ_tau_1);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_2",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_2",      &athLRJ_tau_2);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_21",     1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_21",     &athLRJ_tau_21);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_massApprox", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_massApprox", &athLRJ_massApprox);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_Et",  1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_Et",  &athLRJ_subjet_Et);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_eta", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_eta", &athLRJ_subjet_eta);
-        gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_phi", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_phi", &athLRJ_subjet_phi);
+        if (write_athena_jet_tagger_lrj_tree_) {
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_Et",         1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_Et",         &athLRJ_Et);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_eta",        1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_eta",        &athLRJ_eta);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_phi",        1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_phi",        &athLRJ_phi);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_m",          1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_m",          &athLRJ_m);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_nSubjets",   1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_nSubjets",   &athLRJ_nSubjets);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_psi_R",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_psi_R",      &athLRJ_psi_R);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_1",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_1",      &athLRJ_tau_1);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_2",      1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_2",      &athLRJ_tau_2);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_21",     1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_tau_21",     &athLRJ_tau_21);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_massApprox", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_massApprox", &athLRJ_massApprox);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_Et",  1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_Et",  &athLRJ_subjet_Et);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_eta", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_eta", &athLRJ_subjet_eta);
+            gt->SetBranchStatus ("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_phi", 1); gt->SetBranchAddress("JetTaggerLRJGEPCellsTowerEtaSKJets_subjet_phi", &athLRJ_subjet_phi);
+        }
 
         gt->SetBranchAddress("WTAConeGEPCellsTowerSKJets_pt",  &gepIn_WTAConeCellsTowersSKJetsPt);
         gt->SetBranchAddress("WTAConeGEPCellsTowerSKJets_eta", &gepIn_WTAConeCellsTowersSKJetsEta);
@@ -2083,6 +2228,13 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
         std::cout << "  Number of events: " << event.getEntries() << endl;
 
+        // The dimuon system is only meaningful for Z->mumu, so TruthMuons is retrieved for that
+        // sample alone. Asking for it everywhere is a liability: the retrieve failure path skips
+        // the event, so a wrong or absent container name silently empties the ntuple.
+        const bool isZmumuSample = (signalBool && signalString == "Zmumu");
+        if (!isZmumuSample)
+            std::cout << "  TruthMuons not requested (dimuon branches stay at their defaults)\n";
+
         unsigned int passedEventsCounter = 0;
         Long64_t nEventsToProcess = event.getEntries();
         if (trigGepPerfValidation) nEventsToProcess = std::min(nEventsToProcess, (Long64_t)gt->GetEntries()); // GEP file has only the events the Athena job produced
@@ -2123,7 +2275,6 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
             if(iEvt % 100 == 0) std::cout << "iEvt: " << iEvt << "\n";
             
-
             // -- retrieve collections from DAOD ---
             const xAOD::EventInfo_v1* EventInfo = nullptr;
             if (!event.retrieve(EventInfo, "EventInfo").isSuccess()) {
@@ -2142,7 +2293,57 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 cerr << "Cannot access TruthTop" << endl;
                 continue;
             }
-            
+
+            // Z->mumu reference: truth muons (same TruthParticle_v1 type as above). The
+            // container in the JETM42 DAODs is TruthMuons — MuonTruthParticles does not exist
+            // there, so retrieving it failed on every event.
+            // Zmumu only — see isZmumuSample above. Left null for every other sample, which
+            // leaves the dimuon branches at their defaults rather than skipping the event.
+            const xAOD::TruthParticleContainer* TruthMuons = nullptr;
+            if (isZmumuSample && !event.retrieve(TruthMuons, "TruthMuons").isSuccess()) {
+                cerr << "Cannot access TruthMuons" << endl;
+                continue;
+            }
+
+            // Reconstructed primary vertices (pileup handle for MET resolution binning)
+            const xAOD::VertexContainer* PrimaryVertices = nullptr;
+            if (!event.retrieve(PrimaryVertices, "PrimaryVertices").isSuccess()) {
+                cerr << "Cannot access PrimaryVertices" << endl;
+                continue;
+            }
+
+            // --- Build the dimuon system from the two leading stable truth muons ---
+            // Defaults are set for every sample so the branches are always well defined; the
+            // system itself is only built when the container was retrieved (Zmumu).
+
+            dimuonPt = -1.0; dimuonPhi = -999.0; dimuonMass = -1.0; nTruthMuons = 0;
+            if (TruthMuons) {
+                const xAOD::TruthParticle_v1* leadMu = nullptr;
+                const xAOD::TruthParticle_v1* subMu  = nullptr;
+                for (const auto& mu : *TruthMuons) {
+                    if (std::abs(mu->pdgId()) != 13 || mu->status() != 1) continue;
+                    ++nTruthMuons;
+                    if (!leadMu || mu->pt() > leadMu->pt())      { subMu = leadMu; leadMu = mu; }
+                    else if (!subMu || mu->pt() > subMu->pt())   { subMu = mu; }
+                }
+                if (leadMu && subMu) {
+                    double px = leadMu->px() + subMu->px();
+                    double py = leadMu->py() + subMu->py();
+                    double pz = leadMu->pz() + subMu->pz();
+                    double e  = leadMu->e()  + subMu->e();
+                    dimuonPt   = std::sqrt(px*px + py*py) / 1000.0;        // GeV
+                    dimuonPhi  = std::atan2(py, px);
+                    double m2  = e*e - (px*px + py*py + pz*pz);
+                    dimuonMass = (m2 > 0.0 ? std::sqrt(m2) : 0.0) / 1000.0; // GeV
+                }
+            }
+
+            // --- Count reconstructed primary vertices (>= 2 associated tracks) ---
+            nPrimaryVertices = 0;
+            for (const auto& vtx : *PrimaryVertices) {
+                if (vtx->nTrackParticles() >= 2) ++nPrimaryVertices;
+            }
+
             const xAOD::TruthParticleContainer* TruthHFWithDecayParticles = nullptr;
             if (!event.retrieve(TruthHFWithDecayParticles, "TruthHFWithDecayParticles").isSuccess()) {
                 cerr << "Cannot access TruthHFWithDecayParticles" << endl;
@@ -2230,15 +2431,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 std::cerr << "Failed to retrieve MET_Truth" << std::endl;
             }
 
-            const xAOD::MissingETContainer_v1* MET_Core_AntiKt4EMTopo = nullptr;
-            if (!event.retrieve(MET_Core_AntiKt4EMTopo, "MET_Core_AntiKt4EMTopo").isSuccess()) {
-                std::cerr << "Failed to retrieve MET_Core_AntiKt4EMTopo" << std::endl;
-            }
+            // const xAOD::MissingETContainer_v1* MET_Core_AntiKt4EMTopo = nullptr;
+            // if (!event.retrieve(MET_Core_AntiKt4EMTopo, "MET_Core_AntiKt4EMTopo").isSuccess()) {
+            //     std::cerr << "Failed to retrieve MET_Core_AntiKt4EMTopo" << std::endl;
+            // }
 
-            const xAOD::MissingETContainer_v1* MET_Core_AntiKt4EMPFlow = nullptr;
-            if (!event.retrieve(MET_Core_AntiKt4EMPFlow, "MET_Core_AntiKt4EMPFlow").isSuccess()) {
-                std::cerr << "Failed to retrieve MET_Core_AntiKt4EMPFlow" << std::endl;
-            }
+            // const xAOD::MissingETContainer_v1* MET_Core_AntiKt4EMPFlow = nullptr;
+            // if (!event.retrieve(MET_Core_AntiKt4EMPFlow, "MET_Core_AntiKt4EMPFlow").isSuccess()) {
+            //     std::cerr << "Failed to retrieve MET_Core_AntiKt4EMPFlow" << std::endl;
+            // }
 
             const xAOD::JetContainer* AntiKt10UFOCSSKJets = nullptr;
             if (!event.retrieve(AntiKt10UFOCSSKJets, "AntiKt10UFOCSSKJets").isSuccess()) {
@@ -2590,17 +2791,16 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             eventWeights.clear();
             sumOfWeightsForSample = 0;
             sampleJZSlice = 0;
-            
             // Get sum of weights for sample, individual Monte Carlo event weight, and compute event weight used later for reweighting histograms
-            sumOfWeightsForSample = sumOfEventWeightsByJZSlice[jzSlice];
+            sumOfWeightsForSample = sumOfEventWeightsForPU(jzSlice, pileup);
             
             if (signalBool) sampleJZSlice = -1; 
             float mcEventWeight = EventInfo->mcEventWeight();
             //std::cout << "iEvt: " << iEvt << " and event weight: " << eventWeight << "\n";
             mcEventWeights.push_back(mcEventWeight);
 
-            // Compute weight for histograms 
-            double eventWeight = mcEventWeight * crossSectionsByJZSlice[jzSlice] * filterEffienciesByJZSlice[jzSlice] * reweightLuminosity / (sumOfEventWeightsByJZSlice[jzSlice]);
+            // Compute weight for histograms
+            double eventWeight = mcEventWeight * crossSectionsByJZSlice[jzSlice] * filterEffienciesByJZSlice[jzSlice] * reweightNormalizationForPU(pileup) / (sumOfEventWeightsForPU(jzSlice, pileup));
             eventWeights.push_back(eventWeight);
             
             //std::cout << "----------------- processing event --------------------------" << "\n";
@@ -2770,7 +2970,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 if (gepBasicClusterEt <= 0) continue; // don't store to digitized memories
 
                 // Digitize each variable
-                int phi_bin = digitize(gepBasicClusterPhi, phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(gepBasicClusterPhi);
                 int eta_bin = digitize(gepBasicClusterEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                 int et_bin  = digitize(gepBasicClusterEt, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -2814,7 +3014,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 if (gepBasicClusterSKEt <= 0) continue; // don't store to digitized memories - and remove 0 Et clusters, which were already "removed" by the soft killer algorith
 
                 // Digitize each variable
-                int phi_bin = digitize(gepBasicClusterSKPhi, phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(gepBasicClusterSKPhi);
                 int eta_bin = digitize(gepBasicClusterSKEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                 int et_bin  = digitize(gepBasicClusterSKEt, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -2869,13 +3069,13 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     if (gepCellsTowersEtValue <= 0) continue; // keep your existing rule
 
                     // Digitize
-                    int phi_bin = digitize(gepCellsTowersPhiValue, phi_bit_length_, phi_min_, phi_max_);
+                    int phi_bin = digitize_phi(gepCellsTowersPhiValue);
                     int eta_bin = digitize(gepCellsTowersEtaValue, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                     int et_bin  = digitize(gepCellsTowersEtValue,  et_bit_length_,
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
 
                     int et_bin_sort_purposes = digitize(gepCellsTowersEtValue, 12, static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    int phi_bin_sort_purposes = digitize(gepCellsTowersPhiValue, 6, phi_min_, phi_max_);
+                    int phi_bin_sort_purposes = digitize_phi(gepCellsTowersPhiValue);
                     int eta_bin_sort_purposes = digitize(gepCellsTowersEtValue, 7, static_cast<double>(et_min_), static_cast<double>(et_max_), etaAltRange);
                     int error_bin_sort_purposes = digitize(0, 7, 0, 1 << 7);
 
@@ -2950,13 +3150,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepCellsTowersSKEtValues.push_back(gepCellsTowersSKEtValue);
                     gepCellsTowersSKEtaValues.push_back(gepCellsTowersSKEtaValue);
                     gepCellsTowersSKPhiValues.push_back(gepCellsTowersSKPhiValue);
-                    for (int l = 0; l < 7; ++l)
+                    for (int l = 0; l < 7; ++l){
                         gepCellsTowersSKEt_lValues[l].push_back((*gepIn_CellsTowersSKEt_l[l])[i] / 1000.0);
+                    }
+                        
 
                     if (gepCellsTowersSKEtValue <= 0) continue; // keep your existing rule
-
                     // Digitize
-                    int phi_bin = digitize(gepCellsTowersSKPhiValue, phi_bit_length_, phi_min_, phi_max_);
+                    int phi_bin = digitize_phi(gepCellsTowersSKPhiValue);
                     int eta_bin = digitize(gepCellsTowersSKEtaValue, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                     int et_bin  = digitize(gepCellsTowersSKEtValue,  et_bit_length_,
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -3000,7 +3201,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 if (et <= 0) continue; // don't store to digitized memories
 
                 // Digitize each variable
-                int phi_bin = digitize(cluster->phi(), phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(cluster->phi());
                 int eta_bin = digitize(cluster->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -3041,7 +3242,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                 if (et <= 0) continue; // FIXME for now don't store negative Et to digitized memories
                 // Digitize each variable
-                int phi_bin = digitize(cluster->phi(), phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(cluster->phi());
                 int eta_bin = digitize(cluster->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -3126,7 +3327,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                     if (WTAConeCellsTowersJetspT <= 0) continue;
 
-                    int phi_bin = digitize(WTAConeCellsTowersJetsPhi, phi_bit_length_, phi_min_, phi_max_);
+                    int phi_bin = digitize_phi(WTAConeCellsTowersJetsPhi);
                     int eta_bin = digitize(WTAConeCellsTowersJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                     int pt_bin  = digitize(WTAConeCellsTowersJetspT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -3212,7 +3413,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                     if (WTAConeCellsTowersSKJetspT <= 0) continue; // don't want to skip over  == 0 Et cone jets 
 
-                    int phi_bin = digitize(WTAConeCellsTowersSKJetsPhi, phi_bit_length_, phi_min_, phi_max_);
+                    int phi_bin = digitize_phi(WTAConeCellsTowersSKJetsPhi);
                     int eta_bin = digitize(WTAConeCellsTowersSKJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                     //std::cout << "WTAConeCellsTowersSKJetsEta: " << WTAConeCellsTowersSKJetsEta << " , eta_bit_length_: " << eta_bit_length_ << "\n";
                     //std::cout << "eta min: " << eta_min_ << " , eta_max_: " << eta_max_ << " , etaAltRange: " << etaAltRange << "\n";
@@ -3297,7 +3498,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                     if (coneWTAGEPBasicClustersJetspT <= 0) continue;
 
-                    int phi_bin = digitize(coneWTAGEPBasicClustersJetsPhi, phi_bit_length_, phi_min_, phi_max_);
+                    int phi_bin = digitize_phi(coneWTAGEPBasicClustersJetsPhi);
                     int eta_bin = digitize(coneWTAGEPBasicClustersJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                     int pt_bin  = digitize(coneWTAGEPBasicClustersJetspT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -3379,7 +3580,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                     if (coneWTAGEPBasicClustersSKJetspT <= 0) continue;
 
-                    int phi_bin = digitize(coneWTAGEPBasicClustersSKJetsPhi, phi_bit_length_, phi_min_, phi_max_);
+                    int phi_bin = digitize_phi(coneWTAGEPBasicClustersSKJetsPhi);
                     int eta_bin = digitize(coneWTAGEPBasicClustersSKJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                     int pt_bin  = digitize(coneWTAGEPBasicClustersSKJetspT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -3438,7 +3639,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 if (et <= 0) continue; // FIXME
 
                 // Digitize each variable
-                int phi_bin = digitize(jet->phi(), phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(jet->phi());
                 int eta_bin = digitize(jet->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -3554,7 +3755,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 if (et <= 0) continue;
 
                 // Digitize each variable
-                int phi_bin = digitize(jet->phi(), phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(jet->phi());
                 int eta_bin = digitize(jet->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -3869,11 +4070,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             metTruthIntX       = 0.0; metTruthIntY       = 0.0; metTruthIntSumET       = 0.0; metTruthInt       = 0.0;
             metTruthIntOutX    = 0.0; metTruthIntOutY    = 0.0; metTruthIntOutSumET    = 0.0; metTruthIntOut    = 0.0;
             metTruthIntMuonsX  = 0.0; metTruthIntMuonsY  = 0.0; metTruthIntMuonsSumET  = 0.0; metTruthIntMuons  = 0.0;
-            metCoreEMTopo_SoftClus_X   = 0.0; metCoreEMTopo_SoftClus_Y   = 0.0; metCoreEMTopo_SoftClus_SumET   = 0.0; metCoreEMTopo_SoftClus_MET   = 0.0;
-            metCoreEMTopo_PVSoftTrk_X  = 0.0; metCoreEMTopo_PVSoftTrk_Y  = 0.0; metCoreEMTopo_PVSoftTrk_SumET  = 0.0; metCoreEMTopo_PVSoftTrk_MET  = 0.0;
-            metCoreEMTopo_SoftClusEM_X = 0.0; metCoreEMTopo_SoftClusEM_Y = 0.0; metCoreEMTopo_SoftClusEM_SumET = 0.0; metCoreEMTopo_SoftClusEM_MET = 0.0;
-            metCoreEMPFlow_SoftClus_X  = 0.0; metCoreEMPFlow_SoftClus_Y  = 0.0; metCoreEMPFlow_SoftClus_SumET  = 0.0; metCoreEMPFlow_SoftClus_MET  = 0.0;
-            metCoreEMPFlow_PVSoftTrk_X = 0.0; metCoreEMPFlow_PVSoftTrk_Y = 0.0; metCoreEMPFlow_PVSoftTrk_SumET = 0.0; metCoreEMPFlow_PVSoftTrk_MET = 0.0;
+            // metCoreEMTopo_SoftClus_X   = 0.0; metCoreEMTopo_SoftClus_Y   = 0.0; metCoreEMTopo_SoftClus_SumET   = 0.0; metCoreEMTopo_SoftClus_MET   = 0.0;
+            // metCoreEMTopo_PVSoftTrk_X  = 0.0; metCoreEMTopo_PVSoftTrk_Y  = 0.0; metCoreEMTopo_PVSoftTrk_SumET  = 0.0; metCoreEMTopo_PVSoftTrk_MET  = 0.0;
+            // metCoreEMTopo_SoftClusEM_X = 0.0; metCoreEMTopo_SoftClusEM_Y = 0.0; metCoreEMTopo_SoftClusEM_SumET = 0.0; metCoreEMTopo_SoftClusEM_MET = 0.0;
+            // metCoreEMPFlow_SoftClus_X  = 0.0; metCoreEMPFlow_SoftClus_Y  = 0.0; metCoreEMPFlow_SoftClus_SumET  = 0.0; metCoreEMPFlow_SoftClus_MET  = 0.0;
+            // metCoreEMPFlow_PVSoftTrk_X = 0.0; metCoreEMPFlow_PVSoftTrk_Y = 0.0; metCoreEMPFlow_PVSoftTrk_SumET = 0.0; metCoreEMPFlow_PVSoftTrk_MET = 0.0;
 
             if (L1_gMHTComponentsJwoj) {
                 for (size_t i = 0; i < L1_gMHTComponentsJwoj->size(); ++i) {
@@ -3936,12 +4137,12 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
             // --- MET_Truth ---
             if (MET_Truth) {
-                std::cout << "MET_Truth terms available:\n";
-                for (const xAOD::MissingET* m : *MET_Truth){
+                //std::cout << "MET_Truth terms available:\n";
+                /*for (const xAOD::MissingET* m : *MET_Truth){
                     if(iEvt <= 5){
-                        std::cout << "  name=" << m->name() << "  met=" << std::sqrt(m->mpx()*m->mpx()+m->mpy()*m->mpy())/1000.0 << " GeV\n";
+                        //std::cout << "  name=" << m->name() << "  met=" << std::sqrt(m->mpx()*m->mpx()+m->mpy()*m->mpy())/1000.0 << " GeV\n";
                     }
-                }
+                }*/
                     
 
                 auto fillTruthTerm = [&](const std::string& key,
@@ -3962,31 +4163,31 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             }
 
             // Helper: fill per-term variables from a named term in a MissingET container
-            auto fillCoreTerm = [](const xAOD::MissingETContainer* cont, const std::string& key,
-                                   double& mx, double& my, double& sumet, double& mag, Long64_t iEvt) {
-                auto it = cont->find(key);
-                if (it != cont->end()) {
-                    const xAOD::MissingET* m = *it;
-                    mx    = m->mpx()   / 1000.0;
-                    my    = m->mpy()   / 1000.0;
-                    sumet = m->sumet() / 1000.0;
-                    mag   = std::sqrt(mx * mx + my * my);
-                    if(iEvt <= 10) std::cout << key << ": X=" << mx << " Y=" << my << " SumET=" << sumet << " MET=" << mag << "\n";
-                }
-            };
+            // auto fillCoreTerm = [](const xAOD::MissingETContainer* cont, const std::string& key,
+            //                        double& mx, double& my, double& sumet, double& mag, Long64_t iEvt) {
+            //     auto it = cont->find(key);
+            //     if (it != cont->end()) {
+            //         const xAOD::MissingET* m = *it;
+            //         mx    = m->mpx()   / 1000.0;
+            //         my    = m->mpy()   / 1000.0;
+            //         sumet = m->sumet() / 1000.0;
+            //         mag   = std::sqrt(mx * mx + my * my);
+            //         if(iEvt <= 10) std::cout << key << ": X=" << mx << " Y=" << my << " SumET=" << sumet << " MET=" << mag << "\n";
+            //     }
+            // };
 
             // --- MET_Core_AntiKt4EMTopo ---
-            if (MET_Core_AntiKt4EMTopo) {
-                fillCoreTerm(MET_Core_AntiKt4EMTopo, "SoftClusCore",   metCoreEMTopo_SoftClus_X,   metCoreEMTopo_SoftClus_Y,   metCoreEMTopo_SoftClus_SumET,   metCoreEMTopo_SoftClus_MET, iEvt);
-                fillCoreTerm(MET_Core_AntiKt4EMTopo, "PVSoftTrkCore",  metCoreEMTopo_PVSoftTrk_X,  metCoreEMTopo_PVSoftTrk_Y,  metCoreEMTopo_PVSoftTrk_SumET,  metCoreEMTopo_PVSoftTrk_MET, iEvt);
-                fillCoreTerm(MET_Core_AntiKt4EMTopo, "SoftClusEMCore", metCoreEMTopo_SoftClusEM_X, metCoreEMTopo_SoftClusEM_Y, metCoreEMTopo_SoftClusEM_SumET, metCoreEMTopo_SoftClusEM_MET, iEvt);
-            }
+            // if (MET_Core_AntiKt4EMTopo) {
+            //     fillCoreTerm(MET_Core_AntiKt4EMTopo, "SoftClusCore",   metCoreEMTopo_SoftClus_X,   metCoreEMTopo_SoftClus_Y,   metCoreEMTopo_SoftClus_SumET,   metCoreEMTopo_SoftClus_MET, iEvt);
+            //     fillCoreTerm(MET_Core_AntiKt4EMTopo, "PVSoftTrkCore",  metCoreEMTopo_PVSoftTrk_X,  metCoreEMTopo_PVSoftTrk_Y,  metCoreEMTopo_PVSoftTrk_SumET,  metCoreEMTopo_PVSoftTrk_MET, iEvt);
+            //     fillCoreTerm(MET_Core_AntiKt4EMTopo, "SoftClusEMCore", metCoreEMTopo_SoftClusEM_X, metCoreEMTopo_SoftClusEM_Y, metCoreEMTopo_SoftClusEM_SumET, metCoreEMTopo_SoftClusEM_MET, iEvt);
+            // }
 
             // --- MET_Core_AntiKt4EMPFlow ---
-            if (MET_Core_AntiKt4EMPFlow) {
-                fillCoreTerm(MET_Core_AntiKt4EMPFlow, "SoftClusCore",  metCoreEMPFlow_SoftClus_X,  metCoreEMPFlow_SoftClus_Y,  metCoreEMPFlow_SoftClus_SumET,  metCoreEMPFlow_SoftClus_MET, iEvt);
-                fillCoreTerm(MET_Core_AntiKt4EMPFlow, "PVSoftTrkCore", metCoreEMPFlow_PVSoftTrk_X, metCoreEMPFlow_PVSoftTrk_Y, metCoreEMPFlow_PVSoftTrk_SumET, metCoreEMPFlow_PVSoftTrk_MET, iEvt);
-            }
+            // if (MET_Core_AntiKt4EMPFlow) {
+            //     fillCoreTerm(MET_Core_AntiKt4EMPFlow, "SoftClusCore",  metCoreEMPFlow_SoftClus_X,  metCoreEMPFlow_SoftClus_Y,  metCoreEMPFlow_SoftClus_SumET,  metCoreEMPFlow_SoftClus_MET, iEvt);
+            //     fillCoreTerm(MET_Core_AntiKt4EMPFlow, "PVSoftTrkCore", metCoreEMPFlow_PVSoftTrk_X, metCoreEMPFlow_PVSoftTrk_Y, metCoreEMPFlow_PVSoftTrk_SumET, metCoreEMPFlow_PVSoftTrk_MET, iEvt);
+            // }
 
             std::vector<std::pair<size_t, double>> hltJetEtWithIndex;
             for (size_t i = 0; i < HLT_AntiKt4EMTopoJets_subjesIS->size(); ++i) {
@@ -4302,7 +4503,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             gepBasicClustersSKTree->Fill();
             gepCellsTowersSKTree->Fill();
             gepWTAConeCellsTowersJetsTree->Fill();
-            athenaJetTaggerLRJTree->Fill();
+            if (athenaJetTaggerLRJTree) athenaJetTaggerLRJTree->Fill();
             gepWTAConeBasicClustersJetsTree->Fill();
             gepLeadingWTAConeCellsTowersJetsTree->Fill();
             gepLeadingWTAConeBasicClustersJetsTree->Fill();
@@ -4372,8 +4573,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             gFexMETNoiseCutTree->Fill();
             gFexMETRmsTree->Fill();
             metTruthTree->Fill();
-            metCoreAntiKt4EMTopoTree->Fill();
-            metCoreAntiKt4EMPFlowTree->Fill();
+            // metCoreAntiKt4EMTopoTree->Fill();
+            // metCoreAntiKt4EMPFlowTree->Fill();
             gFexMETJwoJSimTree->Fill();
             gFexMETNoiseCutSimTree->Fill();
             gFexMETRmsSimTree->Fill();
@@ -4399,7 +4600,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     gepCellsTowersTree->Write("", TObject::kOverwrite);
     gepCellsTowersSKTree->Write("", TObject::kOverwrite);
     gepWTAConeCellsTowersJetsTree->Write("", TObject::kOverwrite);
-    athenaJetTaggerLRJTree->Write("", TObject::kOverwrite);
+    if (athenaJetTaggerLRJTree) athenaJetTaggerLRJTree->Write("", TObject::kOverwrite);
     gepWTAConeBasicClustersJetsTree->Write("", TObject::kOverwrite);
     gepWTAConeCellsTowersSKJetsTree->Write("", TObject::kOverwrite);
     gepWTAConeBasicClustersSKJetsTree->Write("", TObject::kOverwrite);
@@ -4473,8 +4674,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     gFexMETNoiseCutTree->Write("", TObject::kOverwrite);
     gFexMETRmsTree->Write("", TObject::kOverwrite);
     metTruthTree->Write("", TObject::kOverwrite);
-    metCoreAntiKt4EMTopoTree->Write("", TObject::kOverwrite);
-    metCoreAntiKt4EMPFlowTree->Write("", TObject::kOverwrite);
+    // metCoreAntiKt4EMTopoTree->Write("", TObject::kOverwrite);
+    // metCoreAntiKt4EMPFlowTree->Write("", TObject::kOverwrite);
     outputFile->Close();
     std::cout << "Processing complete." << endl;
     //std::cout << "higgsPassEventCounter: " << higgsPassEventCounter << "\n";
@@ -4486,7 +4687,7 @@ void HERNTupler(){
     //xAOD::Init().ignore();
 
 
-    gSystem->RedirectOutput("HERNTupler.log", "w");
+    //gSystem->RedirectOutput("HERNTupler.log", "w");
 
     // Set true to validate the Athena TrigGepPerf JetTaggerLRJ output against
     // jetTaggerEmulation: reruns this ntupler on the Athena output ntuple
@@ -4495,9 +4696,9 @@ void HERNTupler(){
     const bool trigGepPerfValidation = true;
     const unsigned int trigGepPerfValidationAlgoVersion = 3; // 2 = basic sample, 3 = advanced sample
     if (trigGepPerfValidation) {
-        const unsigned int etaAltRange = (trigGepPerfValidationAlgoVersion == 2) ? 784 : 98;
+        const unsigned int etaAltRange = eta_range_; // 98 for both versions, see analysisHelperFunctions.h
         nTupler(/*signalBool=*/true, /*signalString=*/"ggF_hh_bbbb", etaAltRange, trigGepPerfValidationAlgoVersion,
-                /*jzSlice=*/0, /*specialJZ0Bool=*/false, /*outputDirOverride=*/"", /*writeDatFiles=*/false,
+                /*jzSlice=*/0, /*specialJZ0Bool=*/false, /*outputDirOverride=*/"", /*writeDatFiles=*/true,
                 /*specificDaodFile=*/"", /*specificGepFile=*/"", /*fileSuffix=*/"",
                 /*trigGepPerfValidation=*/true);
         gSystem->Exit(0);
@@ -4510,13 +4711,8 @@ void HERNTupler(){
     std::vector<std::string > jzOutputFilenames;
 
     for(auto algoVersion : algoVersions){
-        unsigned int etaAltRange = 0;
-        if(algoVersion == 2){
-            etaAltRange = 784;
-        }
-        if(algoVersion == 3){
-            etaAltRange = 98;
-        }
+        // Same tower grid for both versions now: 98 eta codes of 0.1
+        unsigned int etaAltRange = eta_range_;
         //nTupler(true, "VBF_hh_bbbb", etaAltRange, algoVersion); // call for signal (hh->4b VBF)
         //nTupler(true, "ggF_hh_bbbb", etaAltRange, algoVersion); // call for signal (hh->4b ggF)
         nTupler(true, "ggF_hh_bbbb_resim", etaAltRange, algoVersion); // call for signal (hh->4b ggF) (resimulated objects)
@@ -4528,13 +4724,7 @@ void HERNTupler(){
 
     for(auto jzSlice : jzSlices){
         for(auto algoVersion : algoVersions){
-            unsigned int etaAltRange = 0;
-            if(algoVersion == 2){
-                etaAltRange = 784; // = 9.8 / 0.0125
-            }
-            if(algoVersion == 3){
-                etaAltRange = 98; // = 9.8 / 0.1
-            }
+            unsigned int etaAltRange = eta_range_; // = 9.8 / 0.1, both versions
             nTupler(false, "", etaAltRange, algoVersion, jzSlice); // call for each background jzSlice
             if(jzSlice == 0){
                 nTupler(false, "", etaAltRange, algoVersion, jzSlice, true); // call for each background jzSlice
@@ -4561,19 +4751,17 @@ void HERNTupler(){
 }
 
 // Entry point for single-file Condor jobs.
-// Called as: root -b -q 'HERNTupler.C+(signalBool, "signalString", algoVersion, jzSlice, specialJZ0, "outputDir", "daodFile", "gepFile", "fileSuffix")'
-// etaAltRange is derived automatically from algoVersion.
+// Called as: root -b -q 'HERNTupler.C+(signalBool, "signalString", algoVersion, jzSlice, specialJZ0, "outputDir", "daodFile", "gepFile", "fileSuffix", pileup)'
+// etaAltRange is derived automatically from algoVersion. pileup defaults to 200.
 void HERNTupler(bool signalBool, std::string signalString, unsigned int algoVersion,
                 unsigned int jzSlice, bool specialJZ0,
                 std::string outputDir, std::string daodFile, std::string gepFile,
-                std::string fileSuffix) {
-    unsigned int etaAltRange = 0;
-    if (algoVersion == 2) etaAltRange = 784;  // 9.8 / 0.0125
-    else if (algoVersion == 3) etaAltRange = 98;   // 9.8 / 0.1
+                std::string fileSuffix, unsigned int pileup = 200) {
+    unsigned int etaAltRange = eta_range_;  // 9.8 / 0.1, both versions
 
     nTupler(signalBool, signalString, etaAltRange, algoVersion,
             jzSlice, specialJZ0,
-            outputDir, /*writeDatFiles=*/false,
-            daodFile, gepFile, fileSuffix);
+            outputDir, /*writeDatFiles=*/true,
+            daodFile, gepFile, fileSuffix, /*trigGepPerfValidation=*/true, /*pileup=*/pileup);
     gSystem->Exit(0);
 }

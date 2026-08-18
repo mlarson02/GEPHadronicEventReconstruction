@@ -1,4 +1,5 @@
 #include "analysisHelperFunctions.h"
+#include "chainSource.h"
 
 #include "/home/larsonma/atlasrootstyle/AtlasStyle.C"
 
@@ -42,6 +43,40 @@ const int kP10Cyan   = TColor::GetColor("#92dadd");
 // consistent across loops.
 constexpr int kMaxEventsPerSlice = -1;
 
+// Every rate-vs-threshold plot is written twice: once over the full threshold range and once
+// truncated here, where the interesting part of the trigger rate curves lives.
+constexpr double kRateVsThrZoomXMax = 600.0;
+
+// Average pileup quoted on the info line. Set from the sample being processed (see
+// SetPileupFromPath) so PU140 samples are not labelled as PU200.
+int gPileup = 200;
+
+// Is this a PU140 path? Two conventions are recognised:
+//   * the reconstruction tag in the file name — r16129 = PU140, r16130 = PU200.
+//     This is the primary differentiator: HERNTupler stamps it into the ntuple
+//     names and the emulation carries it through to its own outputs, which land
+//     in the same directory for both pileup scenarios.
+//   * a PU140 / pu140 / _140 marker in the path, e.g. the ntuples_PU140 directory.
+bool IsPU140Path(const std::string& path) {
+    return path.find("r16129") != std::string::npos ||
+           path.find("PU140")  != std::string::npos ||
+           path.find("pu140")  != std::string::npos ||
+           path.find("_140")   != std::string::npos;
+}
+
+// PU140 inputs carry the pileup in their filename; PU200 inputs are unlabelled (see the
+// sum-of-weights convention in HERNTupler.C). Detect from any input path.
+void SetPileupFromPath(const std::string& path) {
+    gPileup = IsPU140Path(path) ? 140 : 200;
+}
+
+// Same convention as SetPileupFromPath, but returns the value instead of setting the
+// global. Used to label the multi-file rate overlays, where PU140 and PU200 samples
+// can appear side by side on one canvas.
+int PileupFromPath(const std::string& path) {
+    return IsPU140Path(path) ? 140 : 200;
+}
+
 // Draw the ATLAS "Work in progress" label (plus beam-energy / pileup info) in a
 // white strip ABOVE the plot frame on the currently active canvas.
 // Call after cd()'ing to the canvas and before SaveAs/Print.
@@ -59,7 +94,9 @@ void DrawATLASLabel(double x = 0.20, double /*y*/ = 0.88, const char* status = "
     TLatex p; p.SetNDC(); p.SetTextFont(42); p.SetTextColor(kBlack); p.SetTextSize(0.04);
     p.DrawLatex(x + 0.13, yAtlas, status);
     TLatex e; e.SetNDC(); e.SetTextFont(42); e.SetTextColor(kBlack); e.SetTextSize(0.035);
-    e.DrawLatex(x, yInfo, "#sqrt{s} = 14 TeV, <PU> = 200");
+    // #LT / #GT are TLatex's angle brackets. Plain "<PU>" renders the less-than/greater-than
+    // glyphs, which is not the average-of notation.
+    e.DrawLatex(x, yInfo, Form("#sqrt{s} = 14 TeV, #LTPU#GT = %d", gPileup));
 }
 
 int colors[] = {            // colorblind-friendly Petroff 10-color palette
@@ -263,6 +300,14 @@ std::vector<TGraph*> unique_lead_LRJ_ET_Scan_RatesVsEff_vec;
 // for ET + constituent mass 2D scan ROC
 std::vector<TGraphErrors* > roc_ET_mass_AllEvents_vec;
 
+// AP-style rate-vs-threshold curves for every "threshold_views" quantity, keyed by the
+// tag used in the output file name. Each entry is {file index, curve} so that files
+// skipping a quantity do not shift the colour/legend mapping in the overlay.
+std::vector<std::string> rateVsThr_graph_tags;   // insertion order, for reproducible output
+std::map<std::string, std::vector<std::pair<unsigned int, TGraphErrors*>>> rateVsThr_graph_map;
+// Human-readable axis label per tag, taken from the source histogram's x axis
+std::map<std::string, std::string> rateVsThr_graph_xTitle;
+
 
 
 TH1F* sig_h_leading_offlineLRJ_Et = new TH1F("sig_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading Offline LRJs / 20 GeV", 40, 0, 800); // moved outside scope of file loop for use afterwards
@@ -330,10 +375,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     }
 
     // Open input ROOT files: original ntuple + separate jet tagger output
-    TFile* signalInputFile = TFile::Open(signalFiles[fileIt].first.c_str(), "READ");
-    TFile* backgroundInputFile = TFile::Open(backgroundFiles[fileIt].first.c_str(), "READ");
-    if ((!signalInputFile || signalInputFile->IsZombie()) || (!backgroundInputFile || backgroundInputFile->IsZombie())) {
-        std::cerr << "Error: Could not open file " << signalFiles[fileIt].first << std::endl;
+    ChainSource* signalInputFile = ChainSource::Open(signalFiles[fileIt].first.c_str());
+    ChainSource* backgroundInputFile = ChainSource::Open(backgroundFiles[fileIt].first.c_str());
+    // Quote the pileup of the sample actually being processed, not a hardcoded 200.
+    SetPileupFromPath(signalFiles[fileIt].first + " " + signalFiles[fileIt].second);
+    std::cout << "Labelling plots as <PU> = " << gPileup << "\n";
+
+    if (!signalInputFile || signalInputFile->IsZombie()) {
+        std::cerr << "Error: Could not open signal file " << signalFiles[fileIt].first << std::endl;
+        return;
+    }
+    if (!backgroundInputFile || backgroundInputFile->IsZombie()) {
+        std::cerr << "Error: Could not open background file " << backgroundFiles[fileIt].first << std::endl;
         return;
     }
     TFile* signalJetTaggerFile = TFile::Open(signalFiles[fileIt].second.c_str(), "READ");
@@ -4441,21 +4494,53 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TH1F* back_h_leading_LRJ_Et_normalbinning = new TH1F("back_h_leading_LRJ_Et_normalbinning", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", 41, 0, 1025);
     TH1F* back_h_subleading_LRJ_Et_normalbinning = new TH1F("back_h_subleading_LRJ_Et_normalbinning", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", 41, 0, 1025);
 
-    TH1F* back_h_gFEX_leading_LRJ_Et = new TH1F("back_h_gFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_gFEX_leading_LRJ_Et = new TH1F("back_h_gFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;Leading gFEX LRJ E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* back_h_gFEX_subleading_LRJ_Et = new TH1F("back_h_gFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     // gFEX LRJ Sim (resimulated) — background rate histograms
     TH1F* back_h_gFEX_Sim_leading_LRJ_Et = new TH1F("back_h_gFEX_Sim_leading_LRJ_Et", "Leading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* back_h_gFEX_Sim_subleading_LRJ_Et = new TH1F("back_h_gFEX_Sim_subleading_LRJ_Et", "Subleading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     // JZ0 no-HSTP versions for basic rate comparison
     TH1F* back_h_leading_LRJ_Et_JZ0 = new TH1F("back_h_leading_LRJ_Et_JZ0", "Leading Jet Tagger LRJ E_{T} (JZ0);E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_leading_WtaCone_Et_JZ0 = new TH1F("back_h_leading_WtaCone_Et_JZ0", "Leading WTA Cone Jet E_{T} (JZ0);E_{T} [GeV];% of Leading Cone Jets / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_gFEX_leading_LRJ_Et_JZ0 = new TH1F("back_h_gFEX_leading_LRJ_Et_JZ0", "Leading gFEX LRJ E_{T} (JZ0);E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    // Binned like its all-JZ counterpart back_h_leading_WtaCone_Et, which uses
+    // rateVsEffBins_ConeLeadSingle (10 GeV steps to 400), NOT rateVsEffBins (5 GeV steps). With
+    // rateVsEffBins here the two cumulative curves had different thresholds at the same bin index.
+    TH1F* back_h_leading_WtaCone_Et_JZ0 = new TH1F("back_h_leading_WtaCone_Et_JZ0", "Leading WTA Cone Jet E_{T} (JZ0);E_{T} [GeV];% of Leading Cone Jets / 25 GeV", rateVsEffBins_ConeLeadSingle.size() - 1, rateVsEffBins_ConeLeadSingle.data());
+    TH1F* back_h_gFEX_leading_LRJ_Et_JZ0 = new TH1F("back_h_gFEX_leading_LRJ_Et_JZ0", "Leading gFEX LRJ E_{T} (JZ0);Leading gFEX LRJ E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* back_h_gFEX_Sim_leading_LRJ_Et_JZ0 = new TH1F("back_h_gFEX_Sim_leading_LRJ_Et_JZ0", "Leading gFEX LRJ E_{T} Sim (JZ0);E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     // JZ0 distributions: truth SRJ and jet tagger LRJ Et
     TH1F* back_h_leading_truthSRJ_Et_JZ0 = new TH1F("back_h_leading_truthSRJ_Et_JZ0", "Leading Truth SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", 32, 0, 800);
     TH1F* back_h_subleading_truthSRJ_Et_JZ0 = new TH1F("back_h_subleading_truthSRJ_Et_JZ0", "Subleading Truth SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", 32, 0, 800);
     TH1F* back_h_leading_jetTagger_Et_JZ0 = new TH1F("back_h_leading_jetTagger_Et_JZ0", "Leading Jet Tagger LRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     TH1F* back_h_subleading_jetTagger_Et_JZ0 = new TH1F("back_h_subleading_jetTagger_Et_JZ0", "Subleading Jet Tagger LRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    // JZ0 no-HSTP twins for the remaining single-jet and multi-jet triggers, each binned like
+    // its all-JZ counterpart so the rate curves built from the two are directly comparable in
+    // the normalization overlays. gFEX has no 4th-leading entry: it is not designed for
+    // multi-jet triggers, so the 4-jet leg is jFEX (and WTA cone) only.
+    // (The leading WTA cone JZ0 twin is back_h_leading_WtaCone_Et_JZ0, declared above.)
+    TH1F* back_h_4th_leading_WtaCone_Et_JZ0 = new TH1F("back_h_4th_leading_WtaCone_Et_JZ0", "4th Leading WTA Cone Jet E_{T} (JZ0, no HSTP);4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
+    TH1F* back_h_gFEX_leading_SRJ_Et_JZ0 = new TH1F("back_h_gFEX_leading_SRJ_Et_JZ0", "Leading gFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
+    TH1F* back_h_jFEX_leading_SRJ_Et_JZ0 = new TH1F("back_h_jFEX_leading_SRJ_Et_JZ0", "Leading jFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
+    TH1F* back_h_jFEX_4thleading_SRJ_Et_JZ0 = new TH1F("back_h_jFEX_4thleading_SRJ_Et_JZ0", "4th Leading jFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 100, 0, 200);
+    // Resimulated (Sim) JZ0 no-HSTP twins for the same three legs, binned like their all-JZ Sim
+    // counterparts (back_h_gFEX_Sim_leading_SRJ_Et, back_h_jFEX_Sim_leading_SRJ_Et,
+    // back_h_jFEX_Sim_4thleading_SRJ_Et) so the normalization overlays compare like with like.
+    // The gFEX LRJ leg already has its Sim twin above (back_h_gFEX_Sim_leading_LRJ_Et_JZ0).
+    TH1F* back_h_gFEX_Sim_leading_SRJ_Et_JZ0 = new TH1F("back_h_gFEX_Sim_leading_SRJ_Et_JZ0", "Leading gFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
+    TH1F* back_h_jFEX_Sim_leading_SRJ_Et_JZ0 = new TH1F("back_h_jFEX_Sim_leading_SRJ_Et_JZ0", "Leading jFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
+    TH1F* back_h_jFEX_Sim_4thleading_SRJ_Et_JZ0 = new TH1F("back_h_jFEX_Sim_4thleading_SRJ_Et_JZ0", "4th Leading jFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 100, 0, 200);
+    // Truth-jet rate reference for the JZ0 vs JZ0-9 comparison: leading hard-scatter jet
+    // (AntiKt4TruthDressedWZ) and leading in-time pileup jet (InTimeAntiKt4Truth), taken
+    // straight from the ntuple so no trigger object enters the comparison. All four are filled
+    // before the HSTP filter, so neither the JZ0 nor the JZ0-9 curve carries a selection.
+    TH1F* back_h_leading_truthWZ_SRJ_Et = new TH1F("back_h_leading_truthWZ_SRJ_Et", "Leading Truth HS Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthWZ_SRJ_Et_JZ0 = new TH1F("back_h_leading_truthWZ_SRJ_Et_JZ0", "Leading Truth HS Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthInTimePU_SRJ_Et = new TH1F("back_h_leading_truthInTimePU_SRJ_Et", "Leading In-Time Pileup Truth Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthInTimePU_SRJ_Et_JZ0 = new TH1F("back_h_leading_truthInTimePU_SRJ_Et_JZ0", "Leading In-Time Pileup Truth Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    // Leading truth jet in the event whatever its origin — the larger of the two leading jets
+    // above. This is the spectrum the JZ0 vs JZ0-9 comparison is about: splitting it by origin
+    // asks which collection the leading jet came from, not how the two slice sets compare.
+    TH1F* back_h_leading_truthAny_SRJ_Et = new TH1F("back_h_leading_truthAny_SRJ_Et", "Leading Truth Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthAny_SRJ_Et_JZ0 = new TH1F("back_h_leading_truthAny_SRJ_Et_JZ0", "Leading Truth Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
     // SK and EtaSK WTA cone jets — background distributions
     TH1F* back_h_leading_WTA_coneSK_cellstowers_pT = new TH1F("back_h_leading_WTA_coneSK_cellstowers_pT", "Leading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
     TH1F* back_h_subleading_WTA_coneSK_cellstowers_pT = new TH1F("back_h_subleading_WTA_coneSK_cellstowers_pT", "Subleading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
@@ -4622,17 +4707,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     /// FILEIT LOOP HERE
 
-    std::ifstream sig_infile(signalFiles[fileIt].first);
-    std::ifstream back_infile(backgroundFiles[fileIt].first);
-    //std::cout << "processing: " << signalFiles[fileIt].first << " and: " << backgroundFiles[fileIt].first << "\n";
-    if (!sig_infile.is_open()) { 
-        std::cerr << "Error: Could not open file " << signalFiles[fileIt].first << std::endl;
-        return;
-    }
-    if (!back_infile.is_open()){
-        std::cerr << "Error: Could not open file " << backgroundFiles[fileIt].first << std::endl;
-        return;
-    }
+    // (The std::ifstream existence check that used to sit here has been removed: it could not
+    // handle the wildcard paths used to chain the JZ slices, since ifstream opens one literal
+    // filename. signalInputFile / backgroundInputFile above already cover this via
+    // ChainSource, which expands the wildcard.)
     _lap(Form("[file %u] histogram declarations", fileIt));
 
     for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt ++ ){
@@ -4850,6 +4928,51 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             back_h_gFEX_leading_LRJ_Et_JZ0->Fill(gFexLRJLeadingEtValuesBack->at(0), backgroundEventWeight);
             if (gFexLRJSimLeadingEtValuesBack->size() > 0)
                 back_h_gFEX_Sim_leading_LRJ_Et_JZ0->Fill(gFexLRJSimLeadingEtValuesBack->at(0), backgroundEventWeight);
+            // 4th-leading cone jet fills 0 when the event has fewer than 4 jets, matching the
+            // all-JZ histogram so both curves start from the same denominator.
+            back_h_4th_leading_WtaCone_Et_JZ0->Fill(
+                gepWTAConeCellsTowersJetspTValuesBack->size() >= 4
+                    ? gepWTAConeCellsTowersJetspTValuesBack->at(3) : 0.0,
+                backgroundEventWeight);
+            if (gFexSRJLeadingEtValuesBack->size() > 0)
+                back_h_gFEX_leading_SRJ_Et_JZ0->Fill(gFexSRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+            if (jFexSRJLeadingEtValuesBack->size() > 0)
+                back_h_jFEX_leading_SRJ_Et_JZ0->Fill(jFexSRJLeadingEtValuesBack->at(0), backgroundEventWeight);
+            if (jFexSRJEtValuesBack->size() > 3)
+                back_h_jFEX_4thleading_SRJ_Et_JZ0->Fill(clamp200(jFexSRJEtValuesBack->at(3)), backgroundEventWeight);
+            // Resimulated (Sim) twins of the three fills above, filled exactly the same way so the
+            // JZ0 reference in the rate normalization overlays is built from the same objects as
+            // the all-JZ curve it is compared against.
+            if (gFexSRJSimLeadingEtValuesBack->size() > 0)
+                back_h_gFEX_Sim_leading_SRJ_Et_JZ0->Fill(gFexSRJSimLeadingEtValuesBack->at(0), backgroundEventWeight);
+            if (jFexSRJSimLeadingEtValuesBack->size() > 0)
+                back_h_jFEX_Sim_leading_SRJ_Et_JZ0->Fill(jFexSRJSimLeadingEtValuesBack->at(0), backgroundEventWeight);
+            if (jFexSRJSimEtValuesBack->size() > 3)
+                back_h_jFEX_Sim_4thleading_SRJ_Et_JZ0->Fill(clamp200(jFexSRJSimEtValuesBack->at(3)), backgroundEventWeight);
+        }
+
+        // Truth-jet rate reference — leading hard-scatter jet and leading in-time pileup jet,
+        // both read directly from the ntuple. Filled here, ahead of the HSTP filter and the
+        // out-of-time spike veto, so the only thing separating the JZ0 and JZ0-9 curves is the
+        // JZ slice composition. Events with no such jet fill 0 so that bin 1 of the cumulative
+        // stays the total event rate in both curves, the same convention the 4th-leading cone
+        // jet histograms use.
+        {
+            const double etLeadTruthWZ = (truthAntiKt4WZSRJLeadingEtValuesBack->size() > 0)
+                ? truthAntiKt4WZSRJLeadingEtValuesBack->at(0) : 0.0;
+            const double etLeadTruthPU = (inTimeAntiKt4TruthSRJLeadingEtValuesBack->size() > 0)
+                ? inTimeAntiKt4TruthSRJLeadingEtValuesBack->at(0) : 0.0;
+            // Each collection's entry 0 is already its own leading jet, so the leading truth jet
+            // of the event is whichever of the two is larger.
+            const double etLeadTruthAny = std::max(etLeadTruthWZ, etLeadTruthPU);
+            back_h_leading_truthWZ_SRJ_Et->Fill(etLeadTruthWZ, backgroundEventWeight);
+            back_h_leading_truthInTimePU_SRJ_Et->Fill(etLeadTruthPU, backgroundEventWeight);
+            back_h_leading_truthAny_SRJ_Et->Fill(etLeadTruthAny, backgroundEventWeight);
+            if (sampleJZSliceValuesBack == 0) {
+                back_h_leading_truthWZ_SRJ_Et_JZ0->Fill(etLeadTruthWZ, backgroundEventWeight);
+                back_h_leading_truthInTimePU_SRJ_Et_JZ0->Fill(etLeadTruthPU, backgroundEventWeight);
+                back_h_leading_truthAny_SRJ_Et_JZ0->Fill(etLeadTruthAny, backgroundEventWeight);
+            }
         }
 
         if ((unsigned)sampleJZSliceValuesBack < nJZSlices_) dbgTotal1[sampleJZSliceValuesBack]++;
@@ -5035,6 +5158,39 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     gSystem->mkdir(rateVsEffFileDir);
 
+    // Companion to each "threshold_views_<tag>.pdf": the background rate vs. threshold on
+    // its own, drawn "AP" (markers + error bars) like the rate-vs-eff plots instead of as a
+    // histogram. Also registers the curve for the multi-file overlay drawn at the very end.
+    auto SaveRateVsThrViews = [&](TH1* hRate_vsThr, const char* tag) {
+        if (!hRate_vsThr) return;
+        // Named up front rather than with nested Form() calls, which share one static buffer
+        const TString graphName  = TString::Format("gRate_vsThr_%s_%u", tag, fileIt);
+        const TString canvasName = TString::Format("cRateVsThr_%s_%u", tag, fileIt);
+        const TString outputPath = rateVsEffFileDir + TString::Format("rate_vs_threshold_%s.pdf", tag);
+
+        auto* g = MakeRateVsThrGraph(hRate_vsThr, graphName.Data());
+
+        // Registered before drawing, and cloned again per overlay variant: drawing sets a
+        // graph's internal histogram, so each canvas needs its own copy.
+        if (rateVsThr_graph_map.find(tag) == rateVsThr_graph_map.end()) {
+            rateVsThr_graph_tags.push_back(tag);
+            rateVsThr_graph_xTitle[tag] = hRate_vsThr->GetXaxis()->GetTitle();
+        }
+        rateVsThr_graph_map[tag].emplace_back(
+            fileIt,
+            (TGraphErrors*) g->Clone(TString::Format("%s_overlay", graphName.Data()).Data()));
+
+        SaveRateVsThrGraph(g, outputPath, canvasName.Data());
+
+        // Zoomed duplicate: identical curve, threshold axis truncated
+        const TString zoomName = TString::Format("cRateVsThr_%s_%u_xMax%.0f",
+                                                 tag, fileIt, kRateVsThrZoomXMax);
+        const TString zoomPath = rateVsEffFileDir + TString::Format("rate_vs_threshold_%s_xMax%.0f.pdf",
+                                                                    tag, kRateVsThrZoomXMax);
+        auto* gZoom = (TGraphErrors*) g->Clone(TString::Format("%s_zoom", graphName.Data()).Data());
+        SaveRateVsThrGraph(gZoom, zoomPath, zoomName.Data(), kRateVsThrZoomXMax);
+    };
+
     // 4th leading cone jet rate vs. eff... :
     auto out_4thLeadCone = MakeRateVsEff(sig_h_4th_leading_WtaCone_Et, back_h_4th_leading_WtaCone_Et);
 
@@ -5066,6 +5222,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_4thLeadCone.hRate_vsThr->Draw("HIST");
     c1_4thleadcone->cd(); DrawATLASLabel(); c1_4thleadcone->SaveAs(rateVsEffFileDir + "threshold_views_4thleadcone.pdf");
+    SaveRateVsThrViews(out_4thLeadCone.hRate_vsThr, "4thleadcone");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_4thleadcone = new TCanvas("c2_4thleadcone","Rate vs Eff",700,600);
@@ -5140,6 +5297,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_leading_cone.hRate_vsThr->Draw("HIST");
         c1_leadcone->cd(); DrawATLASLabel(); c1_leadcone->SaveAs(rateVsEffFileDir + "threshold_views_leading_conejets.pdf");
+        SaveRateVsThrViews(out_leading_cone.hRate_vsThr, "leading_conejets");
 
         auto c2_leadcone = new TCanvas("c2_leadcone", "Rate vs Eff", 700, 600);
         c2_leadcone->SetLeftMargin(0.16); c2_leadcone->SetBottomMargin(0.16); c2_leadcone->SetTicks(1,1);
@@ -5174,6 +5332,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_HT_cone.hRate_vsThr->Draw("HIST");
         c1_HT->cd(); DrawATLASLabel(); c1_HT->SaveAs(rateVsEffFileDir + "threshold_views_HT_conejets.pdf");
+        SaveRateVsThrViews(out_HT_cone.hRate_vsThr, "HT_conejets");
 
         auto c2_HT = new TCanvas("c2_HT", "Rate vs Eff", 700, 600);
         c2_HT->SetLeftMargin(0.16); c2_HT->SetBottomMargin(0.16); c2_HT->SetTicks(1,1);
@@ -5217,6 +5376,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_unique_leading.hRate_vsThr->Draw("HIST");
         c1_unique_lead->cd(); DrawATLASLabel(); c1_unique_lead->SaveAs(rateVsEffFileDir + "threshold_views_unique_leading_LRJ.pdf");
+        SaveRateVsThrViews(out_unique_leading.hRate_vsThr, "unique_leading_LRJ");
 
         auto c2_unique_lead = new TCanvas("c2_unique_lead", "Unique rate vs eff", 700, 600);
         c2_unique_lead->SetLeftMargin(0.16); c2_unique_lead->SetBottomMargin(0.16); c2_unique_lead->SetTicks(1,1);
@@ -5272,6 +5432,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out.hRate_vsThr->Draw("HIST");
     c1->cd(); DrawATLASLabel(); c1->SaveAs(rateVsEffFileDir + "threshold_views.pdf");
+    SaveRateVsThrViews(out.hRate_vsThr, "leading_LRJ");
 
     // Main plot: rate vs efficiency (graph)
     auto c2 = new TCanvas("c2","Rate vs Eff",700,600);
@@ -5322,6 +5483,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_subleading.hRate_vsThr->Draw("HIST");
     c1_subleading->cd(); DrawATLASLabel(); c1_subleading->SaveAs(rateVsEffFileDir + "threshold_views_subleading.pdf");
+    SaveRateVsThrViews(out_subleading.hRate_vsThr, "subleading_LRJ");
 
     // Main plot
     auto c2_subleading = new TCanvas("c2_subleading","Rate vs Eff",700,600);
@@ -5355,6 +5517,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_gFEX_leading.hRate_vsThr->Draw("HIST");
     c1_gFEX_leading->cd(); DrawATLASLabel(); c1_gFEX_leading->SaveAs(rateVsEffFileDir + "threshold_views_gfex_leading.pdf");
+    SaveRateVsThrViews(out_gFEX_leading.hRate_vsThr, "gfex_leading");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_gFEX_leading = new TCanvas("c2_gFEX_leading","Rate vs Eff",700,600);
@@ -5394,6 +5557,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_gFEX_subleading.hRate_vsThr->Draw("HIST");
     c1_gFEX_subleading->cd(); DrawATLASLabel(); c1_gFEX_subleading->SaveAs(rateVsEffFileDir + "threshold_views_gfex_subleading.pdf");
+    SaveRateVsThrViews(out_gFEX_subleading.hRate_vsThr, "gfex_subleading");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_gFEX_subleading = new TCanvas("c2_gFEX_subleading","Rate vs Eff",700,600);
@@ -5431,6 +5595,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_gFEX_Sim_leading.hRate_vsThr->Draw("HIST");
     c1_gFEX_Sim_leading->cd(); DrawATLASLabel(); c1_gFEX_Sim_leading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_Sim_leading.pdf");
+    SaveRateVsThrViews(out_gFEX_Sim_leading.hRate_vsThr, "gFEX_Sim_leading");
 
     auto c2_gFEX_Sim_leading = new TCanvas("c2_gFEX_Sim_leading","Rate vs Eff gFEX Sim",700,600);
     c2_gFEX_Sim_leading->SetLeftMargin(0.16); c2_gFEX_Sim_leading->SetBottomMargin(0.16); c2_gFEX_Sim_leading->SetTicks(1,1);
@@ -5486,6 +5651,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_jFEX_Sim_leading.hRate_vsThr->Draw("HIST");
         c1_jFEX_Sim_leading->cd(); DrawATLASLabel(); c1_jFEX_Sim_leading->SaveAs(rateVsEffFileDir + "threshold_views_jFEX_Sim_leading.pdf");
+        SaveRateVsThrViews(out_jFEX_Sim_leading.hRate_vsThr, "jFEX_Sim_leading");
 
         auto c2_jFEX_Sim_leading = new TCanvas("c2_jFEX_Sim_leading","Rate vs Eff jFEX SRJ Sim",700,600);
         c2_jFEX_Sim_leading->SetLeftMargin(0.16); c2_jFEX_Sim_leading->SetBottomMargin(0.16); c2_jFEX_Sim_leading->SetTicks(1,1);
@@ -5517,6 +5683,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_jFEX_Sim_4thleading.hRate_vsThr->Draw("HIST");
         c1_jFEX_Sim_4thleading->cd(); DrawATLASLabel(); c1_jFEX_Sim_4thleading->SaveAs(rateVsEffFileDir + "threshold_views_jFEX_Sim_4thleading.pdf");
+        SaveRateVsThrViews(out_jFEX_Sim_4thleading.hRate_vsThr, "jFEX_Sim_4thleading");
 
         auto c2_jFEX_Sim_4thleading = new TCanvas("c2_jFEX_Sim_4thleading","Rate vs Eff jFEX SRJ Sim",700,600);
         c2_jFEX_Sim_4thleading->SetLeftMargin(0.16); c2_jFEX_Sim_4thleading->SetBottomMargin(0.16); c2_jFEX_Sim_4thleading->SetTicks(1,1);
@@ -5548,6 +5715,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_jFEX_4thleading.hRate_vsThr->Draw("HIST");
         c1_jFEX_4thleading->cd(); DrawATLASLabel(); c1_jFEX_4thleading->SaveAs(rateVsEffFileDir + "threshold_views_jFEX_4thleading.pdf");
+        SaveRateVsThrViews(out_jFEX_4thleading.hRate_vsThr, "jFEX_4thleading");
 
         auto c2_jFEX_4thleading = new TCanvas("c2_jFEX_4thleading","Rate vs Eff jFEX SRJ Sim",700,600);
         c2_jFEX_4thleading->SetLeftMargin(0.16); c2_jFEX_4thleading->SetBottomMargin(0.16); c2_jFEX_4thleading->SetTicks(1,1);
@@ -5580,6 +5748,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_gFEX_SRJ_Sim_leading.hRate_vsThr->Draw("HIST");
         c1_gFEX_Sim_leading->cd(); DrawATLASLabel(); c1_gFEX_Sim_leading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_SRJ_Sim_leading.pdf");
+        SaveRateVsThrViews(out_gFEX_SRJ_Sim_leading.hRate_vsThr, "gFEX_SRJ_Sim_leading");
 
         auto c2_gFEX_Sim_leading = new TCanvas("c2_gFEX_Sim_leading","Rate vs Eff gFEX SRJ Sim",700,600);
         c2_gFEX_Sim_leading->SetLeftMargin(0.16); c2_gFEX_Sim_leading->SetBottomMargin(0.16); c2_gFEX_Sim_leading->SetTicks(1,1);
@@ -5611,6 +5780,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_gFEX_Sim_4thleading.hRate_vsThr->Draw("HIST");
         c1_gFEX_Sim_4thleading->cd(); DrawATLASLabel(); c1_gFEX_Sim_4thleading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_Sim_4thleading.pdf");
+        SaveRateVsThrViews(out_gFEX_Sim_4thleading.hRate_vsThr, "gFEX_Sim_4thleading");
 
         auto c2_gFEX_Sim_4thleading = new TCanvas("c2_gFEX_Sim_4thleading","Rate vs Eff gFEX SRJ Sim",700,600);
         c2_gFEX_Sim_4thleading->SetLeftMargin(0.16); c2_gFEX_Sim_4thleading->SetBottomMargin(0.16); c2_gFEX_Sim_4thleading->SetTicks(1,1);
@@ -5642,6 +5812,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_gFEX_SRJ_leading.hRate_vsThr->Draw("HIST");
         c1_gFEX_leading->cd(); DrawATLASLabel(); c1_gFEX_leading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_SRJ_leading.pdf");
+        SaveRateVsThrViews(out_gFEX_SRJ_leading.hRate_vsThr, "gFEX_SRJ_leading");
 
         auto c2_gFEX_leading = new TCanvas("c2_gFEX_leading","Rate vs Eff gFEX SRJ",700,600);
         c2_gFEX_leading->SetLeftMargin(0.16); c2_gFEX_leading->SetBottomMargin(0.16); c2_gFEX_leading->SetTicks(1,1);
@@ -5673,6 +5844,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gPad->SetLogy();
         out_gFEX_4thleading.hRate_vsThr->Draw("HIST");
         c1_gFEX_4thleading->cd(); DrawATLASLabel(); c1_gFEX_4thleading->SaveAs(rateVsEffFileDir + "threshold_views_gFEX_4thleading.pdf");
+        SaveRateVsThrViews(out_gFEX_4thleading.hRate_vsThr, "gFEX_4thleading");
 
         auto c2_gFEX_4thleading = new TCanvas("c2_gFEX_4thleading","Rate vs Eff gFEX SRJ",700,600);
         c2_gFEX_4thleading->SetLeftMargin(0.16); c2_gFEX_4thleading->SetBottomMargin(0.16); c2_gFEX_4thleading->SetTicks(1,1);
@@ -5844,6 +6016,235 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             legROC3j->Draw();
         }
         cjFEXgFEXSimROC->cd(); DrawATLASLabel(); cjFEXgFEXSimROC->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone_4thLead.pdf");
+    }
+
+    // ---- Rate normalization overlays: as filled vs sigma x L vs binomial per-crossing ------
+    // Every rate histogram above keeps the normalization it always had; this block only draws
+    // clones. Four curves per trigger:
+    //   * as filled            — the curve every other plot in this macro uses,
+    //   * scaled to sigma x L  — the physical collision rate at the analysis pileup, undoing
+    //                            HERNTupler's rate-mode normalization choice,
+    //   * binomial per-crossing — f_BX * (1 - (1-p)^mu) with p = R / (f_BX * mu) the
+    //                            per-collision pass probability. Saturates at the crossing
+    //                            rate instead of growing without bound; in the p << 1 regime
+    //                            it reduces to the sigma x L curve exactly,
+    //   * JZ0 only, no HSTP    — the reference showing how much rate the HSTP filter removes
+    //                            at each threshold (JZ0 alone is 95% of the sample's rate).
+    //
+    // The binomial step factorizes "the crossing fires" into mu independent collisions, which
+    // is meaningful for jets because a jet belongs to one collision. It is NOT applied to MET
+    // in metAnalysisAndRates.C, where the observable is a crossing-level vector sum. Note also
+    // that these samples already have pileup overlaid, so the jets in these curves already
+    // contain PU contributions.
+    {
+        // Follows the pileup of the sample being processed, detected from the r-tag in
+        // its file name by SetPileupFromPath above (r16130 = PU200, r16129 = PU140).
+        const double analysisPileupLRJ = static_cast<double>(gPileup);
+        // HERNTupler runs with useRateNormalization = false, so the weights already carry the
+        // physical collision rate sigma x L_inst (~6 GHz over the full sample). The binomial
+        // conversion therefore takes the curves as they are — applying
+        // RateModeToCollisionRateScale here would multiply by L_inst a second time.
+        const double collisionRateScaleLRJ = 1.0;
+
+        // Cumulative background rate above threshold, same construction MakeRateVsEff uses.
+        auto cumulativeRateHist = [](TH1F* hBkg, const std::string& name) -> TH1* {
+            if (!hBkg) return nullptr;
+            TH1* h = hBkg->GetCumulative(false, name.c_str());
+            h->SetDirectory(nullptr);
+            return h;
+        };
+
+        auto drawRateNormOverlay = [&](TH1* hRateAllJZ, TH1F* hBkgJZ0,
+                                       const std::string& triggerName,
+                                       const std::string& xTitle,
+                                       const std::string& fileStem) {
+            if (!hRateAllJZ) return;
+            TH1* hAsFilled = (TH1*)hRateAllJZ->Clone((fileStem + "_asFilled").c_str());
+            hAsFilled->SetDirectory(nullptr);
+            TH1* hBinomial = MakeBinomialCrossingRateHist(hRateAllJZ, (fileStem + "_binomial").c_str(),
+                                                          collisionRateScaleLRJ, analysisPileupLRJ);
+            TH1* hJZ0 = cumulativeRateHist(hBkgJZ0, fileStem + "_JZ0rate");
+
+            const double jz0AtZero = hJZ0->GetBinContent(1);
+            if (jz0AtZero > 0.0) hJZ0->Scale(kCrossingRateHz / jz0AtZero);
+
+            // No separate sigma x L curve: with luminosity-mode weights the as-filled curve
+            // already is the collision rate, so it would be the same points twice.
+            std::vector<TH1*>        curves = { hAsFilled, hBinomial };
+            std::vector<std::string> labels;
+            labels.push_back("All JZ Slices [HSTP], no binomial");
+            labels.push_back(Form("All JZ Slices [HSTP], binomial",
+                                  analysisPileupLRJ, kCrossingRateHz / 1e6));
+            if (hJZ0) { curves.push_back(hJZ0); labels.push_back("JZ0 only, no HSTP"); }
+            const std::vector<Int_t> normCols = { kBlack, kP10Red, kP10Green };
+
+            // Points with error bars plus a ratio panel. JZ0 with no HSTP requirement is the
+            // denominator when it is available — it is the one curve that never had rate
+            // removed — otherwise fall back to the as-filled curve.
+            const bool haveJZ0 = (curves.size() == 3);
+            DrawRateCurvesWithRatio(curves, labels, normCols,
+                                    /*refIndex=*/haveJZ0 ? 2u : 0u,
+                                    /*refShortName=*/haveJZ0 ? "JZ0 (no HSTP)" : "as filled",
+                                    xTitle, "Estimated Background Rate [Hz]", triggerName,
+                                    rateVsEffFileDir + TString(("rate_normalization_" + fileStem + ".pdf").c_str()),
+                                    /*yScale=*/1.0, /*xMax=*/-1.0, /*yMin=*/1.0,
+                                    /*ratioMin=*/0.0, /*ratioMax=*/4.0);
+
+            // Zoomed duplicate, matching the rate-vs-threshold plots. The curves are rebuilt
+            // from the same histograms, which DrawRateCurvesWithRatio leaves untouched.
+            DrawRateCurvesWithRatio(curves, labels, normCols,
+                                    /*refIndex=*/haveJZ0 ? 2u : 0u,
+                                    /*refShortName=*/haveJZ0 ? "JZ0 (no HSTP)" : "as filled",
+                                    xTitle, "Estimated Background Rate [Hz]", triggerName,
+                                    rateVsEffFileDir + TString::Format("rate_normalization_%s_xMax%.0f.pdf",
+                                                                       fileStem.c_str(), kRateVsThrZoomXMax),
+                                    /*yScale=*/1.0, /*xMax=*/kRateVsThrZoomXMax, /*yMin=*/1.0,
+                                    /*ratioMin=*/0.0, /*ratioMax=*/4.0);
+        };
+
+        // Large-R legs
+        drawRateNormOverlay(out.hRate_vsThr,              back_h_leading_LRJ_Et_JZ0,
+                            "Jet Tagger LRJ, leading",    "Leading Jet Tagger LRJ E_{T} threshold [GeV]",
+                            "jetTagger_leading_LRJ");
+        drawRateNormOverlay(out_gFEX_Sim_leading.hRate_vsThr, back_h_gFEX_Sim_leading_LRJ_Et_JZ0,
+                            "gFEX (Resim) large-R, leading", "Leading gFEX (Resim) LRJ E_{T} threshold [GeV]",
+                            "gFEX_leading_LRJ");
+        // Single-jet legs
+        drawRateNormOverlay(out_leading_cone.hRate_vsThr, back_h_leading_WtaCone_Et_JZ0,
+                            "WTA cone jet, leading",      "Leading WTA cone jet E_{T} threshold [GeV]",
+                            "cone_leading");
+        drawRateNormOverlay(out_gFEX_SRJ_Sim_leading.hRate_vsThr, back_h_gFEX_Sim_leading_SRJ_Et_JZ0,
+                            "gFEX (Resim) SRJ, leading",  "Leading gFEX (Resim) SRJ E_{T} threshold [GeV]",
+                            "gFEX_leading_SRJ");
+        drawRateNormOverlay(out_jFEX_Sim_leading.hRate_vsThr, back_h_jFEX_Sim_leading_SRJ_Et_JZ0,
+                            "jFEX (Resim) SRJ, leading",  "Leading jFEX (Resim) SRJ E_{T} threshold [GeV]",
+                            "jFEX_leading_SRJ");
+        // Multi-jet legs — no gFEX entry, it is not designed for multi-jet triggers
+        drawRateNormOverlay(out_4thLeadCone.hRate_vsThr,  back_h_4th_leading_WtaCone_Et_JZ0,
+                            "WTA cone jet, 4th leading",  "4th leading WTA cone jet E_{T} threshold [GeV]",
+                            "cone_4thLeading");
+        drawRateNormOverlay(out_jFEX_Sim_4thleading.hRate_vsThr, back_h_jFEX_Sim_4thleading_SRJ_Et_JZ0,
+                            "jFEX (Resim) SRJ, 4th leading", "4th leading jFEX (Resim) SRJ E_{T} threshold [GeV]",
+                            "jFEX_4thLeading_SRJ");
+    }
+
+    // ---- Truth-jet version of the same comparison: JZ0 only vs JZ0-9 -----------------------
+    // The block above mixes the slice question together with the trigger object: every curve is
+    // built from an emulated or resimulated jet, and its JZ0 reference also drops the HSTP
+    // requirement. This one removes both complications. The observable is a truth jet already in
+    // the ntuples, and its histograms are filled before the HSTP filter for JZ0 and for JZ0-9
+    // alike, so the only thing separating the two curves is which slices contribute.
+    //
+    // NORMALIZATION, and why it depends on which truth jet is plotted. The weights are a physical
+    // collision rate: sigma_ref x L = 0.080379 b x 7.5e10 b^-1 s^-1 = 6.03e9 Hz at PU200, which is
+    // f_BX x mu = 30.9 MHz x 200 = 6.18e9 Hz to within 2.5%, as it has to be. Turning that into a
+    // per-crossing trigger rate depends on what one entry of the histogram counts:
+    //   * PER-COLLISION observable (leading AntiKt4TruthDressedWZ jet): one hard scatter per
+    //     event, so sigma x L is the right normalization and the binomial conversion
+    //     f_BX x (1 - (1-p)^mu) is the meaningful way to ask for the per-crossing rate.
+    //   * PER-CROSSING observable (anything involving InTimeAntiKt4Truth): that container holds
+    //     the truth jets of ALL mu overlaid collisions, so the entry already ranges over the whole
+    //     crossing and the spectrum is a per-crossing probability P(E_T > thr). The per-crossing
+    //     rate is then f_BX x P = (sigma x L x P) / mu — a plain division by mu. Applying the
+    //     binomial on top of that multiplies by mu a second time: at PU200 it pins the curve to
+    //     f_BX for every threshold below ~80 GeV (p > 2% makes (1-p)^200 < 2e-2), which is not
+    //     saturation of a trigger but double counting of the pileup. Hence no binomial curve for
+    //     those histograms.
+    // Both flavours put JZ0 on the same footing as the trigger-object block above: rescaled so its
+    // first bin is the crossing rate, i.e. read as a sample of random crossings. Without that
+    // rescale JZ0 keeps sigma_JZ0 x L = 5.75e9 Hz (JZ0 is 95.4% of sigma_ref, so its curve lands
+    // on top of the un-converted all-JZ curve and the ratio panel reads a trivial 1.05).
+    //
+    // The axis deliberately runs out to where the JZ0 reference exhausts itself, because that is
+    // part of what these plots are for: each JZ0 event carries
+    // sigma_JZ0 x L / sumOfWeights = 5.75e9 / 1e5 = 5.75e4 Hz, so above ~250 GeV JZ0 is a handful
+    // of events with ~100% statistical errors, and above 400 GeV it has none at all. The wide
+    // error bars and the cliff are the message. (DrawRateCurvesWithRatio already drops ratio points
+    // whose denominator is zero, so the excursions there are error bars, not divisions by zero.)
+    {
+        // Same pileup source as the block above: read from the r-tag by SetPileupFromPath.
+        const double analysisPileupTruth = static_cast<double>(gPileup);
+        // HERNTupler runs with useRateNormalization = false, so these weights are already the
+        // physical collision rate; no RateModeToCollisionRateScale factor belongs here.
+        const double collisionRateScaleTruth = 1.0;
+
+        // observableIsPerCrossing selects between the two normalizations described above: true for
+        // any histogram whose entry involves InTimeAntiKt4Truth (already summed over the crossing),
+        // false for a pure hard-scatter observable.
+        auto drawTruthJZOverlay = [&](TH1F* hAllJZ, TH1F* hJZ0,
+                                      bool observableIsPerCrossing,
+                                      const std::string& jetName,
+                                      const std::string& xTitle,
+                                      const std::string& fileStem) {
+            if (!hAllJZ || !hJZ0) return;
+            TH1* hAllCum = MakeCumulativeRateHist(hAllJZ, (fileStem + "_allJZ").c_str());
+            TH1* hJZ0Cum = MakeCumulativeRateHist(hJZ0,   (fileStem + "_JZ0").c_str());
+
+            // JZ0 as a random-crossing reference, matching drawRateNormOverlay above.
+            const double jz0AtZeroTruth = hJZ0Cum->GetBinContent(1);
+            if (jz0AtZeroTruth > 0.0) hJZ0Cum->Scale(kCrossingRateHz / jz0AtZeroTruth);
+
+            std::vector<TH1*>        curves;
+            std::vector<std::string> labels;
+            std::vector<Int_t>       truthCols;
+            if (observableIsPerCrossing) {
+                // Divide out the mu collisions the observable already spans. Scale() carries the
+                // bin errors with it.
+                TH1* hAllPerBX = (TH1*)hAllCum->Clone((fileStem + "_allJZ_perCrossing").c_str());
+                hAllPerBX->SetDirectory(nullptr);
+                if (analysisPileupTruth > 0.0) hAllPerBX->Scale(1.0 / analysisPileupTruth);
+                curves    = { hAllPerBX, hJZ0Cum };
+                labels    = { Form("All JZ Slices / #mu = %.0f", analysisPileupTruth),
+                              "JZ0 only, scaled to f_{BX}" };
+                truthCols = { kBlack, kP10Green };
+            } else {
+                TH1* hAllBin = MakeBinomialCrossingRateHist(hAllCum, (fileStem + "_allJZ_binomial").c_str(),
+                                                            collisionRateScaleTruth, analysisPileupTruth);
+                curves    = { hAllCum, hAllBin, hJZ0Cum };
+                labels    = { "All JZ Slices, collision rate",
+                              "All JZ Slices, binomial (per crossing)",
+                              "JZ0 only, scaled to f_{BX}" };
+                truthCols = { kBlack, kP10Red, kP10Green };
+            }
+            // JZ0 is the denominator, as in the trigger-object block: the ratio panel then reads
+            // as how much rate the full slice set adds on top of JZ0 at each threshold.
+            const unsigned int refIdx = (unsigned int)(curves.size() - 1);
+
+            DrawRateCurvesWithRatio(curves, labels, truthCols,
+                                    refIdx, /*refShortName=*/"JZ0",
+                                    xTitle, "Estimated Background Rate [Hz]", jetName,
+                                    rateVsEffFileDir + TString(("rate_normalization_" + fileStem + ".pdf").c_str()),
+                                    /*yScale=*/1.0, /*xMax=*/-1.0, /*yMin=*/1.0,
+                                    /*ratioMin=*/0.0, /*ratioMax=*/4.0);
+
+            // Zoomed duplicate, matching the rate-vs-threshold plots. The curves are reused as
+            // they are — DrawRateCurvesWithRatio leaves its inputs untouched.
+            DrawRateCurvesWithRatio(curves, labels, truthCols,
+                                    refIdx, /*refShortName=*/"JZ0",
+                                    xTitle, "Estimated Background Rate [Hz]", jetName,
+                                    rateVsEffFileDir + TString::Format("rate_normalization_%s_xMax%.0f.pdf",
+                                                                       fileStem.c_str(), kRateVsThrZoomXMax),
+                                    /*yScale=*/1.0, /*xMax=*/kRateVsThrZoomXMax, /*yMin=*/1.0,
+                                    /*ratioMin=*/0.0, /*ratioMax=*/4.0);
+        };
+
+        // max(leading HS jet, leading in-time pileup jet): per-crossing, since the in-time pileup
+        // container already spans the crossing. Note this observable is pileup-dominated at every
+        // threshold the sample can populate — and the pileup overlay is identical in every slice —
+        // so it has little JZ sensitivity by construction. The hard-scatter-only version below is
+        // the one that actually answers the JZ0-vs-JZ0-9 question.
+        drawTruthJZOverlay(back_h_leading_truthAny_SRJ_Et, back_h_leading_truthAny_SRJ_Et_JZ0,
+                           /*observableIsPerCrossing=*/true,
+                           "Leading truth jet (HS or in-time pileup)",
+                           "Leading truth jet E_{T} threshold [GeV]",
+                           "truth_leading_jet");
+        // Leading AntiKt4TruthDressedWZ jet: one per hard scatter, so the sigma x L weighting and
+        // the binomial conversion are both self-consistent here.
+        drawTruthJZOverlay(back_h_leading_truthWZ_SRJ_Et, back_h_leading_truthWZ_SRJ_Et_JZ0,
+                           /*observableIsPerCrossing=*/false,
+                           "Leading truth HS jet (AntiKt4TruthDressedWZ)",
+                           "Leading truth HS jet E_{T} threshold [GeV]",
+                           "truth_leading_HSjet");
     }
 
     // ---- 3-way overlay: jFEX SRJ vs jFEX SRJ Sim vs WTA cone leading ---------------
@@ -10373,6 +10774,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_0subjetEtScan.hRate_vsThr->Draw("HIST");
     c1_0Subjets->cd(); DrawATLASLabel(); c1_0Subjets->SaveAs(rateVsEffFileDir + "threshold_views_0subjets_EtScan.pdf");
+    SaveRateVsThrViews(out_0subjetEtScan.hRate_vsThr, "0subjets_EtScan");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_0Subjets = new TCanvas("c2_0Subjets","Rate vs Eff",700,600);
@@ -10448,6 +10850,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_1subjetEtScan.hRate_vsThr->Draw("HIST");
     c1_1Subjet->cd(); DrawATLASLabel(); c1_1Subjet->SaveAs(rateVsEffFileDir + "threshold_views_1Subjet_EtScan.pdf");
+    SaveRateVsThrViews(out_1subjetEtScan.hRate_vsThr, "1Subjet_EtScan");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_1Subjet = new TCanvas("c2_1Subjet","Rate vs Eff",700,600);
@@ -10651,6 +11054,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_0subjetEtScan_LeadingEt.hRate_vsThr->Draw("HIST");
     c1_0Subjets_Leading->cd(); DrawATLASLabel(); c1_0Subjets_Leading->SaveAs(rateVsEffFileDir + "threshold_views_0or1subjets_EtScan_Leading.pdf");
+    SaveRateVsThrViews(out_0subjetEtScan_LeadingEt.hRate_vsThr, "0or1subjets_EtScan_Leading");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_0Subjets_Leading = new TCanvas("c2_0Subjets_Leading ","Rate vs Eff",700,600);
@@ -10684,6 +11088,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gPad->SetLogy();
     out_0subjetEtScan_SubleadingEt.hRate_vsThr->Draw("HIST");
     c1_0Subjets_Subleading->cd(); DrawATLASLabel(); c1_0Subjets_Subleading->SaveAs(rateVsEffFileDir + "threshold_views_0or1subjets_EtScan_Subleading.pdf");
+    SaveRateVsThrViews(out_0subjetEtScan_SubleadingEt.hRate_vsThr, "0or1subjets_EtScan_Subleading");
 
     // Main plot: rate vs efficiency (graph)
     auto c2_0Subjets_Subleading = new TCanvas("c2_0Subjets_Subleading ","Rate vs Eff",700,600);
@@ -10891,6 +11296,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         c_thr_A_leadGe2_subleadLt2->cd(); DrawATLASLabel(); c_thr_A_leadGe2_subleadLt2->SaveAs(
             rateVsEffFileDir + "threshold_views_EtScan_A_leadGe2_subleadLt2.pdf"
         );
+        SaveRateVsThrViews(out_EtScan_A_leadGe2_subleadLt2.hRate_vsThr, "EtScan_A_leadGe2_subleadLt2");
 
         // Main plot: rate vs efficiency
         auto c_re_A_leadGe2_subleadLt2 = new TCanvas("c_re_A_leadGe2_subleadLt2",
@@ -10961,6 +11367,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         c_thr_B_subleadGe2_leadLt2->cd(); DrawATLASLabel(); c_thr_B_subleadGe2_leadLt2->SaveAs(
             rateVsEffFileDir + "threshold_views_EtScan_B_subleadGe2_leadLt2.pdf"
         );
+        SaveRateVsThrViews(out_EtScan_B_subleadGe2_leadLt2.hRate_vsThr, "EtScan_B_subleadGe2_leadLt2");
 
         // Main plot: rate vs efficiency
         auto c_re_B_subleadGe2_leadLt2 = new TCanvas("c_re_B_subleadGe2_leadLt2",
@@ -11031,6 +11438,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         c_thr_C_leadGe2_subleadGe2->cd(); DrawATLASLabel(); c_thr_C_leadGe2_subleadGe2->SaveAs(
             rateVsEffFileDir + "threshold_views_EtScan_C_leadGe2_subleadGe2.pdf"
         );
+        SaveRateVsThrViews(out_EtScan_C_leadGe2_subleadGe2.hRate_vsThr, "EtScan_C_leadGe2_subleadGe2");
 
         // Main plot: rate vs efficiency
         auto c_re_C_leadGe2_subleadGe2 = new TCanvas("c_re_C_leadGe2_subleadGe2",
@@ -22238,13 +22646,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TCanvas cBar_backLead = new TCanvas("cBar_backLead", "Back Leading Subjet Match Frac Overlay",      800, 600);
     TCanvas cBar_backSub  = new TCanvas("cBar_backSub",  "Back Subleading Subjet Match Frac Overlay",   800, 600);
 
-    TLegend* leg_bar_sigLead  = new TLegend(0.30, 0.72, 0.83, 0.9);
+    // Moved down from the top of the frame so they clear the ATLAS label and the
+    // single-process label drawn to its right.
+    TLegend* leg_bar_sigLead  = new TLegend(0.30, 0.60, 0.83, 0.78);
     leg_bar_sigLead->SetBorderSize(0); leg_bar_sigLead->SetFillStyle(0); leg_bar_sigLead->SetTextSize(0.025);
-    TLegend* leg_bar_sigSub   = new TLegend(0.30, 0.72, 0.83, 0.9);
+    TLegend* leg_bar_sigSub   = new TLegend(0.30, 0.60, 0.83, 0.78);
     leg_bar_sigSub->SetBorderSize(0);  leg_bar_sigSub->SetFillStyle(0);  leg_bar_sigSub->SetTextSize(0.025);
-    TLegend* leg_bar_backLead = new TLegend(0.30, 0.72, 0.83, 0.9);
+    TLegend* leg_bar_backLead = new TLegend(0.30, 0.60, 0.83, 0.78);
     leg_bar_backLead->SetBorderSize(0); leg_bar_backLead->SetFillStyle(0); leg_bar_backLead->SetTextSize(0.025);
-    TLegend* leg_bar_backSub  = new TLegend(0.30, 0.72, 0.83, 0.9);
+    TLegend* leg_bar_backSub  = new TLegend(0.30, 0.60, 0.83, 0.78);
     leg_bar_backSub->SetBorderSize(0);  leg_bar_backSub->SetFillStyle(0);  leg_bar_backSub->SetTextSize(0.025);
 
     TLegend* leg = new TLegend(0.4, 0.35, 0.68, 0.68);
@@ -22277,10 +22687,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     // Larger legend for the single-process seed-comparison overlay. Shorter
     // labels (no physics process, no "d_{search} disabled") let it grow.
-    TLegend* legSeedCompare = new TLegend(0.26, 0.20, 0.80, 0.46);
+    // Widened and slightly smaller text so the seed type fits.
+    TLegend* legSeedCompare = new TLegend(0.16, 0.20, 0.88, 0.46);
     legSeedCompare->SetBorderSize(0);
     legSeedCompare->SetFillStyle(0);
-    legSeedCompare->SetTextSize(0.038);
+    legSeedCompare->SetTextSize(0.030);
 
     TLegend *leg_10kHz_effs = new TLegend(0.4, 0.18, 0.78, 0.38);
     leg_10kHz_effs->SetBorderSize(0);
@@ -22358,17 +22769,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TCanvas cCompare_SubjetVsET_40kHz_seedComparison = new TCanvas("cCompare_SubjetVsET_40kHz_seedComparison", "Seed comparison turn-on 40 kHz", 900, 700);
     // As above, but with per-curve integrated-efficiency printouts (all / m>=thr / m<thr) below the process label
     TCanvas cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts = new TCanvas("cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts", "Seed comparison turn-on 40 kHz + int eff printouts", 900, 700);
-    TLegend *legSeedCompare_TurnOn = new TLegend(0.26, 0.18, 0.80, 0.44);
-    legSeedCompare_TurnOn->SetBorderSize(0); legSeedCompare_TurnOn->SetFillStyle(0); legSeedCompare_TurnOn->SetTextSize(0.038);
+    // Widened and slightly smaller text so the seed type fits.
+    TLegend *legSeedCompare_TurnOn = new TLegend(0.16, 0.18, 0.88, 0.44);
+    legSeedCompare_TurnOn->SetBorderSize(0); legSeedCompare_TurnOn->SetFillStyle(0); legSeedCompare_TurnOn->SetTextSize(0.030);
     legSeedCompare_TurnOn->SetHeader("Fixed to 40 kHz rate", "C"); // header above the entries
     // track which sample types have had their gFEX (Resim) LRJ E_T-only curve drawn (once per sample)
     std::vector<std::string> drawnGFexResimModes_compare;
     // same, for the subjet-based mass-split + gFEX overlay
     std::vector<std::string> drawnGFexResimModes_massSplit;
 
+    // gFEX LRJ curves are always drawn in this one colour so they are never confused with the
+    // per-file GEP curves, which cycle through the Petroff palette. Black is outside that palette
+    // and clearly separated from the grey offline LRJ E_T reference distribution.
+    const int colorGFEX = kBlack;
+
     TLegend* legROC_ET_mass = new TLegend(0.45, 0.12, 0.92, 0.52);
     legROC_ET_mass->SetBorderSize(0); legROC_ET_mass->SetFillStyle(0); legROC_ET_mass->SetTextSize(0.022);
     legROC_ET_mass->SetHeader("E_{T} + constituent mass 2D scan", "C");
+
+    // Per-file colour and legend text for the AP-style rate-vs-threshold overlays, filled
+    // inside the loop below and consumed once it has finished.
+    std::vector<int>         rateVsThr_overlay_colors(backgroundFiles.size(), 0);
+    std::vector<std::string> rateVsThr_overlay_labels(backgroundFiles.size());
 
     //std::cout << "looping through " << backgroundFiles.size() << " background files" << "\n";
     for(unsigned int fileIt = 0; fileIt < backgroundFiles.size(); fileIt++){ 
@@ -22378,6 +22800,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         std::string inputObjectType = fileInfo.inputObjectType;
         std::string seedObjectType = fileInfo.seedObjectType;
         std::string rMergeValue = fileInfo.rMergeValue;
+
+        // Legend text for the merge cut. The file-name tag is still called rMerge, but plots
+        // label it d_{search}; the sentinel value 0.001 means the cut was switched off.
+        std::string dSearchLabel = (std::stod(rMergeValue) == 0.001)
+            ? std::string("d_{search} disabled")
+            : Form("d_{search} = %s", rMergeValue.c_str());
 
         unsigned int nInputObjectsAlgorithmConfiguration = 0;
         std::regex re("_IOs_(\\d+)_");
@@ -22398,7 +22826,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if (std::regex_search(signalFiles[fileIt].second, mmec, std::regex("_mec([^_v]+GeV)")))     mec_str = mmec[1];
         }
 
-        int color = fileIt + 2;   // simple mapping; can use a color array if desired
+        // Colourblind-friendly Petroff palette, one entry per file (wraps if there are more
+        // files than palette entries).
+        int color = colors[fileIt % (sizeof(colors) / sizeof(colors[0]))];
 
         // Leading JetTagger LRJ E_T distribution
         c1_Log.cd();
@@ -22428,238 +22858,56 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         std::cout << "mode: " << mode << "\n";
 
         if(mode == "null") std::cerr << "error, unrecognized signal mode" << "\n";
-        std::string legLabelSig_SampleInfoOnly; // meant for comparing across signal types & rMergeCut values, rather than input object types
-        std::string legLabelSigNoIOType_SubjetBasedCut; // meant for comparing across signal types & rMergeCut values, rather than input object types
-        std::string legLabelSigNoIOType_EtCutOnly; // meant for comparing across signal types & rMergeCut values, rather than input object types
-        std::string legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly; // meant for comparing across signal types & rMergeCut values, rather than input object types
-        if(mode == "VBF"){
-            legLabelSig_SampleInfoOnly = "hh#rightarrow4b [VBF, c_{vv} = 0]";
-            if(std::stod(rMergeValue) == 0.001){
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} Cut, hh#rightarrow4b [VBF, c_{vv} = 0] with d_{search} Disabled"
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} Cut, hh#rightarrow4b [VBF, c_{vv} = 0] with d_{search} Disabled"
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, hh#rightarrow4b [VBF, c_{vv} = 0]"
-                );
-                legLabelSig = Form("hh#rightarrow4b [VBF, c_{vv} = 0]: IO: %s, Seed: %s, N_{IO} = %u",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration);
-            
-            }
-            else{
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} Cut, hh#rightarrow4b [VBF, c_{vv} = 0] with d_{search} = %s",
-                    rMergeValue.c_str()
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} Cut, hh#rightarrow4b [VBF, c_{vv} = 0] with d_{search} = %s",
-                    rMergeValue.c_str()
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, hh#rightarrow4b [VBF, c_{vv} = 0]"
-                );
-                legLabelSig = Form("hh#rightarrow4b [VBF, c_{vv} = 0]: IO: %s, Seed: %s, N_{IO} = %u, rMerge = %s",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration,
-                                    rMergeValue.c_str());
-            }
-            
-        }
-        if(mode == "VBF_SM"){
-            legLabelSig_SampleInfoOnly = "hh#rightarrow4b [VBF, c_{vv} = 1]";
-            if(std::stod(rMergeValue) == 0.001){
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} Cut, hh#rightarrow4b [VBF, c_{vv} = 1] with d_{search} Disabled"
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} Cut, hh#rightarrow4b [VBF, c_{vv} = 1] with d_{search} Disabled"
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, hh#rightarrow4b [VBF, c_{vv} = 1]"
-                );
-                legLabelSig = Form("hh#rightarrow4b [VBF, c_{vv} = 1]: IO: %s, Seed: %s, N_{IO} = %u",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration);
-            
-            }
-            else{
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} Cut, hh#rightarrow4b [VBF, c_{vv} = 1] with d_{search} = %s",
-                    rMergeValue.c_str()
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} Cut, hh#rightarrow4b [VBF, c_{vv} = 1] with d_{search} = %s",
-                    rMergeValue.c_str()
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, hh#rightarrow4b [VBF, c_{vv} = 1]"
-                );
-                legLabelSig = Form("hh#rightarrow4b [VBF, c_{vv} = 1]: IO: %s, Seed: %s, N_{IO} = %u, rMerge = %s",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration,
-                                    rMergeValue.c_str());
-            }
-            
-        }
-        else if(mode == "ggF"){
-            legLabelSig_SampleInfoOnly = "hh#rightarrow4b [ggF]";
-            if(std::stod(rMergeValue) == 0.001){
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} Cut, hh#rightarrow4b [ggF] with d_{search} Disabled"
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} Cut, hh#rightarrow4b [ggF] with d_{search} Disabled"
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, hh#rightarrow4b [ggF]"
-                );
-                legLabelSig = Form("hh#rightarrow4b [ggF]: IO: %s, Seed: %s, N_{IO} = %u",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration);
-            }
-            else{
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} Cut, hh#rightarrow4b [ggF]"
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} Cut, hh#rightarrow4b [ggF]"
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, hh#rightarrow4b [ggF]"
-                );
-                legLabelSig = Form("hh#rightarrow4b [ggF]: IO: %s, Seed: %s, N_{IO} = %u, rMerge = %s",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration,
-                                    rMergeValue.c_str());
-            }
-        }
-        else if(mode == "Zprime_tthad"){
-            legLabelSig_SampleInfoOnly = "Z' #rightarrow t#bar{t} [had]";
-            if(std::stod(rMergeValue) == 0.001){
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} cut, Z' #rightarrow t#bar{t} [had], d_{search} disabled"
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} Cut, Z' #rightarrow t#bar{t} [had], d_{search} disabled"
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, Z' #rightarrow t#bar{t} [had]"
-                );
-                legLabelSig = Form("Z' #rightarrow t#bar{t} [had]: IO: %s, Seed: %s, N_{IO} = %u",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration);
-            }
-            else{
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} Cut, Z' #rightarrow t#bar{t} [had] with d_{search} = %s",
-                    rMergeValue.c_str()
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} Cut, Z' #rightarrow t#bar{t} [had]  with d_{search} = %s",
-                    rMergeValue.c_str()
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, Z' #rightarrow t#bar{t} [had]"
-                );
-                legLabelSig = Form("Z' #rightarrow t#bar{t} [had]: IO: %s, Seed: %s, N_{IO} = %u, rMerge = %s",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration,
-                                    rMergeValue.c_str());
-            }
-        }
-        else if(mode == "ZvvHbb"){
-            legLabelSig_SampleInfoOnly = "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}";
-            if (std::stod(rMergeValue) == 0.001) {
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} cut, Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}, d_{search} disabled"
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} cut, Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}, d_{search} disabled"
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}"
-                );
-                legLabelSig = Form("Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}: IO: %s, Seed: %s, N_{IO} = %u",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration);
-            }
-            else {
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} cut, Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}, d_{search} = %s",
-                    rMergeValue.c_str()
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} cut, Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}, d_{search} = %s",
-                    rMergeValue.c_str()
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}"
-                );
-                legLabelSig = Form("Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}: IO: %s, Seed: %s, N_{IO} = %u, rMerge = %s",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration,
-                                    rMergeValue.c_str());
-            }
-        }
-        else if(mode == "ttbar_had"){
-            legLabelSig_SampleInfoOnly = "t#bar{t} [had]";
-            if (std::stod(rMergeValue) == 0.001) {
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} cut, t#bar{t} [had], d_{search} disabled"
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} cut, t#bar{t} [had], d_{search} disabled"
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, t#bar{t} [had]"
-                );
-                legLabelSig = Form("t#bar{t} [had]: IO: %s, Seed: %s, N_{IO} = %u",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration);
-            }
-            else {
-                legLabelSigNoIOType_SubjetBasedCut = Form(
-                    "Subjet-based E_{T} cut, t#bar{t} [had]"
-                );
-                legLabelSigNoIOType_EtCutOnly = Form(
-                    "Lead. LRJ E_{T} cut, t#bar{t} [had]"
-                );
-                legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
-                    "4th Lead. WTA Cone Jet E_{T} cut, t#bar{t} [had]");
-                
-                legLabelSig = Form("t#bar{t} [had]: IO: %s, Seed: %s, N_{IO} = %u, rMerge = %s",
-                                    inputObjectType.c_str(),
-                                    seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration,
-                                    rMergeValue.c_str());
-            }
-        }
+        // Physics-process text only, used on plots that compare across signal types &
+        // d_{search} values rather than input object types.
+        std::string legLabelSig_SampleInfoOnly;
+        if(mode == "VBF")               legLabelSig_SampleInfoOnly = "hh#rightarrow4b [VBF, c_{vv} = 0]";
+        else if(mode == "VBF_SM")       legLabelSig_SampleInfoOnly = "hh#rightarrow4b [VBF, c_{vv} = 1]";
+        else if(mode == "ggF")          legLabelSig_SampleInfoOnly = "hh#rightarrow4b [ggF]";
+        else if(mode == "Zprime_tthad") legLabelSig_SampleInfoOnly = "Z' #rightarrow t#bar{t} [had]";
+        else if(mode == "ZvvHbb")       legLabelSig_SampleInfoOnly = "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}";
+        else if(mode == "ttbar_had")    legLabelSig_SampleInfoOnly = "t#bar{t} [had]";
+
+        // Same, with the trigger selection prepended. The input-object type is left off (that is
+        // the point of these labels) but the seed type is always spelled out.
+        std::string legLabelSigNoIOType_SubjetBasedCut = Form(
+            "Subjet-based E_{T} cut, %s, Seed: %s, %s",
+            legLabelSig_SampleInfoOnly.c_str(), seedObjectType.c_str(), dSearchLabel.c_str());
+        std::string legLabelSigNoIOType_EtCutOnly = Form(
+            "Lead. LRJ E_{T} cut, %s, Seed: %s, %s",
+            legLabelSig_SampleInfoOnly.c_str(), seedObjectType.c_str(), dSearchLabel.c_str());
+        std::string legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly = Form(
+            "4th Lead. WTA Cone Jet E_{T} cut, %s, Seed: %s",
+            legLabelSig_SampleInfoOnly.c_str(), seedObjectType.c_str());
+
+        legLabelSig = Form("%s: IO: %s, Seed: %s, %s",
+                            legLabelSig_SampleInfoOnly.c_str(),
+                            inputObjectType.c_str(),
+                            seedObjectType.c_str(),
+                            dSearchLabel.c_str());
 
         std::string legLabelSigNoIOType_SubjetBased_OR_4thCone =
             legLabelSigNoIOType_SubjetBasedCut + " OR 4th lead. cone jet";
 
-        std::string legLabelBkg = Form("Bkg. (dijet): IO %s, Seed: %s, N_{IO} = %u, rMerge = %s",
+        std::string legLabelBkg = Form("Bkg. (dijet): IO: %s, Seed: %s, %s",
                                     inputObjectType.c_str(),
                                     seedObjectType.c_str(),
-                                    nInputObjectsAlgorithmConfiguration,
-                                    rMergeValue.c_str());
+                                    dSearchLabel.c_str());
         leg->AddEntry(sig_h_leading_LRJ_Et_vec[fileIt], legLabelSig.c_str(), "l");
         if(fileIt == 0) leg->AddEntry(back_h_leading_LRJ_Et_vec[fileIt], legLabelBkg.c_str(), "l");
-        
+
+        // Style/label for the AP-style rate-vs-threshold overlays. The pileup is spelled out
+        // per file because the point of those overlays is comparing e.g. PU140 against PU200.
+        if (fileIt < rateVsThr_overlay_colors.size()) {
+            rateVsThr_overlay_colors[fileIt] = color;
+            rateVsThr_overlay_labels[fileIt] =
+                Form("#LT#mu#GT = %d, IO: %s, Seed: %s, %s",
+                     PileupFromPath(backgroundFiles[fileIt].second),
+                     inputObjectType.c_str(),
+                     seedObjectType.c_str(),
+                     dSearchLabel.c_str());
+        }
+
 
         if(fileIt == (backgroundFiles.size() - 1)){
             leg->Draw();
@@ -22948,11 +23196,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         
         // --- Legend entries ---
         std::string legLabelEff_10kHz = Form(
-            "Lead. LRJ E_{T} > %.1f GeV  (IO: %s, Seed: %s, N_{IO}: %u, rMerge: %s)",
+            "Lead. LRJ E_{T} > %.1f GeV  (IO: %s, Seed: %s, %s)",
             jetTagger_10kHz_Threshold_Leading_vec[fileIt],
             inputObjectType.c_str(),
             seedObjectType.c_str(),
-            nInputObjectsAlgorithmConfiguration, rMergeValue.c_str()
+            dSearchLabel.c_str()
         );
         leg_10kHz_effs->AddEntry(sig_eff_offlineLRJ10kHz_vec[fileIt],
                             legLabelEff_10kHz.c_str(),
@@ -22985,11 +23233,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                             legLabelEff_10kHz.c_str(),
                             "lp");
         std::string legLabelEff_10kHz_HiggsMassWindow = Form(
-            "[m_{H} Window] Lead. LRJ E_{T} > %.1f GeV  (IO: %s, Seed: %s, N_{IO}: %u, rMerge: %s)",
+            "[m_{H} Window] Lead. LRJ E_{T} > %.1f GeV  (IO: %s, Seed: %s, %s)",
             jetTagger_10kHz_Threshold_Leading_vec[fileIt],
             inputObjectType.c_str(),
             seedObjectType.c_str(),
-            nInputObjectsAlgorithmConfiguration, rMergeValue.c_str()
+            dSearchLabel.c_str()
         );
         leg_10kHz_effs_HiggsMassWindow->AddEntry(sig_eff_offlineLRJ10kHz_HiggsMassWindow_vec[fileIt],
                             legLabelEff_10kHz_HiggsMassWindow.c_str(),
@@ -23028,22 +23276,22 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         // --- Legend entries ---
         std::string legLabelEff_10kHz_1Subjet = Form(
-            "[1 Subjet] Lead. LRJ E_{T} > %.1f GeV  (IO: %s, Seed: %s, N IO: %u, rMerge: %s)",
+            "[1 Subjet] Lead. LRJ E_{T} > %.1f GeV  (IO: %s, Seed: %s, %s)",
             jetTagger_10kHz_Threshold_Leading_vec[fileIt],
             inputObjectType.c_str(),
             seedObjectType.c_str(),
-            nInputObjectsAlgorithmConfiguration, rMergeValue.c_str()
+            dSearchLabel.c_str()
         );
         leg_10kHz_effs_Subjets->AddEntry(sig_eff_offlineLRJ10kHz_1Subjet_vec[fileIt],
                             legLabelEff_10kHz_1Subjet.c_str(),
                             "lp");
         // --- Legend entries ---
         std::string legLabelEff_10kHz_GrEq2Subjets = Form(
-            "[>= Subjet] Lead. LRJ E_{T} > %.1f GeV  (IO: %s, Seed: %s, N IO: %u, rMerge: %s)",
+            "[>= Subjet] Lead. LRJ E_{T} > %.1f GeV  (IO: %s, Seed: %s, %s)",
             jetTagger_10kHz_Threshold_Leading_vec[fileIt],
             inputObjectType.c_str(),
             seedObjectType.c_str(),
-            nInputObjectsAlgorithmConfiguration, rMergeValue.c_str()
+            dSearchLabel.c_str()
         );
         leg_10kHz_effs_Subjets->AddEntry(sig_eff_offlineLRJ10kHz_GrEq2Subjets_vec[fileIt],
                             legLabelEff_10kHz_GrEq2Subjets.c_str(),
@@ -23075,9 +23323,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt]->SetAxisRange(0.0, 1.1, "Y");
 
         leg_10kHz_effs_SubjetBased->AddEntry(sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt],
-            Form("Subjet-based E_{T} cut (IO: %s, Seed: %s, N_{IO}: %u, rMerge: %s)",
+            Form("Subjet-based E_{T} cut (IO: %s, Seed: %s, %s)",
                  inputObjectType.c_str(), seedObjectType.c_str(),
-                 nInputObjectsAlgorithmConfiguration, rMergeValue.c_str()),
+                 dSearchLabel.c_str()),
             "lp");
         if (fileIt == 0) {
             sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt]->Draw("P");
@@ -23110,14 +23358,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec[fileIt]->SetAxisRange(0.0, 1.1, "Y");
 
         leg_10kHz_effs_SubjetBased_OfflineSubjets->AddEntry(sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet_vec[fileIt],
-            Form("[1 offline subjet] (IO: %s, Seed: %s, N_{IO}: %u, rMerge: %s)",
+            Form("[1 offline subjet] (IO: %s, Seed: %s, %s)",
                  inputObjectType.c_str(), seedObjectType.c_str(),
-                 nInputObjectsAlgorithmConfiguration, rMergeValue.c_str()),
+                 dSearchLabel.c_str()),
             "lp");
         leg_10kHz_effs_SubjetBased_OfflineSubjets->AddEntry(sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec[fileIt],
-            Form("[>= 2 offline subjets] (IO: %s, Seed: %s, N_{IO}: %u, rMerge: %s)",
+            Form("[>= 2 offline subjets] (IO: %s, Seed: %s, %s)",
                  inputObjectType.c_str(), seedObjectType.c_str(),
-                 nInputObjectsAlgorithmConfiguration, rMergeValue.c_str()),
+                 dSearchLabel.c_str()),
             "lp");
         if (fileIt == 0) {
             sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet_vec[fileIt]->Draw("P");
@@ -23140,9 +23388,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             h->SetAxisRange(0.0, 1.1, "Y");
         };
         // Label used in legend entries (config info)
-        std::string msLegConfig = Form("IO: %s, Seed: %s, N_{IO}: %u, rMerge: %s",
-            inputObjectType.c_str(), seedObjectType.c_str(),
-            nInputObjectsAlgorithmConfiguration, rMergeValue.c_str());
+        std::string msLegConfig = Form("IO: %s, Seed: %s, %s",
+            inputObjectType.c_str(), seedObjectType.c_str(), dSearchLabel.c_str());
 
         // SubjetBased 10 kHz
         /*if(sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec.size() > fileIt &&
@@ -23290,7 +23537,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if(!gFexMassSplitAlreadyDrawn && sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt){
                 drawnGFexResimModes_massSplit.push_back(mode);
                 TH1F* hGfxMS = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
-                hGfxMS->SetLineColor(color); hGfxMS->SetMarkerColor(color);
+                hGfxMS->SetLineColor(colorGFEX); hGfxMS->SetMarkerColor(colorGFEX);
                 hGfxMS->SetMarkerStyle(33); hGfxMS->SetMarkerSize(1.2); // filled diamond = gFEX (Resim)
                 hGfxMS->SetAxisRange(0.0, 1.1, "Y");
                 hGfxMS->Draw("P SAME");
@@ -23370,10 +23617,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             cCompare_SubjetVsET_40kHz.cd();
             setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt], 26); // open triangle = subjet-based
             setupMassSplitHist(sig_eff_ETonly_40kHz_vec[fileIt],               20); // closed circle = ET-only
-            // Config label: IO/Seed/N_{IO} dropped; rMerge shown as d_{search} (0.001 => disabled)
-            std::string cmpLegConfig = (std::stod(rMergeValue) == 0.001)
-                ? std::string("d_{search} disabled")
-                : Form("d_{search}: %s", rMergeValue.c_str());
+            // Config label: IO type dropped, seed type kept, merge cut shown as d_{search}
+            std::string cmpLegConfig = Form("Seed: %s, %s", seedObjectType.c_str(), dSearchLabel.c_str());
             double thrETonly_p = (thr_ET_only_40kHz_vec.size() > fileIt ? thr_ET_only_40kHz_vec[fileIt] : -1.0);
             leg_compare_SubjetVsET_40kHz->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt],
                 Form("Subjet-based, %s [#varepsilon_{int}=%.3f], %s",
@@ -23387,30 +23632,29 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                      (intEff_ETonly_40kHz_all_vec.size()>fileIt ? intEff_ETonly_40kHz_all_vec[fileIt] : 0.),
                      cmpLegConfig.c_str()), "lp");
             if(fileIt == 0){
+                // Overlay gFEX (Resim) LRJ E_T-only turn-on once per sample type
+                if(sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt){
+                    drawnGFexResimModes_compare.push_back(mode);
+                    TH1F* hGfx = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
+                    hGfx->SetLineColor(colorGFEX); hGfx->SetMarkerColor(colorGFEX);
+                    hGfx->SetMarkerStyle(33); hGfx->SetMarkerSize(1.2); // filled diamond = gFEX (Resim)
+                    hGfx->SetAxisRange(0.0, 1.1, "Y");
+                    hGfx->Draw("P SAME");
+                    leg_compare_SubjetVsET_40kHz->AddEntry(hGfx,
+                        Form("gFEX LRJ E_{T} > %.0f GeV only, %s",
+                            (thr_gFEX_Sim_40kHz_vec.size()>fileIt ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0),
+                            legLabelSig_SampleInfoOnly.c_str()), "lp");
+                }
                 sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->Draw("P");
                 // Cut display range at 700 GeV (bin contents untouched)
                 sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->GetXaxis()->SetRangeUser(
-                    sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->GetXaxis()->GetXmin(), 700.0);
+                sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->GetXaxis()->GetXmin(), 700.0);
                 sig_eff_ETonly_40kHz_vec[fileIt]->Draw("P SAME");
             } else {
                 sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->Draw("P SAME");
                 sig_eff_ETonly_40kHz_vec[fileIt]->Draw("P SAME");
             }
-            // Overlay gFEX (Resim) LRJ E_T-only turn-on once per sample type
-            bool gFexAlreadyDrawn = false;
-            for(const auto& m : drawnGFexResimModes_compare) if(m == mode) gFexAlreadyDrawn = true;
-            if(!gFexAlreadyDrawn && sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt){
-                drawnGFexResimModes_compare.push_back(mode);
-                TH1F* hGfx = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
-                hGfx->SetLineColor(color); hGfx->SetMarkerColor(color);
-                hGfx->SetMarkerStyle(33); hGfx->SetMarkerSize(1.2); // filled diamond = gFEX (Resim)
-                hGfx->SetAxisRange(0.0, 1.1, "Y");
-                hGfx->Draw("P SAME");
-                leg_compare_SubjetVsET_40kHz->AddEntry(hGfx,
-                    Form("gFEX LRJ E_{T} > %.0f GeV only, %s",
-                         (thr_gFEX_Sim_40kHz_vec.size()>fileIt ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0),
-                         legLabelSig_SampleInfoOnly.c_str()), "lp");
-            }
+            
             if(fileIt == (backgroundFiles.size() - 1)){
                 sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
                 leg_compare_SubjetVsET_40kHz->Draw();
@@ -23457,8 +23701,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                           << ", idxDisabled=" << idxDisabledTO
                           << ", idxEnabled=" << idxEnabledTO << ").\n";
             } else {
-                // Per-curve colours: subjet-based = red, lead LRJ = blue, gFEX = black.
-                const int colSubjet = kP10Red, colLead = kP10Blue, colGfx = kBlack;
+                // Per-curve colours: subjet-based = red, lead LRJ = blue, gFEX gets its own
+                // dedicated colour so it is never confused with the GEP curves.
+                const int colSubjet = kP10Red, colLead = kP10Blue, colGfx = colorGFEX;
+
+                // Seed types behind the two GEP curves. Normally identical (the two files differ
+                // only in d_{search}), in which case it goes in the header rather than repeated
+                // on every entry.
+                const std::string seedEnabledTO  = ParseFileName(backgroundFiles[idxEnabledTO].second).seedObjectType;
+                const std::string seedDisabledTO = ParseFileName(backgroundFiles[idxDisabledTO].second).seedObjectType;
+                const bool sameSeedTO = (seedEnabledTO == seedDisabledTO);
+                std::string headerTO = "Fixed to 40 kHz rate";
+                std::string seedSuffixSubjetTO, seedSuffixLeadTO;
+                if(sameSeedTO){
+                    headerTO += Form(", Seed: %s", seedEnabledTO.c_str());
+                } else {
+                    seedSuffixSubjetTO = Form(", Seed: %s", seedEnabledTO.c_str());
+                    seedSuffixLeadTO   = Form(", Seed: %s", seedDisabledTO.c_str());
+                }
 
                 cCompare_SubjetVsET_40kHz_seedComparison.cd();
 
@@ -23496,9 +23756,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 if(hGfxTO) hGfxTO->Draw("P SAME");
 
                 legSeedCompare_TurnOn->Clear();
-                legSeedCompare_TurnOn->SetHeader("Fixed to 40 kHz rate", "C"); // re-set: Clear() drops it
-                legSeedCompare_TurnOn->AddEntry(hSubjetTO, "Seed Opt., Subjet-based E_{T} cut", "lp");
-                legSeedCompare_TurnOn->AddEntry(hLeadTO,   "Seeded cone only, Lead. LRJ E_{T} cut", "lp");
+                legSeedCompare_TurnOn->SetHeader(headerTO.c_str(), "C"); // re-set: Clear() drops it
+                legSeedCompare_TurnOn->AddEntry(hSubjetTO,
+                    Form("Seed Opt., Subjet-based E_{T} cut%s", seedSuffixSubjetTO.c_str()), "lp");
+                legSeedCompare_TurnOn->AddEntry(hLeadTO,
+                    Form("Seeded cone only, Lead. LRJ E_{T} cut%s", seedSuffixLeadTO.c_str()), "lp");
                 if(hGfxTO) legSeedCompare_TurnOn->AddEntry(hGfxTO, "gFEX Lead. LRJ E_{T} cut", "lp");
                 legSeedCompare_TurnOn->Draw();
 
@@ -23566,8 +23828,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
         // --- Subjet match-fraction bar chart overlays ---
         {
-            std::string legLabel = Form("IO: %s, Seed: %s, d_{search} = %s, subjet E_{T} > %g GeV",
-                inputObjectType.c_str(), seedObjectType.c_str(), rMergeValue.c_str(), fileInfo.subjetEtThreshold);
+            std::string legLabel = Form("IO: %s, Seed: %s, %s, subjet E_{T} > %g GeV",
+                inputObjectType.c_str(), seedObjectType.c_str(), dSearchLabel.c_str(), fileInfo.subjetEtThreshold);
 
             auto prepBar = [&](TH1F* h, int fillColor){
                 if(h->Integral() > 0) h->Scale(1.0 / h->Integral());
@@ -23604,10 +23866,30 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             leg_bar_backSub->AddEntry(back_h_subSubjet_matchFrac_vec[fileIt], legLabel.c_str(), "f");
 
             if(fileIt == (backgroundFiles.size() - 1)){
-                cBar_sigLead.cd();  leg_bar_sigLead->Draw();  cBar_sigLead.cd(); DrawATLASLabel(); cBar_sigLead.SaveAs(overlayOutputFileDir  + "sig_leadSubjet_matchFrac_overlay.pdf");
-                cBar_sigSub.cd();   leg_bar_sigSub->Draw();   cBar_sigSub.cd(); DrawATLASLabel(); cBar_sigSub.SaveAs(overlayOutputFileDir   + "sig_subSubjet_matchFrac_overlay.pdf");
-                cBar_backLead.cd(); leg_bar_backLead->Draw(); cBar_backLead.cd(); DrawATLASLabel(); cBar_backLead.SaveAs(overlayOutputFileDir + "back_leadSubjet_matchFrac_overlay.pdf");
-                cBar_backSub.cd();  leg_bar_backSub->Draw();  cBar_backSub.cd(); DrawATLASLabel(); cBar_backSub.SaveAs(overlayOutputFileDir  + "back_subSubjet_matchFrac_overlay.pdf");
+                // With a single signal process across all files there is nothing to disambiguate
+                // in the legend, so name the process to the right of the ATLAS labels instead.
+                std::vector<std::string> barModesSeen;
+                for(unsigned int f = 0; f < backgroundFiles.size(); ++f){
+                    std::string m = getProductionMode(signalFiles[f].second);
+                    if(std::find(barModesSeen.begin(), barModesSeen.end(), m) == barModesSeen.end())
+                        barModesSeen.push_back(m);
+                }
+                std::string barProcLabel;
+                if(barModesSeen.size() == 1){
+                    barProcLabel = legLabelSig_SampleInfoOnly;
+                    size_t hp = barProcLabel.find("[had]");
+                    if(hp != std::string::npos) barProcLabel.replace(hp, 5, "[hadronically decaying]");
+                }
+                TLatex barProcTex; barProcTex.SetNDC(); barProcTex.SetTextFont(42);
+                barProcTex.SetTextColor(kBlack); barProcTex.SetTextSize(0.032);
+                auto drawBarProcLabel = [&](){
+                    if(!barProcLabel.empty()) barProcTex.DrawLatex(0.55, 0.945, barProcLabel.c_str());
+                };
+
+                cBar_sigLead.cd();  leg_bar_sigLead->Draw();  cBar_sigLead.cd(); DrawATLASLabel(); drawBarProcLabel(); cBar_sigLead.SaveAs(overlayOutputFileDir  + "sig_leadSubjet_matchFrac_overlay.pdf");
+                cBar_sigSub.cd();   leg_bar_sigSub->Draw();   cBar_sigSub.cd(); DrawATLASLabel(); drawBarProcLabel(); cBar_sigSub.SaveAs(overlayOutputFileDir   + "sig_subSubjet_matchFrac_overlay.pdf");
+                cBar_backLead.cd(); leg_bar_backLead->Draw(); cBar_backLead.cd(); DrawATLASLabel(); drawBarProcLabel(); cBar_backLead.SaveAs(overlayOutputFileDir + "back_leadSubjet_matchFrac_overlay.pdf");
+                cBar_backSub.cd();  leg_bar_backSub->Draw();  cBar_backSub.cd(); DrawATLASLabel(); drawBarProcLabel(); cBar_backSub.SaveAs(overlayOutputFileDir  + "back_subSubjet_matchFrac_overlay.pdf");
             }
         }
 
@@ -23787,7 +24069,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
 
         c9_Log.cd();
-        if(color == kP10Yellow) color = kP10Orange;
+        // (No yellow->orange remap here any more: every palette entry is readable, and remapping
+        // would collide with the file that legitimately owns orange.)
         // FIXME need to fix labels to actually indicate if ggF or whatever (in-progress)
         subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->SetLineColor(color);
         subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->SetMarkerColor(color);
@@ -23807,7 +24090,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
         
         legSigOnlyNoIOTypes->AddEntry(subjetBased_ET_Scan_RatesVsEff_vec[fileIt],
-            (legLabelSigNoIOType_SubjetBasedCut /* + ", Seed: " + seedObjectType */).c_str(), "p");
+            legLabelSigNoIOType_SubjetBasedCut.c_str(), "p");
         legSigOnlyNoIOTypes->AddEntry(lead_ET_Scan_RatesVsEff_vec[fileIt], legLabelSigNoIOType_EtCutOnly.c_str(), "p");
         if(overlay4thLeadConeJetSel) legSigOnlyNoIOTypes->AddEntry(fouth_lead_ConeJet_ET_Scan_RatesVsEff_vec[fileIt], legLabelSigNoIOType_4th_Lead_Cone_EtCutOnly.c_str(), "p");
         if (fileIt == 0) {
@@ -23838,7 +24121,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if(!gFexAlreadyDrawn && gFEX_Sim_ET_Scan_RatesVsEff_vec.size() > fileIt){
                 drawnGFexResimModes_rateEff.push_back(mode);
                 TGraph* gGfx = gFEX_Sim_ET_Scan_RatesVsEff_vec[fileIt];
-                gGfx->SetLineColor(color); gGfx->SetMarkerColor(color);
+                gGfx->SetLineColor(colorGFEX); gGfx->SetMarkerColor(colorGFEX);
                 gGfx->SetMarkerStyle(33); gGfx->SetMarkerSize(1.0); // filled diamond = gFEX (Resim)
                 gGfx->Draw("P SAME");
                 legSigOnlyNoIOTypes->AddEntry(gGfx,
@@ -23918,8 +24201,23 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                           << ", idxDisabled=" << idxDisabled
                           << ", idxEnabled=" << idxEnabled << ").\n";
             } else {
-                // Per-curve colours: subjet-based = red, lead LRJ = blue, gFEX = black.
-                const int colSubjet = kP10Red, colLead = kP10Blue, colGfx = kBlack;
+                // Per-curve colours: subjet-based = red, lead LRJ = blue, gFEX gets its own
+                // dedicated colour so it is never confused with the GEP curves.
+                const int colSubjet = kP10Red, colLead = kP10Blue, colGfx = colorGFEX;
+
+                // Seed types behind the two GEP curves. Normally identical (the two files differ
+                // only in d_{search}), in which case it goes in the header rather than repeated
+                // on every entry.
+                const std::string seedEnabledSC  = ParseFileName(backgroundFiles[idxEnabled].second).seedObjectType;
+                const std::string seedDisabledSC = ParseFileName(backgroundFiles[idxDisabled].second).seedObjectType;
+                const bool sameSeedSC = (seedEnabledSC == seedDisabledSC);
+                std::string headerSC, seedSuffixSubjetSC, seedSuffixLeadSC;
+                if(sameSeedSC){
+                    headerSC = Form("Seed: %s", seedEnabledSC.c_str());
+                } else {
+                    seedSuffixSubjetSC = Form(", Seed: %s", seedEnabledSC.c_str());
+                    seedSuffixLeadSC   = Form(", Seed: %s", seedDisabledSC.c_str());
+                }
 
                 c9b_Log.cd();
 
@@ -23951,8 +24249,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 }
 
                 legSeedCompare->Clear();
-                legSeedCompare->AddEntry(gSubjet, "Seed Opt., Subjet-based E_{T} cut", "p");
-                legSeedCompare->AddEntry(gLead,   "Seeded cone only, Lead. LRJ E_{T} cut", "p");
+                if(!headerSC.empty()) legSeedCompare->SetHeader(headerSC.c_str(), "C"); // set after Clear(), which drops it
+                legSeedCompare->AddEntry(gSubjet,
+                    Form("Seed Opt., Subjet-based E_{T} cut%s", seedSuffixSubjetSC.c_str()), "p");
+                legSeedCompare->AddEntry(gLead,
+                    Form("Seeded cone only, Lead. LRJ E_{T} cut%s", seedSuffixLeadSC.c_str()), "p");
                 if(gGfxSC) legSeedCompare->AddEntry(gGfxSC, "gFEX Lead. LRJ E_{T} cut", "p");
                 legSeedCompare->Draw();
 
@@ -24080,8 +24381,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             }
             {
                 auto* e = legROC_ET_mass->AddEntry((TObject*)nullptr,
-                    Form("N_{IO}=%u",
-                         nInputObjectsAlgorithmConfiguration), "lp");
+                    Form("IO: %s, Seed: %s, %s",
+                         inputObjectType.c_str(), seedObjectType.c_str(),
+                         dSearchLabel.c_str()), "lp");
                 e->SetMarkerStyle(20);
                 e->SetMarkerSize(1.4);
                 e->SetMarkerColor(rocColor);
@@ -24100,6 +24402,52 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
 
     } // Loop to overlay plots after having already filled vectors through main file loop
+
+    // ======= Multi-file overlay: AP-style background rate vs. threshold =======
+    // One PDF per "threshold_views" quantity, all files on the same axes. This is the view
+    // to use for rate comparisons across samples (e.g. PU140 vs PU200), where the histogram
+    // outlines of the paired threshold_views canvases overlap too much to read.
+    for (const std::string& tag : rateVsThr_graph_tags) {
+        const auto& entries = rateVsThr_graph_map[tag];
+        if (entries.empty()) continue;
+
+        std::vector<TGraphErrors*> graphs(backgroundFiles.size(), nullptr);
+        std::vector<TGraphErrors*> graphsZoom(backgroundFiles.size(), nullptr);
+        for (const auto& entry : entries) {
+            if (entry.first >= graphs.size()) continue;
+            graphs[entry.first] = entry.second;
+            // Separate clones: drawing sets each graph's internal histogram, so the two
+            // variants cannot share objects.
+            graphsZoom[entry.first] = (TGraphErrors*) entry.second->Clone(
+                TString::Format("%s_zoom", entry.second->GetName()).Data());
+        }
+
+        const TString canvasName = TString::Format("cRateVsThrOverlay_%s", tag.c_str());
+        const TString outputPath =
+            overlayOutputFileDir + TString::Format("rate_vs_threshold_%s_overlay.pdf", tag.c_str());
+
+        SaveRateVsThrGraphOverlay(graphs,
+                                  rateVsThr_overlay_labels,
+                                  rateVsThr_overlay_colors,
+                                  outputPath,
+                                  canvasName.Data(),
+                                  rateVsThr_graph_xTitle[tag]);
+
+        // Zoomed duplicate
+        const TString zoomName = TString::Format("cRateVsThrOverlay_%s_xMax%.0f",
+                                                 tag.c_str(), kRateVsThrZoomXMax);
+        const TString zoomPath =
+            overlayOutputFileDir + TString::Format("rate_vs_threshold_%s_overlay_xMax%.0f.pdf",
+                                                   tag.c_str(), kRateVsThrZoomXMax);
+
+        SaveRateVsThrGraphOverlay(graphsZoom,
+                                  rateVsThr_overlay_labels,
+                                  rateVsThr_overlay_colors,
+                                  zoomPath,
+                                  zoomName.Data(),
+                                  rateVsThr_graph_xTitle[tag],
+                                  kRateVsThrZoomXMax);
+    }
 
     // ======= Multi-file overlay: ET+mass 10 kHz turn-on, one curve per N_IO =======
     /*if (!eff_ET_mass_10kHz_vec.empty()) {
@@ -24519,9 +24867,27 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
     // Declared explicitly so different physics processes can be paired correctly.
     // Edit these manually when changing signal samples or algorithm configurations.
     std::vector<std::pair<std::string,std::string>> signalFiles = {
-        // ggF HH->4b v4 ntuples
-        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
-          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+        // ggF HH->4b v4 ntuples specifically for seeding comparisons. 
+        //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+
+        //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_jFEXSRJ_SK_subjetEt35GeV_ewm0_mep1_mec30GeV_v3.root" },
+
+        //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gFEXSRJ_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+
+        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+
+        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_jFEXSRJ_SK_subjetEt35GeV_ewm0_mep1_mec30GeV_v3.root" },
+
+        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gFEXSRJ_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+
+
+          
           //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
           //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
 
@@ -24544,9 +24910,20 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
         // v4 QCD JZ merged ntuple: run hadd --ntuples --version 4 --merge-jz first
         //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
         //  "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
-        // v3 QCD JZ (fallback until v4 JZ hadd is run)
-        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
-          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_0.001_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+        // Glob over the ten per-slice v4 ntuples instead of a hadd'd combination: the
+        // merged file would exceed ROOT's 100 GB TTree::fgMaxTreeSize and come out
+        // truncated. ChainSource turns this into one TChain per tree (chainSource.h).
+
+
+        // ntuples specifically for seeding comparisons 
+        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/QCD_Dijet_JZ*_v4/mc21_14TeV_jj_JZ*_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/QCD_Dijet_JZ*_v4/mc21_14TeV_jj_JZ*_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_jFEXSRJ_SK_subjetEt35GeV_ewm0_mep1_mec30GeV_v3.root" },
+        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/QCD_Dijet_JZ*_v4/mc21_14TeV_jj_JZ*_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gFEXSRJ_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+
+          
           //{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root",
           //"/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
 
@@ -24558,7 +24935,7 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
         //  "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/mc21_14TeV_jj_JZ_e8557_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_SK_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
     };
 
-    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_Plots_v4_ggF_SinglePrintout/";
+    TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_25GeVSubjets_Plots_v5_ttbar_SeedComparison/";
     gSystem->mkdir(overlayOutputFileDir);
     gSystem->RedirectOutput("debug_newsamples_atlaslabel_v3_ggF_Plots_singlePrintoutgFEX140.log", "w");
     gErrorIgnoreLevel = kError;

@@ -4,16 +4,20 @@
 #   $1  signalBool   (0 or 1)
 #   $2  signalString (e.g. "displaced_dark_photon"; "BACKGROUND" -> treated as "")
 #   $3  outputDir    (absolute path, created if absent)
-#   $4  daodFile     (absolute path to the specific DAOD_JETM42 pool.root file)
-#   $5  gepFile      (absolute path to the matching GEPOutputReader ntuple file)
-#   $6  fileSuffix   (string appended before .root in output name, e.g. _000001)
+#   $4  jzSlice      (QCD JZ slice 0-9 for background; -1 for signal)
+#   $5  pileup       (200 or 140; selects the sum-of-weights table)
+#   $6  daodFile     (absolute path to the specific DAOD_JETM42 pool.root file)
+#   $7  gepFile      (absolute path to the matching GEPOutputReader ntuple file)
+#   $8  fileSuffix   (string appended before .root in output name, e.g. _000001)
 
 SIGNAL_BOOL="$1"
 SIGNAL_STRING="$2"
 OUTPUT_DIR="$3"
-DAOD_FILE="$4"
-GEP_FILE="$5"
-FILE_SUFFIX="$6"
+JZ_SLICE="$4"
+PILEUP="$5"
+DAOD_FILE="$6"
+GEP_FILE="$7"
+FILE_SUFFIX="$8"
 
 # The submit script passes "BACKGROUND" instead of an empty string so the
 # positional arguments don't shift; translate it back to "" for the macro.
@@ -25,6 +29,8 @@ echo "=== caloShowerShapeNTupler Condor job ==="
 echo "  SIGNAL_BOOL    = $SIGNAL_BOOL"
 echo "  SIGNAL_STRING  = $SIGNAL_STRING"
 echo "  OUTPUT_DIR     = $OUTPUT_DIR"
+echo "  JZ_SLICE       = $JZ_SLICE"
+echo "  PILEUP         = $PILEUP"
 echo "  DAOD_FILE      = $DAOD_FILE"
 echo "  GEP_FILE       = $GEP_FILE"
 echo "  FILE_SUFFIX    = $FILE_SUFFIX"
@@ -52,6 +58,6 @@ mkdir -p "$OUTPUT_DIR"
 ANALYSIS_DIR=/home/larsonma/GEPHadronicEventReconstruction/analysis
 cd "$ANALYSIS_DIR"
 
-root -b -q "caloShowerShapeStudy/caloShowerShapeNTupler.C(${SIGNAL_BOOL}, \"${SIGNAL_STRING}\", \"${OUTPUT_DIR}/\", \"${DAOD_FILE}\", \"${GEP_FILE}\", \"${FILE_SUFFIX}\")"
+root -b -q "caloShowerShapeStudy/caloShowerShapeNTupler.C(${SIGNAL_BOOL}, \"${SIGNAL_STRING}\", \"${OUTPUT_DIR}/\", \"${DAOD_FILE}\", \"${GEP_FILE}\", \"${FILE_SUFFIX}\", ${JZ_SLICE}, ${PILEUP})"
 
 echo "=== Job complete ==="

@@ -9,6 +9,8 @@ signals=(true)
 
 signalStrings=("ZvvHbb")
 #signalStrings=("ZvvHbb")
+#signalStrings=("Zmumu")
+#signalStrings=("ZvvHbb" "ttbar_semilep" "ttbar_dilep" "Zmumu")
 
 puSuppression=(true)
 #puSuppression=(true)

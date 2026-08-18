@@ -818,7 +818,7 @@ void nTupler(bool signalBool, bool daodBool, bool vbfBool) {
                 if (et < 0) continue; // don't store to digitized memories
 
                 // Digitize each variable
-                int phi_bin = digitize(cluster->phi(), phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(cluster->phi());
                 int eta_bin = digitize(cluster->eta(), eta_bit_length_, eta_min_, eta_max_);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -862,7 +862,7 @@ void nTupler(bool signalBool, bool daodBool, bool vbfBool) {
 
                 if (et < 0) continue; // FIXME for now don't store negative Et to digitized memories
                 // Digitize each variable
-                int phi_bin = digitize(cluster->phi(), phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(cluster->phi());
                 int eta_bin = digitize(cluster->eta(), eta_bit_length_, eta_min_, eta_max_);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -927,7 +927,7 @@ void nTupler(bool signalBool, bool daodBool, bool vbfBool) {
                 if (et < 0) continue; // FIXME
 
                 // Digitize each variable
-                int phi_bin = digitize(jet->phi(), phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(jet->phi());
                 int eta_bin = digitize(jet->eta(), eta_bit_length_, eta_min_, eta_max_);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
@@ -1043,7 +1043,7 @@ void nTupler(bool signalBool, bool daodBool, bool vbfBool) {
                 if (et < 0) continue;
 
                 // Digitize each variable
-                int phi_bin = digitize(jet->phi(), phi_bit_length_, phi_min_, phi_max_);
+                int phi_bin = digitize_phi(jet->phi());
                 int eta_bin = digitize(jet->eta(), eta_bit_length_, eta_min_, eta_max_);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));

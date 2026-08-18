@@ -2,6 +2,8 @@
 #define CONSTANTS_H
 // Constants used by SW & FW implementation
 
+#include <cmath>
+
 #define UNROLLFACTOR 1
 #define PIPELINEII 3
 
@@ -13,35 +15,44 @@ constexpr unsigned int nSeedsOutput_ = 2;
 constexpr unsigned int maxObjectsConsidered_ = 10;
 constexpr unsigned int inputEnergyCut_ = 1;
 #define useInputEnergyCut_ false
-constexpr double et_granularity_ = 0.125;
+constexpr double et_granularity_ = 0.25; // 250 MeV LSB = et_max_ / (1 << et_bit_length_)
 constexpr double r2Cut_ = 1.21;
 constexpr double rCut_ = 1.1;
 constexpr double rMergeCut_ = 0.001;
 constexpr unsigned int et_bit_length_ = 13;
 constexpr unsigned int eta_bit_length_ = 10;
-constexpr unsigned int eta_range_ = 784;
+constexpr unsigned int eta_range_ = 98;
 constexpr unsigned int phi_bit_length_ = 9;
-constexpr double phi_min_ = -3.2;
-constexpr double phi_max_ = 3.2;
-constexpr unsigned int pi_digitized_in_phi_ = 251;
+// ---- digitization grid ----
+// Identical physical grid to the advanced version (constants_adv.h): the GEP
+// tower grid, 98 eta towers of 0.1 spanning |eta| < 4.9 and 64 phi towers of
+// pi/32 covering the full 2*pi, matching Athena's
+// CaloTowerContainer::configureGrid(98, -4.9, 4.9, 64). Only the field widths
+// differ here (10b eta / 9b phi, the standard TOB format), and they are just
+// field widths: the dynamic range and the granularity come from the code counts
+// eta_range_ / phi_range_, and the high bits the grid never reaches are padding.
+// eta_min_ / phi_min_ are the first tower centre, *_max_ one LSB past the last.
+constexpr unsigned int phi_range_ = 64;
+constexpr double eta_granularity_ = 0.1;
 constexpr double eta_min_ = -4.85;
-constexpr double eta_max_ = 4.95;
-constexpr double eta_granularity_ = 0.0125;
-constexpr double phi_granularity_ = 0.0125;
-constexpr double deltaR2_granularity_ = 0.00015625;
+constexpr double eta_max_ = eta_min_ + eta_range_ * eta_granularity_; // 4.95
+constexpr double phi_granularity_ = (2 * M_PI) / double(phi_range_); // pi/32
+constexpr double phi_min_ = -M_PI + phi_granularity_ / 2;
+constexpr double phi_max_ = phi_min_ + phi_range_ * phi_granularity_;
+constexpr unsigned int pi_digitized_in_phi_ = phi_range_ / 2; // 32
+constexpr double deltaR2_granularity_ = eta_granularity_ * eta_granularity_;
 constexpr unsigned int et_min_ = 0;
-constexpr unsigned int et_max_ = 1024;
+constexpr unsigned int et_max_ = 2048;
 #define useMax_ false
 constexpr unsigned int max_R2lut_size_ = 45056;
 constexpr unsigned int max_Rlut_size_ = 1;
 constexpr double deltaR_max_ = 10.48187;
 constexpr unsigned int deltaR_bits_ = 8;
 constexpr unsigned int max_R_8b_lut_size_ = 45056;
-constexpr double phi_range_ = 6.4;
 
 
 
-const unsigned int lut_size_ = (eta_range_ * (1 << (phi_bit_length_)));
+const unsigned int lut_size_ = (eta_range_ * (phi_range_ / 2)); // rows of |deltaPhi| codes below pi
 #if !WRITE_LUT
 constexpr unsigned int padded_zeroes_length_ = 64 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;
 constexpr unsigned int padded_zeroes_length_32b_ = 128 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;

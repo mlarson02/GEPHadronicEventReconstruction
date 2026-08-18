@@ -1127,6 +1127,259 @@ RateEff2DOut MakeRateVsEff_ScanRMax(TH2* hSigEtR, TH2* hBkgEtR)
 }
 
 
+// ===========================================================================
+// Pileup rate conversion
+// ---------------------------------------------------------------------------
+// The weighted background histograms are filled with HERNTupler's rate-mode weights, which
+// normalize the sum over the UNFILTERED sample to targetRate = 30 MHz. Two conversions are
+// built on top of that:
+//
+//   1. RateModeToCollisionRateScale — undoes the rate-mode choice and puts the histogram back
+//      on a physical collision rate, sigma x L_inst. Rate-mode weights carry a normalization
+//      of targetRate / sigma_ref instead of L_inst, so the factor is
+//          L_inst * sigma_ref / targetRate
+//      which comes out at ~200.9 (PU200) and ~134.0 (PU140) — close to the pileup itself,
+//      which is the consistency check that L_inst and mu describe the same beam condition.
+//
+//   2. CollisionRateToCrossingRate — the binomial pileup conversion. A collision-level rate R
+//      gives the probability that a single collision passes, p = R / (f_BX * mu); the crossing
+//      fires if at least one of its mu collisions does, so
+//          R_BX = f_BX * (1 - (1-p)^mu).
+//      For p << 1 this reduces to R_BX = R (the linear regime); it only departs from the
+//      identity as R approaches the ~30 MHz saturation scale, where a crossing can fire once
+//      and no more.
+//
+// APPLICABILITY: the binomial factorizes "the crossing fires" into mu independent chances, so
+// it is meaningful for object triggers — a jet belongs to one collision. It does NOT apply to
+// MET, which is a vector sum over the whole crossing with cancellations between collisions;
+// there is no such thing as one collision passing a MET threshold. Note also that these
+// samples already have pileup overlaid, so the jets in them already contain PU contributions.
+// ===========================================================================
+
+// Crossing rate of colliding bunches [Hz] (HL-LHC, 2760 filled bunches x 11245 Hz).
+constexpr double kCrossingRateHz = 30.9e6;
+
+// Constants mirroring HERNTupler.C — keep in sync if the normalization there changes.
+constexpr double kSigmaRefBarns  = 0.080379;   // sum over slices of xsec x filterEff [b]
+constexpr double kTargetRateHz   = 30.9e6;     // HERNTupler targetRate (rate mode)
+constexpr double kLumiPU200      = 7.5e10;     // b^-1 s^-1, 7.5e34 cm^-2 s^-1
+constexpr double kLumiPU140      = 5.0e10;     // b^-1 s^-1, 5.0e34 cm^-2 s^-1
+
+// Factor taking a rate-mode-weighted histogram to a physical collision rate.
+inline double RateModeToCollisionRateScale(unsigned int pileup = 200) {
+  const double lumi = (pileup == 140) ? kLumiPU140 : kLumiPU200;
+  return lumi * kSigmaRefBarns / kTargetRateHz;
+}
+
+// Binomial pileup conversion: collision-level rate [Hz] -> per-crossing trigger rate [Hz].
+inline double CollisionRateToCrossingRate(double collisionRateHz,
+                                          double pileup = 200.0,
+                                          double crossingRateHz = kCrossingRateHz) {
+  if (collisionRateHz <= 0.0 || pileup <= 0.0 || crossingRateHz <= 0.0) return 0.0;
+  double p = collisionRateHz / (crossingRateHz * pileup);
+  p = std::min(std::max(p, 0.0), 1.0);
+  return crossingRateHz * (1.0 - std::pow(1.0 - p, pileup));
+}
+
+// Error propagation through the conversion above. d(R_BX)/dR = (1-p)^(mu-1), so a collision-rate
+// uncertainty shrinks by the same factor that the rate itself saturates by.
+inline double CollisionRateToCrossingRateError(double collisionRateHz, double errorHz,
+                                               double pileup = 200.0,
+                                               double crossingRateHz = kCrossingRateHz) {
+  if (errorHz <= 0.0 || pileup <= 0.0 || crossingRateHz <= 0.0) return 0.0;
+  double p = collisionRateHz / (crossingRateHz * pileup);
+  p = std::min(std::max(p, 0.0), 1.0);
+  return errorHz * std::pow(1.0 - p, pileup - 1.0);
+}
+
+// Histogram form, mirroring the sigma_hist_to_rate_binomial pattern: takes a CUMULATIVE
+// rate-vs-threshold histogram (bin i already holds the rate for the threshold at bin i, as
+// produced by MakeRateVsEff) and returns a new histogram holding the per-crossing rate.
+// collisionRateScale converts the input bins to a collision rate first — pass
+// RateModeToCollisionRateScale(pileup) for the rate-mode-weighted histograms used here.
+inline TH1* MakeBinomialCrossingRateHist(const TH1* hCumulativeRate,
+                                         const char* newName,
+                                         double collisionRateScale = 1.0,
+                                         double pileup = 200.0,
+                                         double crossingRateHz = kCrossingRateHz) {
+  if (!hCumulativeRate) return nullptr;
+  TH1* out = (TH1*)hCumulativeRate->Clone(newName);
+  out->SetDirectory(nullptr);
+  for (int ib = 1; ib <= out->GetNbinsX(); ++ib) {
+    const double rColl = hCumulativeRate->GetBinContent(ib) * collisionRateScale;
+    const double eColl = hCumulativeRate->GetBinError(ib)   * collisionRateScale;
+    out->SetBinContent(ib, CollisionRateToCrossingRate(rColl, pileup, crossingRateHz));
+    out->SetBinError  (ib, CollisionRateToCrossingRateError(rColl, eColl, pileup, crossingRateHz));
+  }
+  return out;
+}
+
+// Defined in each analysis macro (metAnalysisAndRates.C, largeRJetAnalysisAndRates.C) below
+// the point where this header is included, so declare it here to be able to call it. Declared
+// without default arguments — the macros supply those on their definitions.
+void DrawATLASLabel(double x, double y, const char* status);
+
+// Cumulative rate above threshold, from a weighted background histogram. Bin i holds the sum
+// of bins i..N, i.e. the rate for a threshold at bin i's lower edge — the same construction
+// MakeRateVsEff uses for its hRate_vsThr.
+inline TH1* MakeCumulativeRateHist(const TH1* hWeighted, const char* newName) {
+  if (!hWeighted) return nullptr;
+  TH1* h = ((TH1*)hWeighted)->GetCumulative(/*forward=*/false, "_cumulTmp");
+  h->SetName(newName);
+  h->SetDirectory(nullptr);
+  return h;
+}
+
+// ---------------------------------------------------------------------------
+// Rate-vs-threshold overlay drawn as points with error bars, with a ratio panel underneath
+// giving each curve divided by the curve at refIndex. Inputs are CUMULATIVE rate histograms
+// (MakeCumulativeRateHist or MakeRateVsEff's hRate_vsThr); points are placed at bin lower
+// edges, since that is the threshold each cumulative bin corresponds to.
+//
+// Ratio errors combine both curves in quadrature. Where the curves are rescalings of the same
+// events — as filled vs sigma x L vs binomial — they are fully correlated and the true ratio
+// is exact, so those error bars overstate the uncertainty; only a statistically independent
+// curve (JZ0 only, zero-bias data) has a meaningful band.
+// ---------------------------------------------------------------------------
+inline void DrawRateCurvesWithRatio(const std::vector<TH1*>& curves,
+                                    const std::vector<std::string>& labels,
+                                    const std::vector<Int_t>& colors,
+                                    unsigned int refIndex,
+                                    const std::string& refShortName,   // names the denominator on the ratio axis
+                                    const std::string& xTitle,
+                                    const std::string& yTitle,
+                                    const std::string& legendHeader,
+                                    const TString& outputPath,
+                                    double yScale = 1.0,
+                                    double xMax = -1.0,
+                                    double yMin = -1.0,
+                                    double ratioMin = 0.0,
+                                    double ratioMax = 3.0) {
+  if (curves.empty() || refIndex >= curves.size() || !curves[refIndex]) return;
+
+  const Style_t mkstyles[8] = { 20, 21, 22, 23, 29, 33, 34, 47 };
+  // Plain ROOT enums only: the Petroff kP6/kP8/kP10 constants are TColor::GetColor() variables
+  // defined inside each macro AFTER this header is included, so they are not visible here.
+  // Callers pass the Petroff colours explicitly; this array is only the fallback.
+  const Int_t   fallback[8] = { kBlack, kRed + 1, kBlue, kGreen + 2,
+                                kViolet, kOrange + 7, kCyan + 1, kMagenta + 1 };
+
+  auto graphFrom = [&](const TH1* h, Int_t col, Style_t mk) -> TGraphErrors* {
+    std::vector<double> x, y, ex, ey;
+    for (int ib = 1; ib <= h->GetNbinsX(); ++ib) {
+      x .push_back(h->GetBinLowEdge(ib));
+      y .push_back(h->GetBinContent(ib) * yScale);
+      ex.push_back(0.0);
+      ey.push_back(h->GetBinError(ib)   * yScale);
+    }
+    auto* g = new TGraphErrors((int)x.size(), x.data(), y.data(), ex.data(), ey.data());
+    g->SetLineColor(col); g->SetMarkerColor(col);
+    g->SetMarkerStyle(mk); g->SetMarkerSize(0.8); g->SetLineWidth(2);
+    return g;
+  };
+
+  TCanvas* c = new TCanvas(("cRatio_" + outputPath).Data(), legendHeader.c_str(), 800, 800);
+  TPad* padHi = new TPad("padHi", "", 0.0, 0.30, 1.0, 1.0);
+  TPad* padLo = new TPad("padLo", "", 0.0, 0.00, 1.0, 0.30);
+  // Both pads need the same left margin or the two x axes will not line up. It has to be wide
+  // enough for the ratio pad's y title, which is drawn at a distance set by its (larger,
+  // pad-relative) title size — 0.14 clipped it off the canvas.
+  padHi->SetBottomMargin(0.02); padHi->SetLeftMargin(0.18); padHi->SetTicks(1, 1); padHi->SetLogy();
+  padLo->SetTopMargin(0.03);    padLo->SetLeftMargin(0.18); padLo->SetTicks(1, 1);
+  padLo->SetBottomMargin(0.32);
+  padHi->Draw(); padLo->Draw();
+
+  // ---- main pad
+  padHi->cd();
+  double yMaxSeen = 0.0;
+  std::vector<TGraphErrors*> graphs;
+  for (unsigned int i = 0; i < curves.size(); ++i) {
+    if (!curves[i]) { graphs.push_back(nullptr); continue; }
+    TGraphErrors* g = graphFrom(curves[i], i < colors.size() ? colors[i] : fallback[i % 8],
+                                mkstyles[i % 8]);
+    graphs.push_back(g);
+    for (int p = 0; p < g->GetN(); ++p) yMaxSeen = std::max(yMaxSeen, g->GetY()[p]);
+    g->Draw(graphs.size() == 1 ? "AP" : "P SAME");
+    if (i == 0) {
+      g->GetYaxis()->SetTitle(yTitle.c_str());
+      g->GetYaxis()->SetTitleSize(0.050); g->GetYaxis()->SetTitleOffset(1.30);
+      g->GetYaxis()->SetLabelSize(0.042);
+      g->GetXaxis()->SetLabelSize(0.0);   // x labels live on the ratio pad
+      if (xMax > 0.0) g->GetXaxis()->SetLimits(curves[i]->GetXaxis()->GetXmin(), xMax);
+    }
+  }
+  if (!graphs.empty() && graphs[0]) {
+    graphs[0]->SetMinimum(yMin > 0.0 ? yMin : std::max(yMaxSeen * 1e-8, 1e-12));
+    graphs[0]->SetMaximum(yMaxSeen * 20.0);
+  }
+  TLegend* leg = new TLegend(0.42, 0.62, 0.93, 0.92);
+  leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.034);
+  if (!legendHeader.empty()) leg->AddEntry((TObject*)nullptr, legendHeader.c_str(), "");
+  for (unsigned int i = 0; i < graphs.size(); ++i)
+    if (graphs[i]) leg->AddEntry(graphs[i], labels[i].c_str(), "lp");
+  leg->Draw();
+  DrawATLASLabel(0.20, 0.88, "Work in progress");   // defaults live on the macro definitions
+
+  // ---- ratio pad
+  // Error bars are each sample's OWN fractional statistical uncertainty, not the uncertainty
+  // on the ratio (which would fold in the denominator's error as well). The panel is there to
+  // show how well each sample is statistically determined, so the reference curve is drawn
+  // too: it sits at exactly 1.0, carrying its own stat. error.
+  padLo->cd();
+  const TH1* href = curves[refIndex];
+  bool firstRatio = true;
+  for (unsigned int i = 0; i < curves.size(); ++i) {
+    if (!curves[i]) continue;
+    std::vector<double> x, r, ex, er;
+    for (int ib = 1; ib <= curves[i]->GetNbinsX(); ++ib) {
+      // Pair the curves by THRESHOLD, not by bin index: the reference is often a different
+      // histogram (a JZ0 twin, a truth spectrum) and need not share the numerator's binning.
+      // Indexing both by ib then silently divides values taken at two different thresholds.
+      // Where the edges do not line up, the reference is evaluated at the bin containing thr,
+      // i.e. at the largest of its thresholds not above thr.
+      const double thr   = curves[i]->GetBinLowEdge(ib);
+      const int    ibRef = href->GetXaxis()->FindFixBin(thr);
+      if (ibRef < 1 || ibRef > href->GetNbinsX()) continue;
+      const double yr = href->GetBinContent(ibRef);
+      const double yi = curves[i]->GetBinContent(ib);
+      if (yr <= 0.0 || yi <= 0.0) continue;
+      const double relI = curves[i]->GetBinError(ib) / yi;   // this sample's stat. precision
+      x .push_back(thr);
+      r .push_back(yi / yr);
+      ex.push_back(0.0);
+      er.push_back((yi / yr) * relI);
+    }
+    if (x.empty()) continue;
+    auto* gr = new TGraphErrors((int)x.size(), x.data(), r.data(), ex.data(), er.data());
+    const Int_t col = i < colors.size() ? colors[i] : fallback[i % 8];
+    gr->SetLineColor(col); gr->SetMarkerColor(col);
+    gr->SetMarkerStyle(mkstyles[i % 8]); gr->SetMarkerSize(0.8); gr->SetLineWidth(2);
+    gr->Draw(firstRatio ? "AP" : "P SAME");
+    if (firstRatio) {
+      gr->GetYaxis()->SetTitle(("Ratio to " + refShortName).c_str());
+      gr->GetYaxis()->SetNdivisions(505);
+      gr->GetYaxis()->SetTitleSize(0.105); gr->GetYaxis()->SetTitleOffset(0.58);
+      gr->GetYaxis()->SetLabelSize(0.095);
+      gr->GetXaxis()->SetTitle(xTitle.c_str());
+      gr->GetXaxis()->SetTitleSize(0.115); gr->GetXaxis()->SetTitleOffset(1.20);
+      gr->GetXaxis()->SetLabelSize(0.095);
+      gr->SetMinimum(ratioMin); gr->SetMaximum(ratioMax);
+      gr->GetXaxis()->SetLimits(curves[refIndex]->GetXaxis()->GetXmin(),
+                                xMax > 0.0 ? xMax : curves[refIndex]->GetXaxis()->GetXmax());
+      firstRatio = false;
+    }
+  }
+  if (!firstRatio) {
+    const double x1 = curves[refIndex]->GetXaxis()->GetXmin();
+    const double x2 = xMax > 0.0 ? xMax : curves[refIndex]->GetXaxis()->GetXmax();
+    TLine* unity = new TLine(x1, 1.0, x2, 1.0);
+    unity->SetLineStyle(2); unity->SetLineColor(kGray + 2);
+    unity->Draw("SAME");
+  }
+  c->cd();
+  c->SaveAs(outputPath);
+}
+
 // Function to generate background rate vs. signal efficiency plots
 RateEffOut MakeRateVsEff(TH1* hSig, TH1* hBkg) {
   // 1) cumulative from HIGH -> LOW threshold
@@ -1182,6 +1435,143 @@ double FindThrForRate(const TH1* hRateVsThr, double targetHz) {
     x0 = x1; y0 = y1;
   }
   return std::numeric_limits<double>::quiet_NaN();     // not found
+}
+
+
+// -----------------------------------------------------------------------------
+// AP-style (marker) rate-vs-threshold views
+//
+// The "threshold_views" canvases show signal efficiency and background rate vs.
+// threshold side by side as histograms. The helpers below build the rate-vs-threshold
+// curve on its own as a TGraphErrors so it can be drawn with the same "AP" marker
+// style used for the rate-vs-efficiency plots. This matters most for the multi-file
+// overlays, where comparing e.g. PU140 against PU200 rates is far easier with
+// markers + error bars than with overlapping histogram outlines.
+// -----------------------------------------------------------------------------
+TGraphErrors* MakeRateVsThrGraph(const TH1* hRateVsThr, const char* name)
+{
+  auto* g = new TGraphErrors();
+  g->SetName(name);
+  if (!hRateVsThr) return g;
+
+  int ip = 0;
+  for (int ib = 1; ib <= hRateVsThr->GetNbinsX(); ++ib) {
+    const double rate = hRateVsThr->GetBinContent(ib);
+    if (rate <= 0.0) continue;                  // rate axis is log: drop empty bins
+    g->SetPoint     (ip, hRateVsThr->GetXaxis()->GetBinCenter(ib), rate);
+    g->SetPointError(ip, 0.0, hRateVsThr->GetBinError(ib));
+    ++ip;
+  }
+  if (g->GetN() == 0) return g;                 // no axes to style on an empty graph
+
+  g->SetTitle(hRateVsThr->GetTitle());
+  auto styleAxis = [](TAxis* ax, const char* title) {
+    ax->SetTitle(title);
+    ax->SetTitleFont(42);  ax->SetLabelFont(42);
+    ax->SetTitleSize(0.05); ax->SetLabelSize(0.05);
+    ax->SetNdivisions(510); ax->SetTitleOffset(1.25);
+  };
+  styleAxis(g->GetXaxis(), hRateVsThr->GetXaxis()->GetTitle());
+  styleAxis(g->GetYaxis(), hRateVsThr->GetYaxis()->GetTitle());
+  g->SetMarkerStyle(20);
+  g->SetMarkerSize(0.8);
+  g->SetLineWidth(2);
+  return g;
+}
+
+// Single-file rate-vs-threshold plot, same canvas geometry as the rate-vs-eff plots.
+// xMax > 0 truncates the threshold axis; the y range is then taken from the surviving
+// points only, so the zoomed view is not squashed by the tail that was cut away.
+// NOTE: drawing sets the graph's internal histogram — pass a clone for each variant.
+void SaveRateVsThrGraph(TGraphErrors* g, const TString& outputPath, const char* canvasName,
+                        double xMax = -1.0)
+{
+  if (!g || g->GetN() == 0) return;
+  auto* c = new TCanvas(canvasName, "Rate vs threshold", 700, 600);
+  c->SetLeftMargin(0.16); c->SetBottomMargin(0.16); c->SetTicks(1,1);
+  c->SetLogy();
+  g->Draw("AP");
+  if (xMax > 0.0) {
+    double xLo =  std::numeric_limits<double>::max();
+    double yLo =  std::numeric_limits<double>::max(), yHi = 0.0;
+    for (int p = 0; p < g->GetN(); ++p) {
+      if (g->GetX()[p] > xMax) continue;
+      xLo = std::min(xLo, g->GetX()[p]);
+      yLo = std::min(yLo, g->GetY()[p]);  yHi = std::max(yHi, g->GetY()[p]);
+    }
+    if (yHi > 0.0) {
+      const double xPad = 0.02 * std::max(xMax - xLo, 1e-9);
+      g->GetXaxis()->SetLimits(xLo - xPad, xMax + xPad);
+      g->SetMinimum(std::max(yLo * 0.5, 1e-3));
+      g->SetMaximum(yHi * 5.0);
+    }
+  }
+  gPad->RedrawAxis();
+  c->cd(); DrawATLASLabel(0.20, 0.88, "Work in progress");   // defaults live on the macro definitions
+  c->SaveAs(outputPath);
+}
+
+// Multi-file overlay of rate-vs-threshold graphs. labels/lineColors are indexed in
+// step with graphs; null or empty graphs are skipped without shifting the mapping.
+// xMaxCap > 0 truncates the threshold axis, with the y range taken from the surviving
+// points only. NOTE: drawing sets each graph's internal histogram — pass clones for
+// each variant rather than reusing the same graphs.
+void SaveRateVsThrGraphOverlay(const std::vector<TGraphErrors*>& graphs,
+                               const std::vector<std::string>&   labels,
+                               const std::vector<int>&           lineColors,
+                               const TString&                    outputPath,
+                               const char*                       canvasName,
+                               const std::string&                legendHeader = "",
+                               double                            xMaxCap = -1.0)
+{
+  static const int mkstyles[] = {20, 24, 21, 25, 22, 26, 23, 32};
+
+  double yMin =  std::numeric_limits<double>::max(), yMax = 0.0;
+  double xMin =  std::numeric_limits<double>::max();
+  double xMax = -std::numeric_limits<double>::max();
+  bool haveAny = false;
+  for (auto* g : graphs) {
+    if (!g || g->GetN() == 0) continue;
+    for (int p = 0; p < g->GetN(); ++p) {
+      if (xMaxCap > 0.0 && g->GetX()[p] > xMaxCap) continue;
+      haveAny = true;
+      yMin = std::min(yMin, g->GetY()[p]);  yMax = std::max(yMax, g->GetY()[p]);
+      xMin = std::min(xMin, g->GetX()[p]);  xMax = std::max(xMax, g->GetX()[p]);
+    }
+  }
+  if (!haveAny) return;
+  if (xMaxCap > 0.0) xMax = xMaxCap;
+
+  auto* c = new TCanvas(canvasName, "Rate vs threshold (overlay)", 700, 600);
+  c->SetLeftMargin(0.16); c->SetBottomMargin(0.16); c->SetTicks(1,1);
+  c->SetLogy();
+
+  TLegend* leg = new TLegend(0.38, 0.66, 0.93, 0.90);
+  leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.024);
+  if (!legendHeader.empty()) leg->SetHeader(legendHeader.c_str(), "C");
+
+  bool first = true;
+  for (unsigned int i = 0; i < graphs.size(); ++i) {
+    TGraphErrors* g = graphs[i];
+    if (!g || g->GetN() == 0) continue;
+    // colour 0 is kWhite, i.e. an unset entry — fall back to a visible default
+    const int col = (i < lineColors.size() && lineColors[i] != 0) ? lineColors[i] : (int)(i + 2);
+    g->SetLineColor(col); g->SetMarkerColor(col);
+    g->SetMarkerStyle(mkstyles[i % 8]); g->SetMarkerSize(0.8); g->SetLineWidth(2);
+    g->Draw(first ? "AP" : "P SAME");
+    if (first) {
+      const double xPad = 0.02 * std::max(xMax - xMin, 1e-9);
+      g->GetXaxis()->SetLimits(xMin - xPad, xMax + xPad);
+      g->SetMinimum(std::max(yMin * 0.5, 1e-3));
+      g->SetMaximum(yMax * 20.0);
+      first = false;
+    }
+    leg->AddEntry(g, (i < labels.size() ? labels[i] : std::string(g->GetName())).c_str(), "lp");
+  }
+  leg->Draw();
+  gPad->RedrawAxis();
+  c->cd(); DrawATLASLabel(0.20, 0.88, "Work in progress");   // defaults live on the macro definitions
+  c->SaveAs(outputPath);
 }
 
 
@@ -4111,27 +4501,67 @@ bool displayEv4Back_ = false;
 
 const double mH_ = 125.0;
 
-constexpr double et_granularity_ = 0.125;
+// ---------------------------------------------------------------------------
+// Digitization grid.
+//
+// Both algorithm versions describe the *same* physical grid -- the GEP tower
+// grid, 98 eta towers of 0.1 spanning |eta| < 4.9 and 64 phi towers of pi/32
+// spanning the full 2*pi. They differ only in the width of the fields the codes
+// are packed into (v2 keeps the wider standard TOB fields, 10b eta / 9b phi),
+// so the dynamic range and the granularity are set by the code counts
+// eta_range_ / phi_range_, never by the field widths; the unused high bits of
+// the v2 fields are just zero padding.
+//
+// eta_min_ / phi_min_ are the *first tower centre* and *_max_ one LSB past the
+// last, so digitizing a tower centre lands exactly on an integer code (no
+// round-half ties) and undigitizing a code returns the tower centre it came
+// from. This mirrors the Athena tower grid, CaloTowerContainer::configureGrid
+// (98, -4.9, 4.9, 64) with phi hardcoded to [-pi, pi]:
+//   eta centre(k) = -4.9 + (k + 0.5) * 0.1    = -4.85    + k * 0.1
+//   phi centre(k) = -pi  + (k + 0.5) * pi/32  = -pi+pi/64 + k * pi/32
+constexpr double et_granularity_ = 0.25; // 250 MeV LSB
 constexpr unsigned int et_bit_length_ = 13;
-//constexpr unsigned int eta_bit_length_ = 10;
-constexpr unsigned int eta_bit_length_ = 7;
-//constexpr unsigned int eta_range_ = 784;
-constexpr unsigned int eta_range_ = 98;
-//constexpr unsigned int phi_bit_length_ = 9;
-constexpr unsigned int phi_bit_length_ = 6;
-constexpr unsigned int padded_zeroes_length_ = 64 - eta_bit_length_ - et_bit_length_ - phi_bit_length_;
-constexpr double phi_min_ = -3.2;
-constexpr double phi_max_ = 3.2;
-constexpr double eta_min_ = -4.85;
-constexpr double eta_max_ = 4.95;
-constexpr double eta_granularity_ = 0.1;
-//constexpr double eta_granularity_ = 0.0125;
-constexpr double phi_granularity_ = 0.1;
-//constexpr double phi_granularity_ = 0.0125;
 constexpr unsigned int et_min_ = 0;
-constexpr unsigned int et_max_ = 1024;
+constexpr unsigned int et_max_ = 2048; // = et_granularity_ * (1 << et_bit_length_)
+
+//constexpr unsigned int eta_bit_length_ = 10; // v2 TOB field width
+constexpr unsigned int eta_bit_length_ = 7;
+constexpr unsigned int eta_range_ = 98; // 98 towers of 0.1 -> |eta| < 4.9, both versions
+constexpr double eta_granularity_ = 0.1;
+constexpr double eta_min_ = -4.85;
+constexpr double eta_max_ = eta_min_ + eta_range_ * eta_granularity_; // 4.95
+
+//constexpr unsigned int phi_bit_length_ = 9; // v2 TOB field width
+constexpr unsigned int phi_bit_length_ = 6;
+constexpr unsigned int phi_range_ = 64; // 64 towers of pi/32 -> exactly 2*pi, both versions
+constexpr double phi_granularity_ = M_PI / 32.0;
+constexpr double phi_min_ = -M_PI + M_PI / 64.0;
+constexpr double phi_max_ = phi_min_ + phi_range_ * phi_granularity_;
+constexpr unsigned int pi_digitized_in_phi_ = phi_range_ / 2; // 32 codes = pi
+
+constexpr unsigned int padded_zeroes_length_ = 64 - eta_bit_length_ - et_bit_length_ - phi_bit_length_;
 const bool useMax_ = false;
 const unsigned nSeeds_ = 2;
+
+// Digitize phi onto the tower grid.
+//
+// Kept separate from digitize() because phi is periodic while eta/Et are not:
+// the generic function saturates at range - 1, which is wrong at both ends of
+// the phi axis. A value in the top half tower (phi within pi/64 of +pi) belongs
+// in code 0, not in a code one past the end of the range -- which would not even
+// fit the 6-bit v3 field. The code count is phi_range_ (64) rather than
+// 1 << phi_bit_length_ so that the wider v2 phi field keeps the same pi/32
+// granularity and the same dynamic range, with its top 3 bits left as padding.
+inline unsigned int digitize_phi(double phi) {
+    const int nPhi = static_cast<int>(phi_range_);
+    const int code = static_cast<int>(std::lround((phi - phi_min_) / phi_granularity_));
+    return static_cast<unsigned int>(((code % nPhi) + nPhi) % nPhi);
+}
+
+// Inverse of digitize_phi: returns the centre of the phi tower a code refers to.
+inline double undigitize_phi_value(unsigned int phi_code) {
+    return phi_min_ + phi_code * phi_granularity_;
+}
 
 // Function to scale and digitize a value, returning the result as a binary string
 /*template <int bit_length>

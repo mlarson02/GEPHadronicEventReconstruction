@@ -5,7 +5,9 @@ baseDir = "/data/larsonma/GEPHadronicEventReconstruction/GEPOutputReaderNTuples/
 
 with open("sumOfWeights.txt", "w") as out:
     for jz in range(10):
-        pattern = f"{baseDir}/JZ{jz}/user.mlarson.GEPNtupleJETM42.QCD_Dijet_JZ{jz}.v11_GEPHadronicReconstruction_EXT0/*.root"
+        # Version tag varies per JZ slice (v17/v18/v22, JZ1 is PU200), so match
+        # on the dataset dir suffix rather than a fixed version string.
+        pattern = f"{baseDir}/JZ{jz}/user.mlarson.GEPNtupleJETM42.QCD_Dijet_JZ{jz}.*_EXT0/*.root"
         files = sorted(glob.glob(pattern))
 
         if not files:
