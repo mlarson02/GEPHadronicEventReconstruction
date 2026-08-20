@@ -120,6 +120,34 @@ static const double kMaxJetAbsEta = 1.2;
 static const int    kNEtBins  = 40;
 static const double kEtMaxGeV = 800.0;
 
+// Set to a non-empty string to name the output sub-directory by hand instead of
+// from the knobs (e.g. "scan_rfit0p15").
+static const char* kOutputTagOverride = "";
+
+// Short name for the tower collection in use.
+static inline std::string towerTag(const std::string& tree) {
+    if (tree.find("EtaSK") != std::string::npos) return "EtaSK";
+    if (tree.find("SK")    != std::string::npos) return "SK";
+    return "noSK";
+}
+
+// Every knob that changes a distribution, folded into one directory name:
+//   noSK_twrEt0p00_eta1p20_etw2p00_rfitoff
+// Output goes to plots/<sample>/<tag>/, so configurations sit side by side instead
+// of overwriting each other.
+static std::string plotsConfigTag(double etMinTower) {
+    if (kOutputTagOverride && kOutputTagOverride[0]) return kOutputTagOverride;
+    std::string t = towerTag(kTowerTree);
+    t += "_twrEt" + numTag(etMinTower);
+    t += "_eta"   + numTag(kMaxJetAbsEta, 1);
+    t += "_"      + fitConfigTag();
+    if (!kApplyJZWeights)  t += "_noJZwgt";
+    if (!kApplyHSTPFilter) t += "_noHSTP";
+    if (kRunLRJ)           t += "_withLRJ";
+    if (kMaxEventsPerSample >= 0) t += "_cap" + std::to_string(kMaxEventsPerSample);
+    return t;
+}
+
 static inline double dRp(double e1,double p1,double e2,double p2){
     double dp=std::fabs(p1-p2); while(dp>M_PI) dp=std::fabs(dp-2*M_PI);
     double de=e1-e2; return std::sqrt(de*de+dp*dp);
@@ -436,7 +464,7 @@ void caloShowerShapePlots(std::string signalFile = "",
                           // huge-DCA3D tail, so the default is now 0 (keep everything).
                           double      etMinTower = 0.0,
                           bool        useTruth   = false) {
-    // No-arg default (root -b -l -q 'caloShowerShapePlots.C'): run both signals
+    // No-arg default (root -b -l -q 'caloShowerShapePlots.C'): run every signal
     // once each against the chained QCD JZ0-9 background, each written into its
     // own plots/<label>/ sub-directory. Pass a signalFile explicitly to process one
     // sample (and "" as dijetFile to drop the background overlay).
@@ -444,9 +472,12 @@ void caloShowerShapePlots(std::string signalFile = "",
         const std::vector<std::pair<std::string,std::string>> samples = {
             {"/data/larsonma/CaloShowerShapeTriggers/ntuples/caloShowerShape_displaced_dark_photon.root", "displaced_dark_photon"},
             {"/data/larsonma/CaloShowerShapeTriggers/ntuples/caloShowerShape_emerging_jets.root",         "emerging_jets"},
+            {"/data/larsonma/CaloShowerShapeTriggers/ntuples/caloShowerShape_stau_stau.root",             "stau_stau"},
         };
+        const std::string cfgTag = plotsConfigTag(etMinTower);
+        std::cout << "[caloShowerShapePlots] configuration: " << cfgTag << "\n";
         for (const auto& s : samples) {
-            std::string od = "plots/" + s.second;
+            std::string od = "plots/" + s.second + "/" + cfgTag;
             gSystem->mkdir(od.c_str(), kTRUE);
             std::cout << "[caloShowerShapePlots] === " << s.second << " -> " << od << "/ ===\n";
             caloShowerShapePlots(s.first, dijetFile, od, ptMinBSM, etMinTower, useTruth);
@@ -568,7 +599,9 @@ void caloShowerShapePlots(std::string signalFile = "",
         for(int l=0;l<7;++l){ c->cd(l+1); drawPair(sfrac[l],dfrac[l],Form("layer %d E_{T} fraction;E_{T,l%d}/E_{T};jets (norm)",l,l)); }
         c->cd(8); { TLatex tl; tl.SetNDC(); tl.SetTextSize(0.06);
             tl.DrawLatex(0.1,0.6,Form("%s jets",coll.tag)); tl.DrawLatex(0.1,0.45,"red = signal (solid)"); tl.DrawLatex(0.1,0.33,"blue = dijet (dashed)");
-            if (kApplyJZWeights) { tl.SetTextSize(0.045); tl.DrawLatex(0.1,0.20,"dijet: JZ0-9 cross-section weighted"); } }
+            if (kApplyJZWeights) { tl.SetTextSize(0.045); tl.DrawLatex(0.1,0.20,"dijet: JZ0-9 cross-section weighted"); }
+            tl.SetTextSize(0.032);
+            tl.DrawLatex(0.1,0.10,plotsConfigTag(etMinTower).c_str()); }
         c->Print(pdf);
 
         // page 2: summary observables (2x2)

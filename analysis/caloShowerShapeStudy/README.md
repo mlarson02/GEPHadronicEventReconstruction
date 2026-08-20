@@ -2,8 +2,9 @@
 
 Tooling for exploring a **displaced-jet trigger based on calorimeter shower
 shape**, using GEP (Global Event Processor) EtaSK objects plus truth BSM
-particles. Signals of interest: **displaced dark photons** (`HAHM ZdZd4e`) and
-**emerging jets** (`Zprime2EJs`); **QCD dijet** is used as the background/prompt
+particles. Signals of interest: **displaced dark photons** (`HAHM ZdZd4e`),
+**emerging jets** (`Zprime2EJs`) and **long-lived staus**
+(`StauStauLLP_500_0_10ns`); **QCD dijet** is used as the background/prompt
 comparison.
 
 The physics idea: a long-lived BSM particle decays at a displaced vertex, so its
@@ -114,7 +115,7 @@ root -b -q 'caloShowerShapeStudy/caloShowerShapeNTupler.C(0,"","out/","daod.root
 ```
 
 Event displays — one PDF per jet collection (WTACone only unless `kRunLRJ`). With no
-arguments both signals **and** the QCD dijet chain are drawn; for the dijet chain the
+arguments all three signals **and** the QCD dijet chain are drawn; for the dijet chain the
 pages are a fixed quota per slice — `kEventsPerSlice = 10` from each of
 `kDisplaySlices = {1,2,3,4}`, i.e. 40 pages, with **JZ0 excluded** (the HSTP filter
 removes essentially all of it, so its events carry no rate). Any input may be a glob; drawn events
@@ -139,8 +140,9 @@ per jet collection, seven pages:
 | 5 | truth shower-parent kinematics: `pT`, `eta`, `phi`, mass |
 | 6 | fitted − truth `dca3D` residual and the fitted-vs-truth 2D correlation |
 | 7 | QCD rate (Hz) vs leading-jet E_T threshold ± the `dca3D` cut, and the signal efficiency |
+| 8 | `<DCA₃D>` profiled vs `|η|`, vs layers used in the fit, vs jet E_T — the diagnostics that separate geometry artefacts from shower physics |
 
-With no arguments both signals run against the JZ chain:
+With no arguments all three signals run against the JZ chain:
 ```bash
 root -b -l -q 'caloShowerShapeStudy/caloShowerShapePlots.C'
 root -b -q 'caloShowerShapeStudy/caloShowerShapePlots.C("signal.root","caloShowerShape_dijet_JZ[0-9].root","plots/")'
@@ -152,11 +154,16 @@ Grid/Condor ntuple production for all samples (signals + dijet JZ0-9):
 # then merge the per-job outputs into one file per tag (per JZ slice):
 ../../condor/hadd_emulator_outputs.sh --caloshowershape
 ```
-`submit_caloShowerShape.py` supports `--signal {displaced_dark_photon,emerging_jets}`
-or `--background --jz <N>`. `--jz` gives the ntupler the slice weight, resolves the
+`submit_caloShowerShape.py` supports
+`--signal {displaced_dark_photon,emerging_jets,stau_stau}` or
+`--background --jz <N>`. `--jz` gives the ntupler the slice weight, resolves the
 `QCD_Dijet/JZ<N>` DAOD/GEP containers under
 `/data/larsonma/GEPHadronicEventReconstruction/` (dijet is not part of the
-CaloShowerShapeTriggers download), and tags the output `dijet_JZ<N>`.
+CaloShowerShapeTriggers download), and tags the output `dijet_JZ<N>`. `stau_stau`
+is in the same situation as dijet — its inputs are auto-resolved from
+`StauStau/` under `/data/larsonma/GEPHadronicEventReconstruction/` (see
+`SIGNAL_BASES`) — while the other two signals come from the
+CaloShowerShapeTriggers layout.
 
 Training parquet — signals + all ten JZ slices by default:
 ```bash
@@ -187,6 +194,47 @@ Consequences:
   products**, so the truth target could be the impact parameter of their summed
   direction rather than the parent's. `TruthBSMWithDecayParticles` has them;
   `showerParentTree` currently keeps only the parents.
+
+### Why DCA₃D has a large background tail — and the knobs for it
+
+The miss distance is amplified by `r₁r₆/|P₆−P₁| ≈ 2.4 m` per **radian** of per-layer
+angular drift, so **one 0.1 tower cell of drift ≈ 240 mm of DCA₃D**. Hundreds of mm
+therefore needs only a fraction of a cell of layer-to-layer centroid movement, which
+pileup and E_T fluctuation supply for free. Two geometry effects make it worse:
+
+- the nominal geometry switches from fixed-r to fixed-z at `|η| = 1.5`, so a jet
+  straddling it gets per-layer centroids from two different placement families;
+- in the endcap `r = z/sinh η`, so `dr/dη ≈ −r·coth η` (≈ 1.6 m per unit η at η = 2)
+  turns a small η-centroid shift into a large radial shift.
+
+Removing the soft killer fixed the "fit had <2 layers" failures but can *increase*
+the drift, because the cone then holds ~50 soft towers and in the outer layers the
+E_T-weighted centroid gets dragged from the core toward the pileup average.
+
+| Constant | Where | Effect |
+|---|---|---|
+| `kMaxJetAbsEta` | plots + displays | barrel-only. In the plots it is a **soft** cut: forward jets stay out of the physics distributions but still fill the page-8 `|η|` diagnostics, so one run shows both |
+| `kFitEtWeightPower` | `caloShowerPointing.h` | 1 = E_T, 2 = E_T² — biases the centroid onto the core |
+| `kFitRassoc` | `caloShowerPointing.h` | tighter cone for the **fit only** (try 0.15–0.2); ≤0 = same as the association cone |
+
+### Configurations are self-labelling
+
+Every knob above that changes a distribution is folded into the output directory
+name, so runs sit side by side instead of overwriting each other:
+
+```
+plots/<sample>/<config>/caloShowerShapePlots_WTACone.pdf
+plots/<sample>/<config>/caloShowerEventDisplays_WTACone_<label>.pdf
+
+  noSK_twrEt0p00_eta1p2_etw2p00_rfitoff      <- tower collection, per-layer E_T cut,
+  EtaSK_twrEt0p50_etaoff_etw1p00_rfitoff        |eta| cut, fit weight power, fit cone
+  noSK_twrEt0p00_eta1p2_etw2p00_rfit0p15
+```
+
+Non-default background handling appends `_noJZwgt` / `_noHSTP`, `kRunLRJ` appends
+`_withLRJ`, and an event cap appends `_capN`. The tag is also stamped on the plots
+(page 1) and on every event-display page, so a stray PDF still says what produced it.
+`kOutputTagOverride` (both macros) replaces the whole tag with a name of your own.
 
 ## Important caveats
 

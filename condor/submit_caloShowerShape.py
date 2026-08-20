@@ -32,6 +32,10 @@ Usage examples:
       --gep-dir  /data/larsonma/CaloShowerShapeTriggers/GEPOutputReaderNTuples/DisplacedDarkPhoton/<container> \\
       --output-dir /data/larsonma/CaloShowerShapeTriggers/ntuples
 
+  # Long-lived stau signal — its inputs live under the main
+  # GEPHadronicEventReconstruction layout (StauStau/), also auto-detected:
+  python3 submit_caloShowerShape.py --signal stau_stau
+
   # QCD dijet background, JZ slice 4 — paths auto-detected from the
   # GEPHadronicEventReconstruction QCD_Dijet layout:
   python3 submit_caloShowerShape.py --background --jz 4
@@ -54,6 +58,7 @@ WRAPPER = Path(__file__).parent / "run_caloShowerShape_job.sh"
 SIGNAL_STRINGS = {
     "displaced_dark_photon",
     "emerging_jets",
+    "stau_stau",
 }
 
 # Default CaloShowerShapeTriggers data layout, used to auto-fill --daod-dir /
@@ -67,6 +72,7 @@ DEFAULT_OUTPUT_DIR = f"{CALO_BASE}/ntuples"
 SIGNAL_DIRS = {
     "displaced_dark_photon": "DisplacedDarkPhoton",
     "emerging_jets":         "EmergingJets",
+    "stau_stau":             "StauStau",
 }
 
 # QCD dijet is not part of the CaloShowerShapeTriggers download: its DAODs and
@@ -76,6 +82,14 @@ GEP_PROJECT_BASE = "/data/larsonma/GEPHadronicEventReconstruction"
 DIJET_DAOD_BASE = f"{GEP_PROJECT_BASE}/JETM42_DAODs/QCD_Dijet"
 DIJET_GEP_BASE = f"{GEP_PROJECT_BASE}/GEPOutputReaderNTuples/QCD_Dijet"
 N_JZ_SLICES = 10
+
+# Signals whose inputs also live in the main GEPHadronicEventReconstruction
+# layout rather than in the CaloShowerShapeTriggers download: signal key ->
+# (DAOD base, GEP base), the sample sub-directory from SIGNAL_DIRS still applies.
+SIGNAL_BASES = {
+    "stau_stau": (f"{GEP_PROJECT_BASE}/JETM42_DAODs",
+                  f"{GEP_PROJECT_BASE}/GEPOutputReaderNTuples"),
+}
 
 _JOB_NUM_RE = re.compile(r'\.?_([\d]{5,6})\.')
 
@@ -266,10 +280,12 @@ def main():
             if sample_dir is None:
                 parser.error(f"no default data layout for signal '{args.signal}'; "
                              "pass --daod-dir/--gep-dir explicitly")
+            daod_base, gep_base = SIGNAL_BASES.get(args.signal,
+                                                   (DEFAULT_DAOD_BASE, DEFAULT_GEP_BASE))
             if not args.daod_dir:
-                args.daod_dir = find_container(os.path.join(DEFAULT_DAOD_BASE, sample_dir), "EXT1")
+                args.daod_dir = find_container(os.path.join(daod_base, sample_dir), "EXT1")
             if not args.gep_dir:
-                args.gep_dir = find_container(os.path.join(DEFAULT_GEP_BASE, sample_dir), "EXT0")
+                args.gep_dir = find_container(os.path.join(gep_base, sample_dir), "EXT0")
     if not args.output_dir:
         args.output_dir = DEFAULT_OUTPUT_DIR
 

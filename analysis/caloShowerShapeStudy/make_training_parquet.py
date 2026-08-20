@@ -66,9 +66,9 @@ import pyarrow.parquet as pq
 NLAYERS = 7
 NTUPLE_DIR = "/data/larsonma/CaloShowerShapeTriggers/ntuples"   # merged input ntuples
 OUT_DIR = "/eos/user/m/mlarson/CaloShowerDisplacement"          # parquet output (EOS)
-# Default samples processed when no input paths are given: the two merged signals
+# Default samples processed when no input paths are given: the merged signals
 # plus the ten per-slice QCD dijet ntuples (label 0).
-DEFAULT_SIGNALS = ["displaced_dark_photon", "emerging_jets"]
+DEFAULT_SIGNALS = ["displaced_dark_photon", "emerging_jets", "stau_stau"]
 # [0-9].root, not *.root: the per-job outputs (caloShowerShape_dijet_JZ9_000510.root)
 # stay in this flat directory after the hadd, so a bare wildcard would read every
 # event twice -- once per-job and once from the merged slice file.

@@ -35,7 +35,13 @@
 #   --caloshowershape  Merge caloShowerShapeNTupler per-job outputs (flat dir; one
 #                   merged file per signal/background tag)
 #   --dry-run       Print what would be done without running hadd
-#   --force         Overwrite existing merged output files
+#   --force         Overwrite existing merged output files (this is the DEFAULT)
+#   --skip-existing Merge only the bases whose {base}.root does not exist yet, leaving
+#                   already-merged configurations untouched. The fast path when the output
+#                   directory holds many configurations and only a few were just produced.
+#                   Note it skips on existence alone: if more per-job files landed after a
+#                   merge was made, that merge is stale and stays stale — the skip message
+#                   flags this case, and --force is how you rebuild it.
 #   --cleanup       Delete per-file inputs after a successful hadd
 #   --jobs N        Run N hadd processes in parallel (default: 4)
 #   --threads N     Pass -j N to hadd for multi-threaded merging (default: off)
@@ -80,6 +86,7 @@ NTUPLE_DIR="/data/larsonma/GEPHadronicEventReconstruction/ntuples/"
 NTUPLE_DIR_PU140="/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/"
 CALO_DIR="/data/larsonma/CaloShowerShapeTriggers/ntuples/"
 DRY_RUN=0
+# Overwrite merged outputs by default; --skip-existing is what turns this off.
 FORCE=1
 CLEANUP=0
 PARALLEL_JOBS=4
@@ -99,6 +106,7 @@ while [[ $# -gt 0 ]]; do
         --met)      MODE="met" ;;
         --dry-run)  DRY_RUN=1 ;;
         --force)    FORCE=1 ;;
+        --skip-existing) FORCE=0 ;;
         --cleanup)  CLEANUP=1 ;;
         --jobs)     PARALLEL_JOBS="$2"; shift ;;
         --threads)  HADD_THREADS="$2"; shift ;;
@@ -147,6 +155,26 @@ run_hadd() {
     local debug="$7"
 
     local out="${base}.root"
+
+    # --skip-existing: leave an already-merged configuration alone. Checked before the input
+    # glob so a skipped base costs a single stat rather than a glob plus a version sort —
+    # which is the whole point when the directory holds hundreds of finished configurations
+    # and only a handful were just produced.
+    if [[ -f "$out" && "$force" -eq 0 ]]; then
+        # An output older than one of its inputs means per-job files landed after it was
+        # merged, so it is a partial merge. Still skipped, since that is what was asked for,
+        # but said out loud: silently keeping a stale merge is the one way this option bites.
+        local newer
+        newer=$(find "$(dirname "$out")" -maxdepth 1 \
+                     -name "$(basename "$base")${pattern}" -newer "$out" -print -quit 2>/dev/null || true)
+        if [[ -n "$newer" ]]; then
+            echo "[skip] Already exists but INPUTS ARE NEWER — stale, use --force: $(basename "$out")"
+        else
+            echo "[skip] Already exists (--force to overwrite): $(basename "$out")"
+        fi
+        return 0
+    fi
+
     # Sort inputs with version sort so _file2.root < _file10.root (not lexicographic)
     mapfile -t inputs < <(printf '%s\n' ${base}${pattern} | sort -V)
 
@@ -162,11 +190,6 @@ run_hadd() {
         for i in "${!inputs[@]}"; do
             printf "        [%3d] %s\n" "$i" "$(basename "${inputs[$i]}")"
         done
-    fi
-
-    if [[ -f "$out" && "$force" -eq 0 ]]; then
-        echo "[skip] Already exists (--force to overwrite): $(basename "$out")"
-        return 0
     fi
 
     echo "[hadd] $(basename "$out")  ($n files)"

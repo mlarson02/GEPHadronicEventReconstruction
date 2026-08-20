@@ -26,17 +26,11 @@ void DrawATLASLabel(double /*x*/, double /*y*/, const char* /*status*/) {}
 // Ntupler functions
 // Used for digitized data writing
 struct OutputFiles {
-    std::string topo422;
-    std::string caloTopoTowers;
-    std::string gepBasicClusters;
-    std::string gepBasicClustersSK;
-    std::string gepCellTowersSK; 
     std::string gepCellTowers;
+    std::string gepCellTowersEtaSK;
     std::string gepCellTowersSort;
     std::string gepWTAConeJetsCellsTowers;
-    std::string gepWTAConeJetsBasicClusters;
-    std::string gepWTAConeJetsCellsTowersSK;
-    std::string gepWTAConeJetsBasicClustersSK;
+    std::string gepWTAConeJetsCellsTowersEtaSK;
     std::string gFex;
     std::string jFex;
 };
@@ -186,17 +180,11 @@ inline OutputFiles makeMemPrintFilenames(std::string signalString, bool signalBo
     }
 
     OutputFiles out;
-    out.topo422         = base + "CaloTopo_422/"    + tag + "_topo422.dat";
-    out.caloTopoTowers  = base + "CaloTopoTowers/"  + tag + "_calotopotowers.dat";
-    out.gepBasicClusters = base + "GEPBasicClusters/"+ tag + "_gepbasicclusters.dat";
-    out.gepBasicClustersSK = base + "GEPBasicClustersSK/"+ tag + "_gepbasicclusters.dat";
     out.gepCellTowers = base + "GEPCellsTowers/"+ tag + "_gepcellstowers.dat";
-    out.gepCellTowersSK = base + "GEPCellsTowersSK/"+ tag + "_gepcellstowerssk.dat";
+    out.gepCellTowersEtaSK = base + "GEPCellsTowersEtaSK/"+ tag + "_gepcellstowersetask.dat";
     out.gepCellTowersSort =base + "GEPCellsTowers_Sort/" + tag + "_gepcellstowers.dat";
     out.gepWTAConeJetsCellsTowers = base + "GEPConeJetsCellsTowers/"+ tag + "_gepconejetscellstowers.dat";
-    out.gepWTAConeJetsBasicClusters = base + "GEPConeJetsBasicClusters/"+ tag + "_gepconejetsbasicclusters.dat";
-    out.gepWTAConeJetsCellsTowersSK = base + "GEPConeJetsCellsTowersSK/"+ tag + "_gepconejetscellstowerssk.dat";
-    out.gepWTAConeJetsBasicClustersSK = base + "GEPConeJetsBasicClustersSK/"+ tag + "_gepconejetsbasicclusterssk.dat";
+    out.gepWTAConeJetsCellsTowersEtaSK = base + "GEPConeJetsCellsTowersEtaSK/"+ tag + "_gepconejetscellstowersetask.dat";
     out.gFex            = base + "gFex/"            + tag + "_gfex_smallrj.dat";
     out.jFex            = base + "jFex/"            + tag + "_jfex_smallrj.dat";
     return out;
@@ -407,28 +395,20 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     const unsigned int maxDatEvents = 1000;
 
     // Declare .dat output streams (only opened when writeDatFiles == true)
-    std::ofstream f_topotower, f_gepbasicclusters, f_gepcellstowers;
-    std::ofstream f_gepbasicclusterssk, f_gepcellstowerssk, f_gepcellstowers_sort;
-    std::ofstream f_wtaconejetscellstowers, f_wtaconejetsbasicclusters;
-    std::ofstream f_wtaconejetscellstowerssk, f_wtaconejetsbasicclusterssk;
-    std::ofstream f_topo, f_gfex, f_jfex;
+    std::ofstream f_gepcellstowers, f_gepcellstowersetask, f_gepcellstowers_sort;
+    std::ofstream f_wtaconejetscellstowers, f_wtaconejetscellstowersetask;
+    std::ofstream f_gfex, f_jfex;
 
     if (writeDatFiles) {
         OutputFiles out = makeMemPrintFilenames(signalString, signalBool, jzSlice, algoVersion);
-        f_topotower.open(out.caloTopoTowers);
-        f_gepbasicclusters.open(out.gepBasicClusters);
         f_gepcellstowers.open(out.gepCellTowers);
-        f_gepbasicclusterssk.open(out.gepBasicClustersSK);
-        f_gepcellstowerssk.open(out.gepCellTowersSK);
+        f_gepcellstowersetask.open(out.gepCellTowersEtaSK);
         f_gepcellstowers_sort.open(out.gepCellTowersSort);
         f_wtaconejetscellstowers.open(out.gepWTAConeJetsCellsTowers);
-        f_wtaconejetsbasicclusters.open(out.gepWTAConeJetsBasicClusters);
-        f_wtaconejetscellstowerssk.open(out.gepWTAConeJetsCellsTowersSK);
-        f_wtaconejetsbasicclusterssk.open(out.gepWTAConeJetsBasicClustersSK);
-        f_topo.open(out.topo422);
+        f_wtaconejetscellstowersetask.open(out.gepWTAConeJetsCellsTowersEtaSK);
         f_gfex.open(out.gFex);
         f_jfex.open(out.jFex);
-        if (!f_topotower.is_open() || !f_topo.is_open() || !f_gfex.is_open() || !f_jfex.is_open() || !f_gepbasicclusters.is_open() || !f_gepcellstowers.is_open() || !f_gepbasicclusterssk.is_open() || !f_gepcellstowerssk.is_open() || !f_wtaconejetscellstowers.is_open() || !f_wtaconejetsbasicclusters.is_open() || !f_wtaconejetscellstowerssk.is_open() || !f_wtaconejetsbasicclusterssk.is_open()) {
+        if (!f_gfex.is_open() || !f_jfex.is_open() || !f_gepcellstowers.is_open() || !f_gepcellstowersetask.is_open() || !f_gepcellstowers_sort.is_open() || !f_wtaconejetscellstowers.is_open() || !f_wtaconejetscellstowersetask.is_open()) {
             std::cerr << "Error: One or more .dat output files could not be opened for writing!" << std::endl;
         }
     }
@@ -2957,90 +2937,18 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 }
             }
 
-            unsigned int gepbasicclusters_it = 0;
+            // Basic clusters: ntuple branches only, no .dat memories written.
             for (unsigned int i = 0; i < gepIn_BasicClustersEt->size(); ++i) {
-                float gepBasicClusterEt  = (*gepIn_BasicClustersEt)[i] / 1000.0;
-                float gepBasicClusterEta = (*gepIn_BasicClustersEta)[i];
-                float gepBasicClusterPhi = (*gepIn_BasicClustersPhi)[i];
-
-                gepBasicClustersEtValues.push_back(gepBasicClusterEt);
-                gepBasicClustersEtaValues.push_back(gepBasicClusterEta);
-                gepBasicClustersPhiValues.push_back(gepBasicClusterPhi);
-
-                if (gepBasicClusterEt <= 0) continue; // don't store to digitized memories
-
-                // Digitize each variable
-                int phi_bin = digitize_phi(gepBasicClusterPhi);
-                int eta_bin = digitize(gepBasicClusterEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
-                int et_bin  = digitize(gepBasicClusterEt, et_bit_length_,
-                              static_cast<double>(et_min_), static_cast<double>(et_max_));
-                                        
-                // 2. Build binary string (for debug or text output)
-                std::stringstream binary_ss;
-                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
-                        << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<et_bit_length_>(et_bin);
-                std::string binary_word = binary_ss.str();
-
-                // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
-                                    (eta_bin << et_bit_length_) |
-                                    (et_bin);
-                                    
-                if (iEvt < maxDatEvents) {
-                    if (gepbasicclusters_it == 0) {
-                        f_gepbasicclusters << "Event : " << std::dec << iEvt << "\n";
-                    }
-                    // 4. Write to output file
-                    f_gepbasicclusters << "0x" << std::hex << std::setw(2) << std::setfill('0') << gepbasicclusters_it
-                                << " " << binary_word
-                                << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
-                    gepbasicclusters_it++;
-                }
-
+                gepBasicClustersEtValues.push_back((*gepIn_BasicClustersEt)[i] / 1000.0);
+                gepBasicClustersEtaValues.push_back((*gepIn_BasicClustersEta)[i]);
+                gepBasicClustersPhiValues.push_back((*gepIn_BasicClustersPhi)[i]);
             }
 
             // SK basic clusters
-            unsigned int gepbasicclusterssk_it = 0;
             for (unsigned int i = 0; i < gepIn_BasicClustersSKEt->size(); ++i) {
-                float gepBasicClusterSKEt  = (*gepIn_BasicClustersSKEt)[i] / 1000.0;
-                float gepBasicClusterSKEta = (*gepIn_BasicClustersSKEta)[i];
-                float gepBasicClusterSKPhi = (*gepIn_BasicClustersSKPhi)[i];
-
-                gepBasicClustersSKEtValues.push_back(gepBasicClusterSKEt);
-                gepBasicClustersSKEtaValues.push_back(gepBasicClusterSKEta);
-                gepBasicClustersSKPhiValues.push_back(gepBasicClusterSKPhi);
-
-                if (gepBasicClusterSKEt <= 0) continue; // don't store to digitized memories - and remove 0 Et clusters, which were already "removed" by the soft killer algorith
-
-                // Digitize each variable
-                int phi_bin = digitize_phi(gepBasicClusterSKPhi);
-                int eta_bin = digitize(gepBasicClusterSKEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
-                int et_bin  = digitize(gepBasicClusterSKEt, et_bit_length_,
-                              static_cast<double>(et_min_), static_cast<double>(et_max_));
-                                        
-                // 2. Build binary string (for debug or text output)
-                std::stringstream binary_ss;
-                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
-                        << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<et_bit_length_>(et_bin);
-                std::string binary_word = binary_ss.str();
-
-                // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
-                                    (eta_bin << et_bit_length_) |
-                                    (et_bin);
-                                    
-                if (iEvt < maxDatEvents) {
-                    if (gepbasicclusterssk_it == 0) {
-                        f_gepbasicclusterssk << "Event : " << std::dec << iEvt << "\n";
-                    }
-                    // 4. Write to output file
-                    f_gepbasicclusterssk << "0x" << std::hex << std::setw(2) << std::setfill('0') << gepbasicclusterssk_it
-                                << " " << binary_word
-                                << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
-                    gepbasicclusterssk_it++;
-                }
+                gepBasicClustersSKEtValues.push_back((*gepIn_BasicClustersSKEt)[i] / 1000.0);
+                gepBasicClustersSKEtaValues.push_back((*gepIn_BasicClustersSKEta)[i]);
+                gepBasicClustersSKPhiValues.push_back((*gepIn_BasicClustersSKPhi)[i]);
             }
 
             // ---------- gepCellsTowers ----------
@@ -3131,6 +3039,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             }
 
             // ---------- gepCellsTowers SK PU Suppression applied ----------
+            // Ntuple branches only, no .dat memories written.
             {
                 // Sort input towers by E_T descending only (no eta/phi tie-break).
                 std::vector<unsigned int> order(gepIn_CellsTowersSKEt->size());
@@ -3140,56 +3049,20 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                             return (*gepIn_CellsTowersSKEt)[a] > (*gepIn_CellsTowersSKEt)[b];
                         });
 
-                unsigned int gepcellstowerssk_it = 0;
                 for (unsigned int i : order) {
-                    float gepCellsTowersSKEtValue  = (*gepIn_CellsTowersSKEt)[i] / 1000.0f;
-                    float gepCellsTowersSKEtaValue = (*gepIn_CellsTowersSKEta)[i];
-                    float gepCellsTowersSKPhiValue = (*gepIn_CellsTowersSKPhi)[i];
-
                     // push in Et-sorted order
-                    gepCellsTowersSKEtValues.push_back(gepCellsTowersSKEtValue);
-                    gepCellsTowersSKEtaValues.push_back(gepCellsTowersSKEtaValue);
-                    gepCellsTowersSKPhiValues.push_back(gepCellsTowersSKPhiValue);
+                    gepCellsTowersSKEtValues.push_back((*gepIn_CellsTowersSKEt)[i] / 1000.0f);
+                    gepCellsTowersSKEtaValues.push_back((*gepIn_CellsTowersSKEta)[i]);
+                    gepCellsTowersSKPhiValues.push_back((*gepIn_CellsTowersSKPhi)[i]);
                     for (int l = 0; l < 7; ++l){
                         gepCellsTowersSKEt_lValues[l].push_back((*gepIn_CellsTowersSKEt_l[l])[i] / 1000.0);
                     }
-                        
-
-                    if (gepCellsTowersSKEtValue <= 0) continue; // keep your existing rule
-                    // Digitize
-                    int phi_bin = digitize_phi(gepCellsTowersSKPhiValue);
-                    int eta_bin = digitize(gepCellsTowersSKEtaValue, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
-                    int et_bin  = digitize(gepCellsTowersSKEtValue,  et_bit_length_,
-                                        static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    
-
-                    // Build binary string
-                    std::stringstream binary_ss;
-                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
-                            << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<et_bit_length_>(et_bin);
-                    std::string binary_word = binary_ss.str();
-
-                    // Pack into 27-bit word
-                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
-                                        (eta_bin << et_bit_length_) |
-                                        (et_bin);
-
-                    if (iEvt < maxDatEvents) {
-                        if (gepcellstowerssk_it == 0) {
-                            f_gepcellstowerssk << "Event : " << std::dec << iEvt << "\n";
-                        }
-                        f_gepcellstowerssk << "0x" << std::hex << std::setw(2) << std::setfill('0') << gepcellstowerssk_it
-                                        << " "  << binary_word
-                                        << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
-                    }
-                    ++gepcellstowerssk_it;
                 }
             }
 
 
             // Loop over clusters and fill Et, Eta, Phi
-            unsigned int topotower_it = 0;
+            // Ntuple branches only, no .dat memories written.
             for (const auto* cluster : *CaloCalAllTopoTowers) {
                 if (!cluster) continue;
 
@@ -3197,41 +3070,10 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 caloTopoTowerEtValues.push_back(et);
                 caloTopoTowerEtaValues.push_back(cluster->eta());
                 caloTopoTowerPhiValues.push_back(cluster->phi());
-
-                if (et <= 0) continue; // don't store to digitized memories
-
-                // Digitize each variable
-                int phi_bin = digitize_phi(cluster->phi());
-                int eta_bin = digitize(cluster->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
-                int et_bin  = digitize(et, et_bit_length_,
-                              static_cast<double>(et_min_), static_cast<double>(et_max_));
-                                        
-                // 2. Build binary string (for debug or text output)
-                std::stringstream binary_ss;
-                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
-                        << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<et_bit_length_>(et_bin);
-                std::string binary_word = binary_ss.str();
-
-                // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
-                                    (eta_bin << et_bit_length_) |
-                                    (et_bin);
-                                    
-                if (iEvt < maxDatEvents) {
-                    if (topotower_it == 0) {
-                        f_topotower << "Event : " << std::dec << iEvt << "\n";
-                    }
-                    // 4. Write to output file
-                    f_topotower << "0x" << std::hex << std::setw(2) << std::setfill('0') << topotower_it
-                                << " " << binary_word
-                                << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
-                    topotower_it++;
-                }
             }
 
-            unsigned int topocluster422_it = 0;
             // Loop over the clusters and store Et, Eta, Phi
+            // Ntuple branches only, no .dat memories written.
             for (const auto* cluster : *CaloTopoClusters422) {
                 if (!cluster) continue;
 
@@ -3239,38 +3081,6 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 topo422EtValues.push_back(et);
                 topo422EtaValues.push_back(cluster->eta());
                 topo422PhiValues.push_back(cluster->phi());
-
-                if (et <= 0) continue; // FIXME for now don't store negative Et to digitized memories
-                // Digitize each variable
-                int phi_bin = digitize_phi(cluster->phi());
-                int eta_bin = digitize(cluster->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
-                int et_bin  = digitize(et, et_bit_length_,
-                              static_cast<double>(et_min_), static_cast<double>(et_max_));
-
-                //std::cout << "eta: " << cluster->eta() << " and eta_bin : " << eta_bin << "\n";
-                                        
-                // 2. Build binary string (for debug or text output)
-                std::stringstream binary_ss;
-                binary_ss << std::bitset<phi_bit_length_>(phi_bin) << "|"
-                        << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                        << std::bitset<et_bit_length_>(et_bin);
-                std::string binary_word = binary_ss.str();
-
-                // 3. Pack into 27-bit word (stored as uint32_t)
-                uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
-                                    (eta_bin << et_bit_length_) |
-                                    (et_bin);
-
-                //std::cout << "binary: " << binary_word << "\n";
-
-                // 4. Write to output file
-                /*if (topocluster422_it == 0) {
-                    f_topo << "Event : " << std::dec << iEvt << "\n";
-                }
-                f_topo << "0x" << std::hex << std::setw(2) << std::setfill('0') << topocluster422_it
-                        << " " << binary_word
-                        << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
-                topocluster422_it++; */
             }
 
             // GEP cone jets from GEPCellsTowers
@@ -3358,6 +3168,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             }
 
             // GEP cone jets from GEPCellsTowers with SoftKiller PU Suppression applied
+            // Ntuple branches only, no .dat memories written.
             //std::cout << "gepIn_WTAConeCellsTowersSKJetsPt->size(): " << gepIn_WTAConeCellsTowersSKJetsPt->size() << "\n";
             if(gepIn_WTAConeCellsTowersSKJetsPt->size() == 0) std::cout << "NO WTA CONE JETS FOR THIS EVENT!" << "\n";
             {
@@ -3368,7 +3179,6 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                         [&](unsigned int a, unsigned int b) {
                             return (*gepIn_WTAConeCellsTowersSKJetsPt)[a] > (*gepIn_WTAConeCellsTowersSKJetsPt)[b];
                         });
-                unsigned int gepwtaconecellstowerssk_it = 0;
                 for (unsigned int i = 0; i < indices.size(); i++) {
                     unsigned int idx = indices[i];
                     float WTAConeCellsTowersSKJetspT  = (*gepIn_WTAConeCellsTowersSKJetsPt)[idx] / 1000.0;
@@ -3410,42 +3220,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepWTAConeCellsTowersSKJetsNConstituentsValues.push_back(WTAConeCellsTowersSKJetsNConstituents);
                     gepWTAConeCellsTowersSKJetsRing0Et.push_back(ctsk_r0Et); gepWTAConeCellsTowersSKJetsRing1Et.push_back(ctsk_r1Et); gepWTAConeCellsTowersSKJetsRing2Et.push_back(ctsk_r2Et); gepWTAConeCellsTowersSKJetsRing3Et.push_back(ctsk_r3Et); gepWTAConeCellsTowersSKJetsRing4Et.push_back(ctsk_r4Et);
                     gepWTAConeCellsTowersSKJetsTotalTobN.push_back(ctsk_totN); gepWTAConeCellsTowersSKJetsRing0TobN.push_back(ctsk_r0N); gepWTAConeCellsTowersSKJetsRing1TobN.push_back(ctsk_r1N); gepWTAConeCellsTowersSKJetsRing2TobN.push_back(ctsk_r2N); gepWTAConeCellsTowersSKJetsRing3TobN.push_back(ctsk_r3N); gepWTAConeCellsTowersSKJetsRing4TobN.push_back(ctsk_r4N);
-
-                    if (WTAConeCellsTowersSKJetspT <= 0) continue; // don't want to skip over  == 0 Et cone jets 
-
-                    int phi_bin = digitize_phi(WTAConeCellsTowersSKJetsPhi);
-                    int eta_bin = digitize(WTAConeCellsTowersSKJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
-                    //std::cout << "WTAConeCellsTowersSKJetsEta: " << WTAConeCellsTowersSKJetsEta << " , eta_bit_length_: " << eta_bit_length_ << "\n";
-                    //std::cout << "eta min: " << eta_min_ << " , eta_max_: " << eta_max_ << " , etaAltRange: " << etaAltRange << "\n";
-                    //std::cout << "eta_bin: " << eta_bin << "\n";
-                    int pt_bin  = digitize(WTAConeCellsTowersSKJetspT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
-                                        static_cast<double>(et_min_), static_cast<double>(et_max_));
-
-                    std::stringstream binary_ss;
-                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
-                            << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<et_bit_length_>(pt_bin);
-                    std::string binary_word = binary_ss.str();
-
-                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
-                                        (eta_bin << et_bit_length_) |
-                                        (pt_bin);
-
-
-                    if (iEvt < maxDatEvents) {
-                        if (gepwtaconecellstowerssk_it == 0) {
-                            f_wtaconejetscellstowerssk << "Event : " << std::dec << iEvt << "\n";
-                        }
-                        f_wtaconejetscellstowerssk << "0x" << std::hex << std::setw(2) << std::setfill('0') << gepwtaconecellstowerssk_it
-                                            << " "  << binary_word
-                                            << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
-                    }
-                    ++gepwtaconecellstowerssk_it;
-
                 }
             }
 
             // GEP cone jets from basic clusters
+            // Ntuple branches only, no .dat memories written.
             {
                 std::vector<unsigned int> indices(gepIn_WTAConeBasicClustersJetsPt->size());
                 std::iota(indices.begin(), indices.end(), 0);
@@ -3454,7 +3233,6 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                         [&](unsigned int a, unsigned int b) {
                             return (*gepIn_WTAConeBasicClustersJetsPt)[a] > (*gepIn_WTAConeBasicClustersJetsPt)[b];
                         });
-                unsigned int gepwtaconebasicclusters_it = 0;
                 for (unsigned int i = 0; i < indices.size(); i++) {
                     unsigned int idx = indices[i];
                     float coneWTAGEPBasicClustersJetspT  = (*gepIn_WTAConeBasicClustersJetsPt)[idx] / 1000.0;
@@ -3495,39 +3273,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepWTAConeGEPBasicClustersJetsNConstituentsValues.push_back(coneWTAGEPBasicClustersJetsNConstituents);
                     gepWTAConeBasicClustersJetsRing0Et.push_back(bc_r0Et); gepWTAConeBasicClustersJetsRing1Et.push_back(bc_r1Et); gepWTAConeBasicClustersJetsRing2Et.push_back(bc_r2Et); gepWTAConeBasicClustersJetsRing3Et.push_back(bc_r3Et); gepWTAConeBasicClustersJetsRing4Et.push_back(bc_r4Et);
                     gepWTAConeBasicClustersJetsTotalTobN.push_back(bc_totN); gepWTAConeBasicClustersJetsRing0TobN.push_back(bc_r0N); gepWTAConeBasicClustersJetsRing1TobN.push_back(bc_r1N); gepWTAConeBasicClustersJetsRing2TobN.push_back(bc_r2N); gepWTAConeBasicClustersJetsRing3TobN.push_back(bc_r3N); gepWTAConeBasicClustersJetsRing4TobN.push_back(bc_r4N);
-
-                    if (coneWTAGEPBasicClustersJetspT <= 0) continue;
-
-                    int phi_bin = digitize_phi(coneWTAGEPBasicClustersJetsPhi);
-                    int eta_bin = digitize(coneWTAGEPBasicClustersJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
-                    int pt_bin  = digitize(coneWTAGEPBasicClustersJetspT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
-                                        static_cast<double>(et_min_), static_cast<double>(et_max_));
-
-                    std::stringstream binary_ss;
-                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
-                            << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<et_bit_length_>(pt_bin);
-                    std::string binary_word = binary_ss.str();
-
-                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
-                                        (eta_bin << et_bit_length_) |
-                                        (pt_bin);
-
-
-                    if (iEvt < maxDatEvents) {
-                        if (gepwtaconebasicclusters_it == 0) {
-                            f_wtaconejetsbasicclusters << "Event : " << std::dec << iEvt << "\n";
-                        }
-                        f_wtaconejetsbasicclusters << "0x" << std::hex << std::setw(2) << std::setfill('0') << gepwtaconebasicclusters_it
-                                            << " "  << binary_word
-                                            << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
-                    }
-                    ++gepwtaconebasicclusters_it;
-
                 }
             }
 
             // GEP cone jets from basic clusters with SoftKiller PU Suppression applied
+            // Ntuple branches only, no .dat memories written.
             {
                 std::vector<unsigned int> indices(gepIn_WTAConeBasicClustersSKJetsPt->size());
                 std::iota(indices.begin(), indices.end(), 0);
@@ -3536,7 +3286,6 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                         [&](unsigned int a, unsigned int b) {
                             return (*gepIn_WTAConeBasicClustersSKJetsPt)[a] > (*gepIn_WTAConeBasicClustersSKJetsPt)[b];
                         });
-                unsigned int gepwtaconebasicclusterssk_it = 0;
                 for (unsigned int i = 0; i < indices.size(); i++) {
                     unsigned int idx = indices[i];
                     float coneWTAGEPBasicClustersSKJetspT  = (*gepIn_WTAConeBasicClustersSKJetsPt)[idx] / 1000.0;
@@ -3577,33 +3326,6 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepWTAConeGEPBasicClustersSKJetsNConstituentsValues.push_back(coneWTAGEPBasicClustersSKJetsNConstituents);
                     gepWTAConeBasicClustersSKJetsRing0Et.push_back(bcsk_r0Et); gepWTAConeBasicClustersSKJetsRing1Et.push_back(bcsk_r1Et); gepWTAConeBasicClustersSKJetsRing2Et.push_back(bcsk_r2Et); gepWTAConeBasicClustersSKJetsRing3Et.push_back(bcsk_r3Et); gepWTAConeBasicClustersSKJetsRing4Et.push_back(bcsk_r4Et);
                     gepWTAConeBasicClustersSKJetsTotalTobN.push_back(bcsk_totN); gepWTAConeBasicClustersSKJetsRing0TobN.push_back(bcsk_r0N); gepWTAConeBasicClustersSKJetsRing1TobN.push_back(bcsk_r1N); gepWTAConeBasicClustersSKJetsRing2TobN.push_back(bcsk_r2N); gepWTAConeBasicClustersSKJetsRing3TobN.push_back(bcsk_r3N); gepWTAConeBasicClustersSKJetsRing4TobN.push_back(bcsk_r4N);
-
-                    if (coneWTAGEPBasicClustersSKJetspT <= 0) continue;
-
-                    int phi_bin = digitize_phi(coneWTAGEPBasicClustersSKJetsPhi);
-                    int eta_bin = digitize(coneWTAGEPBasicClustersSKJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
-                    int pt_bin  = digitize(coneWTAGEPBasicClustersSKJetspT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
-                                        static_cast<double>(et_min_), static_cast<double>(et_max_));
-
-                    std::stringstream binary_ss;
-                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
-                            << std::bitset<eta_bit_length_>(eta_bin) << "|"
-                            << std::bitset<et_bit_length_>(pt_bin);
-                    std::string binary_word = binary_ss.str();
-
-                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
-                                        (eta_bin << et_bit_length_) |
-                                        (pt_bin);
-
-                    if (iEvt < maxDatEvents) {
-                        if (gepwtaconebasicclusterssk_it == 0) {
-                            f_wtaconejetsbasicclusterssk << "Event : " << std::dec << iEvt << "\n";
-                        }
-                        f_wtaconejetsbasicclusterssk << "0x" << std::hex << std::setw(2) << std::setfill('0') << gepwtaconebasicclusterssk_it
-                                            << " "  << binary_word
-                                            << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
-                    }
-                    ++gepwtaconebasicclusterssk_it;
                 }
             }
 
@@ -3852,12 +3574,47 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                         [&](unsigned int a, unsigned int b){
                             return (*gepIn_CellsTowersEtaSKEt)[a] > (*gepIn_CellsTowersEtaSKEt)[b];
                         });
+                unsigned int gepcellstowersetask_it = 0;
                 for (unsigned int i : order) {
-                    gepCellsTowersEtaSKEtValues.push_back((*gepIn_CellsTowersEtaSKEt)[i] / 1000.0);
-                    gepCellsTowersEtaSKEtaValues.push_back((*gepIn_CellsTowersEtaSKEta)[i]);
-                    gepCellsTowersEtaSKPhiValues.push_back((*gepIn_CellsTowersEtaSKPhi)[i]);
+                    float gepCellsTowersEtaSKEtValue  = (*gepIn_CellsTowersEtaSKEt)[i] / 1000.0f;
+                    float gepCellsTowersEtaSKEtaValue = (*gepIn_CellsTowersEtaSKEta)[i];
+                    float gepCellsTowersEtaSKPhiValue = (*gepIn_CellsTowersEtaSKPhi)[i];
+
+                    gepCellsTowersEtaSKEtValues.push_back(gepCellsTowersEtaSKEtValue);
+                    gepCellsTowersEtaSKEtaValues.push_back(gepCellsTowersEtaSKEtaValue);
+                    gepCellsTowersEtaSKPhiValues.push_back(gepCellsTowersEtaSKPhiValue);
                     for (int l = 0; l < 7; ++l)
                         gepCellsTowersEtaSKEt_lValues[l].push_back((*gepIn_CellsTowersEtaSKEt_l[l])[i] / 1000.0);
+
+                    if (gepCellsTowersEtaSKEtValue <= 0) continue; // don't store to digitized memories
+
+                    // Digitize
+                    int phi_bin = digitize_phi(gepCellsTowersEtaSKPhiValue);
+                    int eta_bin = digitize(gepCellsTowersEtaSKEtaValue, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
+                    int et_bin  = digitize(gepCellsTowersEtaSKEtValue,  et_bit_length_,
+                                        static_cast<double>(et_min_), static_cast<double>(et_max_));
+
+                    // Build binary string
+                    std::stringstream binary_ss;
+                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
+                            << std::bitset<eta_bit_length_>(eta_bin) << "|"
+                            << std::bitset<et_bit_length_>(et_bin);
+                    std::string binary_word = binary_ss.str();
+
+                    // Pack into 27-bit word
+                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                        (eta_bin << et_bit_length_) |
+                                        (et_bin);
+
+                    if (iEvt < maxDatEvents) {
+                        if (gepcellstowersetask_it == 0) {
+                            f_gepcellstowersetask << "Event : " << std::dec << iEvt << "\n";
+                        }
+                        f_gepcellstowersetask << "0x" << std::hex << std::setw(2) << std::setfill('0') << gepcellstowersetask_it
+                                        << " "  << binary_word
+                                        << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
+                    }
+                    ++gepcellstowersetask_it;
                 }
             }
 
@@ -3876,6 +3633,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     [&](unsigned int a, unsigned int b) {
                         return (*gepIn_WTAConeCellsTowersEtaSKJetsPt)[a] > (*gepIn_WTAConeCellsTowersEtaSKJetsPt)[b];
                     });
+                unsigned int gepwtaconecellstowersetask_it = 0;
                 for (unsigned int i = 0; i < indices.size(); i++) {
                     unsigned int idx = indices[i];
                     float etaskct_pT  = (*gepIn_WTAConeCellsTowersEtaSKJetsPt)[idx] / 1000.0;
@@ -3915,6 +3673,33 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                     gepWTAConeCellsTowersEtaSKJetsNConstituentsValues.push_back(etaskct_nc);
                     gepWTAConeCellsTowersEtaSKJetsRing0Et.push_back(etaskct_r0Et); gepWTAConeCellsTowersEtaSKJetsRing1Et.push_back(etaskct_r1Et); gepWTAConeCellsTowersEtaSKJetsRing2Et.push_back(etaskct_r2Et); gepWTAConeCellsTowersEtaSKJetsRing3Et.push_back(etaskct_r3Et); gepWTAConeCellsTowersEtaSKJetsRing4Et.push_back(etaskct_r4Et);
                     gepWTAConeCellsTowersEtaSKJetsTotalTobN.push_back(etaskct_totN); gepWTAConeCellsTowersEtaSKJetsRing0TobN.push_back(etaskct_r0N); gepWTAConeCellsTowersEtaSKJetsRing1TobN.push_back(etaskct_r1N); gepWTAConeCellsTowersEtaSKJetsRing2TobN.push_back(etaskct_r2N); gepWTAConeCellsTowersEtaSKJetsRing3TobN.push_back(etaskct_r3N); gepWTAConeCellsTowersEtaSKJetsRing4TobN.push_back(etaskct_r4N);
+
+                    if (etaskct_pT <= 0) continue; // don't store to digitized memories
+
+                    int phi_bin = digitize_phi(etaskct_phi);
+                    int eta_bin = digitize(etaskct_eta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
+                    int pt_bin  = digitize(etaskct_pT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
+                                        static_cast<double>(et_min_), static_cast<double>(et_max_));
+
+                    std::stringstream binary_ss;
+                    binary_ss << std::bitset<phi_bit_length_>(phi_bin)  << "|"
+                            << std::bitset<eta_bit_length_>(eta_bin) << "|"
+                            << std::bitset<et_bit_length_>(pt_bin);
+                    std::string binary_word = binary_ss.str();
+
+                    uint32_t packed_word = (phi_bin << (eta_bit_length_ + et_bit_length_)) |
+                                        (eta_bin << et_bit_length_) |
+                                        (pt_bin);
+
+                    if (iEvt < maxDatEvents) {
+                        if (gepwtaconecellstowersetask_it == 0) {
+                            f_wtaconejetscellstowersetask << "Event : " << std::dec << iEvt << "\n";
+                        }
+                        f_wtaconejetscellstowersetask << "0x" << std::hex << std::setw(2) << std::setfill('0') << gepwtaconecellstowersetask_it
+                                            << " "  << binary_word
+                                            << " 0x" << std::setw(8) << std::setfill('0') << packed_word << "\n";
+                    }
+                    ++gepwtaconecellstowersetask_it;
                 }
             }
 
@@ -4694,7 +4479,7 @@ void HERNTupler(){
     // (paths overridden inside nTupler), then feed its output to the emulation
     // (jetTaggerConfigLocal.sh with trigGepPerfValidation=true).
     const bool trigGepPerfValidation = true;
-    const unsigned int trigGepPerfValidationAlgoVersion = 3; // 2 = basic sample, 3 = advanced sample
+    const unsigned int trigGepPerfValidationAlgoVersion = 2; // 2 = basic sample, 3 = advanced sample
     if (trigGepPerfValidation) {
         const unsigned int etaAltRange = eta_range_; // 98 for both versions, see analysisHelperFunctions.h
         nTupler(/*signalBool=*/true, /*signalString=*/"ggF_hh_bbbb", etaAltRange, trigGepPerfValidationAlgoVersion,

@@ -212,6 +212,22 @@ FileInfo ParseFileName(const std::string& path)
     return info;
 }
 
+// Set false to print the bare seed name in legends, with no subjet E_T suffix. Only
+// worth turning on when the overlaid files differ in subjet E_T threshold.
+const bool label_subjet_et_threshold_in_legends_ = true;
+
+// Seed text for plot legends: the seed name plus the subjet E_T threshold it was run
+// with, e.g. "jFEX, 35 GeV". Kept to a bare ", <N> GeV" suffix so the legends still
+// fit when several subjet E_T scan points are overlaid.
+std::string SeedLegendLabel(const FileInfo& info) {
+    if(!label_subjet_et_threshold_in_legends_) return info.seedObjectType;
+    return info.seedObjectType + Form(", %g GeV", info.subjetEtThreshold);
+}
+
+std::string SeedLegendLabel(const std::string& path) {
+    return SeedLegendLabel(ParseFileName(path));
+}
+
 
 double clamp200(double input){
   return std::min(input, 199.9);
@@ -4524,15 +4540,15 @@ constexpr unsigned int et_bit_length_ = 13;
 constexpr unsigned int et_min_ = 0;
 constexpr unsigned int et_max_ = 2048; // = et_granularity_ * (1 << et_bit_length_)
 
-//constexpr unsigned int eta_bit_length_ = 10; // v2 TOB field width
-constexpr unsigned int eta_bit_length_ = 7;
+constexpr unsigned int eta_bit_length_ = 10; // v2 TOB field width
+//constexpr unsigned int eta_bit_length_ = 7;
 constexpr unsigned int eta_range_ = 98; // 98 towers of 0.1 -> |eta| < 4.9, both versions
 constexpr double eta_granularity_ = 0.1;
 constexpr double eta_min_ = -4.85;
 constexpr double eta_max_ = eta_min_ + eta_range_ * eta_granularity_; // 4.95
 
-//constexpr unsigned int phi_bit_length_ = 9; // v2 TOB field width
-constexpr unsigned int phi_bit_length_ = 6;
+constexpr unsigned int phi_bit_length_ = 9; // v2 TOB field width
+//constexpr unsigned int phi_bit_length_ = 6;
 constexpr unsigned int phi_range_ = 64; // 64 towers of pi/32 -> exactly 2*pi, both versions
 constexpr double phi_granularity_ = M_PI / 32.0;
 constexpr double phi_min_ = -M_PI + M_PI / 64.0;

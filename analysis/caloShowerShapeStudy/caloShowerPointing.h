@@ -8,6 +8,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <string>
 #include <vector>
 
 #include "TMatrixD.h"
@@ -38,8 +40,26 @@ static const double kEtaBarrelLimit = 1.5;
 //                      keeps them the same. A tight fit cone (0.15-0.2) keeps the
 //                      centroid on the core while the layer fractions still use
 //                      the full cone.
-static const double kFitEtWeightPower = 1.0;
-static const double kFitRassoc        = -1.0;
+static const double kFitEtWeightPower = 2.0;
+static const double kFitRassoc        = 0.2;
+
+// --- output tagging ---------------------------------------------------------
+// Every knob that changes a distribution goes into the output directory name, so
+// two configurations cannot silently overwrite each other's PDFs and a directory
+// listing is a record of what was run. "1.2" -> "1p20", a disabled option -> "off".
+static inline std::string numTag(double v, int prec = 2) {
+    if (v < 0) return "off";
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.*f", prec, v);
+    std::string s(buf);
+    for (size_t i = 0; i < s.size(); ++i) if (s[i] == '.') s[i] = 'p';
+    return s;
+}
+
+// Fit-side configuration (this header's knobs), e.g. "etw2p00_rfitoff".
+static inline std::string fitConfigTag() {
+    return "etw" + numTag(kFitEtWeightPower) + "_rfit" + numTag(kFitRassoc);
+}
 
 static inline double caloShowerDR(double e1, double p1, double e2, double p2) {
     double dp = std::fabs(p1 - p2);

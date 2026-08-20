@@ -6,6 +6,13 @@ DAOD_BASE=/data/larsonma/CaloShowerShapeTriggers/JETM42_DAODs
 GEP_BASE=/data/larsonma/CaloShowerShapeTriggers/GEPOutputReaderNTuples
 OUT_BASE=/data/larsonma/CaloShowerShapeTriggers/ntuples
 
+# Samples that are not part of the CaloShowerShapeTriggers download (stau, and
+# the QCD dijet slices below) live under the main GEPHadronicEventReconstruction
+# layout instead.
+GEP_PROJECT_BASE=/data/larsonma/GEPHadronicEventReconstruction
+GEP_PROJECT_DAOD_BASE=$GEP_PROJECT_BASE/JETM42_DAODs
+GEP_PROJECT_GEP_BASE=$GEP_PROJECT_BASE/GEPOutputReaderNTuples
+
 # Find the unique user.mlarson*_EXT{0,1} subdirectory under a given base path.
 find_container() {
     local base="$1" ext="$2"
@@ -37,6 +44,13 @@ submit emerging_jets \
     --signal emerging_jets \
     --daod-dir "$(find_container $DAOD_BASE/EmergingJets EXT1)" \
     --gep-dir  "$(find_container $GEP_BASE/EmergingJets  EXT0)" \
+    --output-dir $OUT_BASE
+
+# --- Signal: long-lived stau (stau-stau direct production, 500 GeV / 10 ns) ---
+submit stau_stau \
+    --signal stau_stau \
+    --daod-dir "$(find_container $GEP_PROJECT_DAOD_BASE/StauStau EXT1)" \
+    --gep-dir  "$(find_container $GEP_PROJECT_GEP_BASE/StauStau  EXT0)" \
     --output-dir $OUT_BASE
 
 # --- Background: QCD dijet, JZ0-9.

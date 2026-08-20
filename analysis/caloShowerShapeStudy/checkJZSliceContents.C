@@ -110,7 +110,7 @@ void checkJZSliceContents(std::string gepFile = "") {
                       + std::to_string(jz) + ".root";
         auditFile(p, "JZ" + std::to_string(jz));
     }
-    for (const char* s : {"displaced_dark_photon", "emerging_jets"}) {
+    for (const char* s : {"displaced_dark_photon", "emerging_jets", "stau_stau"}) {
         std::string p = std::string(kNtupleDir) + "/caloShowerShape_" + s + ".root";
         auditFile(p, s);
     }

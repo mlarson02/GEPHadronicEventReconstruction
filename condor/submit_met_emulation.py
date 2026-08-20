@@ -30,16 +30,32 @@ WRAPPER = Path(__file__).parent / "run_met_emulation_job.sh"
 # ---------------------------------------------------------------------------
 SIGNALS        = [True, False]
 SIGNAL_STRINGS = ["ZvvHbb", "ttbar_semilep", "ttbar_dilep", "Zmumu"]   # only used when signal=True
-PU_SUPPRESSION = [True]
+PU_SUPPRESSION = [True, False]
 JET_ET_THRESHOLDS        = [15.0]
-DO_JET_TOWER_OR          = [True]
+DO_JET_TOWER_OR          = [False]
 TOWER_ET_THRESHOLDS      = [2.0]
-ETA_SK_OBJECTS           = [True]
+ETA_SK_OBJECTS           = [True, False]
 # (towerScaleFactor, jetScaleFactor) pairs applied in the totalMET sum.
 # Default (1.0, 1.0); test pair (0.4, 1.0) to down-weight tower contribution.
 #SCALE_FACTOR_PAIRS       = [(1.0, 1.0), (1.0, 0.5), (0.2, 0.5), (0.4, 1.0)]
 #SCALE_FACTOR_PAIRS       = [(0.4, 1.0),(0.3, 1.0),(0.2, 1.0),(0.6, 1.0),(0.1, 1.0),(0.7, 1.0)]
-SCALE_FACTOR_PAIRS       = [(0.5, 1.0)]
+SCALE_FACTOR_PAIRS       = [(1.0, 1.0)]
+
+# --- Produced 08192026: the single point missing from the Z->mumu OR comparison --------------
+# EtaSK / jetEt15 / towerEt2 / NoOR / twrSF0p5 / jetSF1, for the Zmumu signal and the dijet
+# background, at the default --pu 200. Both outputs exist and are merged, so this grid is done;
+# kept for the record and to re-run from if either output ever has to be rebuilt.
+#SIGNALS        = [True, False]        # True -> Zmumu signal, False -> BACKGROUND (JZ dijet)
+#SIGNAL_STRINGS = ["Zmumu"]            # only used when signal=True
+## EtaSK is selected by ETA_SK_OBJECTS=True; PU_SUPPRESSION must be True alongside it, since
+## the output tag is EtaSK either way and running both values would give two jobs writing the
+## same filename.
+#PU_SUPPRESSION = [True]
+#JET_ET_THRESHOLDS        = [15.0]
+#DO_JET_TOWER_OR          = [False]    # NoOR
+#TOWER_ET_THRESHOLDS      = [2.0]
+#ETA_SK_OBJECTS           = [True]     # EtaSK
+#SCALE_FACTOR_PAIRS       = [(0.5, 1.0)]
 # Number of input HERNTupler ntuples processed per Condor job.
 # Each job hadds its assigned inputs on the worker (preserving the sorted
 # order) and runs metEmulation once on the merged input — this amortises

@@ -6,7 +6,7 @@
 // to displaced truth-BSM particles (signal), or of the leading jets (dijet
 // background). Three views per event: r-z, transverse (x-y), and 3D.
 //
-//   # both signals + the QCD dijet background, into plots/<label>/ (no args):
+//   # all signals + the QCD dijet background, into plots/<label>/ (no args):
 //   root -b -l -q 'caloShowerEventDisplays.C'
 //   # or one sample explicitly:
 //   root -b -q 'caloShowerEventDisplays.C("in.root","displaced_dark_photon",false,20,"plots/")'
@@ -129,6 +129,35 @@ static const char* kTowerTreeFallback = "gepCellsTowersEtaSKTree";
 // study measures. Mirrors kRunLRJ in caloShowerShapePlots.C.
 static const bool kRunLRJ = false;
 
+// Barrel-only, mirroring kMaxJetAbsEta in caloShowerShapePlots.C: with the nominal
+// geometry the barrel/endcap switch at |eta| = 1.5 and the endcap r = z/sinh(eta)
+// sensitivity both fake a large DCA3D, so restricting to central jets shows what the
+// fit does where the geometry is well behaved. -1 keeps all jets.
+static const double kMaxJetAbsEta = 1.2;
+
+// Set to a non-empty string to name the output sub-directory by hand instead of
+// from the knobs.
+static const char* kOutputTagOverride = "";
+
+// Short name for the tower collection in use.
+static inline std::string towerTag(const std::string& tree) {
+    if (tree.find("EtaSK") != std::string::npos) return "EtaSK";
+    if (tree.find("SK")    != std::string::npos) return "SK";
+    return "noSK";
+}
+
+// Same scheme as caloShowerShapePlots.C: the knobs that change what is drawn become
+// the output sub-directory, so plots/<label>/<tag>/ keeps configurations apart.
+static std::string displayConfigTag(double etMinTower) {
+    if (kOutputTagOverride && kOutputTagOverride[0]) return kOutputTagOverride;
+    std::string t = towerTag(kTowerTree);
+    t += "_twrEt" + numTag(etMinTower);
+    t += "_eta"   + numTag(kMaxJetAbsEta, 1);
+    t += "_"      + fitConfigTag();
+    if (kRunLRJ) t += "_withLRJ";
+    return t;
+}
+
 // Depth gradient EM(inner, blue) -> HAD(outer, red) so color encodes shower depth.
 static       int    kLayerColor[7] = { 616, 600, 860, 433, 418, 807, 632 };
 //                                     kMag  kBlu kAz  kCy+ kGr+ kOr+ kRed
@@ -250,7 +279,7 @@ void caloShowerEventDisplays(std::string inputFile = "",
                              double      etMinTower  = 0.0,
                              bool        useTruth    = false)  // false = leading jets, skip truth overlay
 {
-    // No-arg default (root -b -l -q 'caloShowerEventDisplays.C'): both signals plus
+    // No-arg default (root -b -l -q 'caloShowerEventDisplays.C'): every signal plus
     // the QCD dijet background, each written into its own plots/<label>/ dir.
     // Pass an inputFile explicitly to process a single sample.
     if (inputFile.empty()) {
@@ -258,6 +287,7 @@ void caloShowerEventDisplays(std::string inputFile = "",
         const std::vector<Sample> samples = {
             {"/data/larsonma/CaloShowerShapeTriggers/ntuples/caloShowerShape_displaced_dark_photon.root", "displaced_dark_photon", false},
             {"/data/larsonma/CaloShowerShapeTriggers/ntuples/caloShowerShape_emerging_jets.root",         "emerging_jets",         false},
+            {"/data/larsonma/CaloShowerShapeTriggers/ntuples/caloShowerShape_stau_stau.root",             "stau_stau",             false},
             // QCD dijet: the ten slices chained, so the drawn events span JZ0-9
             // (see the [0-9] note above). No truth to overlay -- these jets are
             // prompt by construction, which is exactly the point of looking at
@@ -269,8 +299,10 @@ void caloShowerEventDisplays(std::string inputFile = "",
         // no-arg default draws leading jets (jets + towers only, no truth overlay).
         // Flip to true to require displaced-BSM matching once truth is sorted out.
         const bool useTruthDefault = false;
+        const std::string cfgTag = displayConfigTag(etMinTower);
+        std::cout << "[caloShowerEventDisplays] configuration: " << cfgTag << "\n";
         for (const auto& s : samples) {
-            std::string od = std::string("plots/") + s.label;
+            std::string od = std::string("plots/") + s.label + "/" + cfgTag;
             gSystem->mkdir(od.c_str(), kTRUE);
             std::cout << "[caloShowerEventDisplays] === " << s.label << " -> " << od
                       << "/  (isDijet=" << s.isDijet << ", useTruth=" << useTruthDefault << ") ===\n";
@@ -508,6 +540,13 @@ void caloShowerEventDisplays(std::string inputFile = "",
             } else {
                 if (wta_pt) for (size_t j=0;j<wta_pt->size();++j)
                     jets.push_back({ (*wta_eta)[j], (*wta_phi)[j], (*wta_pt)[j] });
+            }
+            // Barrel-only: drop forward jets before the leading/subleading pick, so a
+            // page never spends its slots on jets the plots macro is excluding.
+            if (kMaxJetAbsEta > 0.0) {
+                std::vector<std::array<double,3>> central;
+                for (const auto& j : jets) if (std::fabs(j[0]) <= kMaxJetAbsEta) central.push_back(j);
+                jets.swap(central);
             }
             if (jets.empty()) continue;
 
@@ -770,6 +809,8 @@ void caloShowerEventDisplays(std::string inputFile = "",
             leg->SetBorderSize(0); leg->Draw(); garbage.push_back(leg);
             TLatex* note=new TLatex(); note->SetNDC(); note->SetTextSize(0.030);
             note->DrawLatex(0.05,0.26,Form("#splitline{marker size #propto layer E_{T}}{%d matched jet(s)}",(int)selJets.size()));
+            { TLatex* cfg=new TLatex(); cfg->SetNDC(); cfg->SetTextSize(0.022);
+              cfg->DrawLatex(0.05,0.30,displayConfigTag(etMinTower).c_str()); garbage.push_back(cfg); }
             // Towers / lit layers per jet, in leading-then-subleading order. Printed
             // next to the fitted DCA3D because the two go together: a jet with a
             // handful of towers spread over one or two layers has no lever arm, and

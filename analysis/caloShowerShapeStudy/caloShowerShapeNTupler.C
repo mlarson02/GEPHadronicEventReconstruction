@@ -64,12 +64,14 @@
 // ---------------------------------------------------------------------------
 // Shower-parent selection + debug.
 // The shower-initiating LLPs (dark photon Zd -> e+ e-, diagonal dark pion 4900111
-// -> q qbar) decay to Standard-Model products at a displaced vertex; that decay
+// -> q qbar, long-lived stau 1000015 -> tau + LSP) decay to Standard-Model
+// products at a displaced vertex; that decay
 // vertex is the displacement label for the regression model. Those decay vertices
 // are NOT in TruthBSM but ARE in TruthBSMWithDecayParticles (BSM particles + their
 // decay products) -- which is what showerParentTree reads.
-//   * kShowerParentPdgIds empty -> auto-select: a BSM parent (|pdgId|>=4900000 or
-//     Zd=32) with a decay vertex that decays to >=1 visible SM particle.
+//   * kShowerParentPdgIds empty -> auto-select: a BSM parent (|pdgId|>=4900000,
+//     Zd=32, or a SUSY sparticle 1000000<=|pdgId|<3000000, e.g. the long-lived
+//     stau 1000015) with a decay vertex that decays to >=1 visible SM particle.
 //   * kShowerParentPdgIds set   -> select exactly those |pdgId| (with a decay vtx).
 // Read pdgIds/children off the "[BSMwithDecay dump]" printouts to verify.
 // ---------------------------------------------------------------------------
@@ -620,8 +622,11 @@ void caloShowerShapeNTupler(bool signalBool,
         const xAOD::TruthParticleContainer* bsmDecay = nullptr;
         bool haveBsmDecay = event.retrieve(bsmDecay, "TruthBSMWithDecayParticles").isSuccess() && bsmDecay;
 
-        // parent is BSM (dark sector 4900xxx, or Zd=32); child is a visible SM particle.
-        auto isBSM = [](int pid){ int a = pid < 0 ? -pid : pid; return a >= 4900000 || a == 32; };
+        // parent is BSM (dark sector 4900xxx, Zd=32, or a SUSY sparticle 1000xxx /
+        // 2000xxx -- the long-lived stau is 1000015/2000015); child is a visible SM
+        // particle.
+        auto isBSM = [](int pid){ int a = pid < 0 ? -pid : pid;
+            return a >= 4900000 || a == 32 || (a >= 1000000 && a < 3000000); };
         auto isVisibleSM = [](int pid){ int a = pid < 0 ? -pid : pid;
             return a > 0 && a < 4900000 && a != 12 && a != 14 && a != 16; };  // exclude neutrinos
         auto seedsShower = [&](const xAOD::TruthParticle* p) -> bool {

@@ -28,31 +28,44 @@ WRAPPER = Path(__file__).parent / "run_jet_tagger_emulation_job.sh"
 # ---------------------------------------------------------------------------
 # Parameter grid — edit these to match jetTaggerConfigLocal.sh
 # ---------------------------------------------------------------------------
-ALGO_VERSIONS  = [2]
-R_MERGE_CUTS   = [0.001]
+ALGO_VERSIONS  = [3]
+R_MERGE_CUTS   = [2]
 R_SQUARED_CUTS = [1.21]
-N_IOS          = [8]
+N_IOS          = [128]
 N_SEEDS        = [2]
 SIGNALS        = [True, False]
 SIGNAL_STRINGS = ["ggF_hh_bbbb", "VBF_hh_bbbb", "Zprime_ttbar_allhad_flatpT", "ttbar_allhad"]   # only used when signal=True
 INPUT_OBJECTS  = ["gepCellsTowers"]
-#SEED_OBJECTS   = ["gepWTAConeCellsTowersJets", "jFEXSRJ", "gFEXSRJ"]
-SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
+SEED_OBJECTS   = ["gepWTAConeCellsTowersJets", "jFEXSRJ", "gFEXSRJ"]
+#SEED_OBJECTS   = ["jFEXSRJ"]
+#SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
 PU_SUPPRESSION = [True]
-ETA_SK_OBJECTS = [False]   # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
+ETA_SK_OBJECTS = [True]   # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
 ET_WEIGHTED_MIDPOINTS      = [False]
 MIN_ET_SEED_POS_OPT        = [True]
 
 SUBJET_ET_BY_SEED = {
-    #"gFEXSRJ":                   25,
-    #"jFEXSRJ":                   35,
+    "gFEXSRJ":                   25,
+    "jFEXSRJ":                   35,
     "gepWTAConeCellsTowersJets":  25,
 }
 
 MIN_ET_SEED_POS_OPT_CUT_BY_SEED = {
-    #"gFEXSRJ":                   20.0,
-    #"jFEXSRJ":                   30.0,
+    "gFEXSRJ":                   20.0,
+    "jFEXSRJ":                   30.0,
     "gepWTAConeCellsTowersJets":  20.0,
+}
+
+# Optional subjet E_T scan [GeV], per seed object. A seed listed here is submitted
+# once per scan point instead of once at its SUBJET_ET_BY_SEED default; seeds left
+# out (or set to an empty list) keep that single default. The min-E_T seed-position
+# optimization cut follows each scan point, holding the seed's default
+# (subjet E_T - cut) offset fixed -- currently 5 GeV for every seed, so scanning
+# jFEX over 25/30/35/40 GeV pairs with mec 20/25/30/35 GeV.
+SUBJET_ET_SCAN_BY_SEED = {
+    "jFEXSRJ":                   [25, 30, 35, 40],
+    #"gFEXSRJ":                   [25, 30, 35, 40],
+    #"gepWTAConeCellsTowersJets": [25, 30, 35, 40],
 }
 
 # Directories containing HERNTupler output ntuples for each sample.
@@ -99,6 +112,27 @@ def subjet_et(seed_obj: str) -> int:
 
 def min_et_seed_pos_opt_cut(seed_obj: str) -> float:
     return MIN_ET_SEED_POS_OPT_CUT_BY_SEED.get(seed_obj, 20.0)
+
+
+def subjet_et_points(seed_obj: str) -> list[int]:
+    """Subjet E_T thresholds [GeV] to submit for this seed: the configured scan
+    points, or the single SUBJET_ET_BY_SEED default when no scan is set."""
+    return list(SUBJET_ET_SCAN_BY_SEED.get(seed_obj) or [subjet_et(seed_obj)])
+
+
+def seed_subjet_et_points() -> list[tuple[str, int]]:
+    """(seed object, subjet E_T) pairs covering SEED_OBJECTS -- one entry per seed,
+    or one per scan point for seeds listed in SUBJET_ET_SCAN_BY_SEED."""
+    return [(seed_obj, sjett)
+            for seed_obj in SEED_OBJECTS
+            for sjett in subjet_et_points(seed_obj)]
+
+
+def min_et_seed_pos_opt_cut_for(seed_obj: str, sjett: int) -> float:
+    """min-E_T seed-position-optimization cut paired with a scanned subjet E_T,
+    preserving the seed's default (subjet E_T - cut) offset."""
+    offset = subjet_et(seed_obj) - min_et_seed_pos_opt_cut(seed_obj)
+    return sjett - offset
 
 
 def fmt_rmerge(v: float) -> str:
@@ -220,9 +254,8 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
             ALGO_VERSIONS, R_MERGE_CUTS, R_SQUARED_CUTS, N_IOS, N_SEEDS):
         if algov == 2 and rmrg != 0.001:
             continue
-        for inobj, seedobj in itertools.product(INPUT_OBJECTS, SEED_OBJECTS):
-            sjett = subjet_et(seedobj)
-            minetc = min_et_seed_pos_opt_cut(seedobj)
+        for inobj, (seedobj, sjett) in itertools.product(INPUT_OBJECTS, seed_subjet_et_points()):
+            minetc = min_et_seed_pos_opt_cut_for(seedobj, sjett)
             for etwm, mineto in itertools.product(
                     ET_WEIGHTED_MIDPOINTS, MIN_ET_SEED_POS_OPT):
                 for signal in SIGNALS:
@@ -230,9 +263,12 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                     for sigstr in sig_list:
                         for pusup in PU_SUPPRESSION:
                             for etask in ETA_SK_OBJECTS:
-                                # EtaSK only supported for gepCellsTowers input + WTAConeJets seeds
-                                if etask and inobj not in ("gepCellsTowers",) or \
-                                   etask and seedobj not in ("gepWTAConeCellsTowersJets",):
+                                # EtaSK selects the PU-suppressed *input objects* (towers), so it
+                                # only constrains inobj. The seed collection is independent:
+                                # jetTaggerEmulation.cc branches on seedObjectType first, and the
+                                # FEX seeds come from their own resim trees, so EtaSK towers can
+                                # be seeded by jFEX/gFEX SRJ just as well as by WTA cone jets.
+                                if etask and inobj not in ("gepCellsTowers",):
                                     continue
                                 if etask:
                                     pu_tag = "EtaSK"
@@ -245,6 +281,7 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                                             f"_{'sig' if signal else 'bkg'}"
                                             f"_{sigstr if signal else 'bkg'}"
                                             f"_{pu_tag}"
+                                            f"_sjet{sjett}"
                                             f"_etwm{int(etwm)}_mep{int(mineto)}"
                                             f"_mec{minetc:.4g}")
 
