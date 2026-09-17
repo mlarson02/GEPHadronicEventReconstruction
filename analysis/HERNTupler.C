@@ -71,33 +71,30 @@ const double crossSectionsByJZSlice[nJZSlices] = {0.07893,      // JZ0
                                                   3.4519e-14};  // JZ9
 
 // PU200 sum of weights, from getSumOfWeights.C over the PU200 ntuples
-// (sumOfWeights.txt). Selected when pileup == 200.
-const double sumOfEventWeightsByJZSlice[nJZSlices] = {100000.0,      // JZ0
+// (sumOfWeights_PU200.txt). Selected when pileup == 200.
+const double sumOfEventWeightsByJZSlice[nJZSlices] = {249900.0,      // JZ0
                                                       9493.89,       // JZ1
                                                       40.6686,       // JZ2
                                                       0.81292,       // JZ3
                                                       0.0126565,     // JZ4
                                                       0.000982199,   // JZ5
-                                                      0.000164118,   // JZ6
+                                                      0.000169235,   // JZ6
                                                       4.75189e-05,   // JZ7
                                                       1.42645e-05,   // JZ8
-                                                      3.27642e-08};  // JZ9
+                                                      3.27753e-08};  // JZ9
 
-// PU140 counterpart of sumOfEventWeightsByJZSlice, from the CutBookkeeper of the
-// PU140 samples. Selected when pileup == 140.
-// FIXME: PLACEHOLDER values (copied from the PU200 array so weights stay finite) —
-// replace each entry with the PU140 CutBookkeeper sum-of-weights once the samples
-// are downloaded. Until then, PU140 normalization is NOT correct.
-const double sumOfEventWeightsByJZSlice_PU140[nJZSlices] = {100000.0,                // JZ0
-                                                           9497.47,      // JZ1
-                                                           40.6686,     // JZ2
-                                                           0.814425,    // JZ3
-                                                           0.0113906,  // JZ4
-                                                           0.000933323, // JZ5
-                                                           0.000152669,  // JZ6
-                                                           4.76259e-05,  // JZ7
-                                                           1.39203e-05, // JZ8
-                                                           6.56804e-08}; // JZ9
+// PU140 counterpart of sumOfEventWeightsByJZSlice, from getSumOfWeights.C over the
+// PU140 ntuples (sumOfWeights_PU140.txt). Selected when pileup == 140.
+const double sumOfEventWeightsByJZSlice_PU140[nJZSlices] = {249750.0,      // JZ0
+                                                            9497.47,       // JZ1
+                                                            38.6013,       // JZ2
+                                                            0.814425,      // JZ3
+                                                            0.0116942,     // JZ4
+                                                            0.000984,      // JZ5
+                                                            0.000169235,   // JZ6
+                                                            4.76259e-05,   // JZ7
+                                                            1.42645e-05,   // JZ8
+                                                            6.56804e-08};  // JZ9
 
 // --- Reweighting normalization mode --------------------------------------
 // The per-event histogram weight can be normalized in one of two ways:
@@ -469,7 +466,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     TTree* truthHiggsTree = new TTree("truthHiggsTree", "Tree storing event-wise information about truth particles");
     TTree* truthTopTree = new TTree("truthTopTree", "Tree storing event-wise information about truth particles");
     //TTree* truthVBFQuark = new TTree("truthVBFQuark", "Tree storing event-wise information about truth particles");
-    TTree* caloTopoTowerTree = new TTree("caloTopoTowerTree", "Tree storing event-wise Et, Eta, Phi");
+    //TTree* caloTopoTowerTree = new TTree("caloTopoTowerTree", "Tree storing event-wise Et, Eta, Phi");  // disabled: caloTopoTowers no longer written out
     TTree* gepBasicClustersTree = new TTree("gepBasicClustersTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* gepBasicClustersSKTree = new TTree("gepBasicClustersSKTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* gepCellsTowersTree = new TTree("gepCellsTowersTree", "Tree storing event-wise Et, Eta, Phi");
@@ -486,7 +483,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     TTree* gepWTAConeBasicClustersSKJetsTree = new TTree("gepWTAConeBasicClustersSKJetsTree", "Tree storing event-wise Pt, Eta, Phi, Mass, NConstituents");
     TTree* gepLeadingWTAConeBasicClustersSKJetsTree = new TTree("gepLeadingWTAConeBasicClustersSKJetsTree", "Tree storing event-wise Pt, Eta, Phi, Mass, NConstituents");
     TTree* gepSubleadingWTAConeBasicClustersSKJetsTree = new TTree("gepSubleadingWTAConeBasicClustersSKJetsTree", "Tree storing event-wise Pt, Eta, Phi, Mass, NConstituents");
-    TTree* topo422Tree = new TTree("topo422Tree", "Tree storing event-wise Et, Eta, Phi");
+    //TTree* topo422Tree = new TTree("topo422Tree", "Tree storing event-wise Et, Eta, Phi");  // disabled: topo422 clusters no longer written out
     TTree* gFexSRJTree = new TTree("gFexSRJTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* gFexLeadingSRJTree = new TTree("gFexLeadingSRJTree", "Tree storing event-wise Et, Eta, Phi");
     TTree* gFexSubleadingSRJTree = new TTree("gFexSubleadingSRJTree", "Tree storing event-wise Et, Eta, Phi");
@@ -587,6 +584,14 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     // for binning MET resolution vs pileup. -1 when the container is unavailable.
     int    nPrimaryVertices = -1;
 
+    // Pileup per bunch crossing, straight off EventInfo, for binning rates vs mu.
+    // actualInteractionsPerCrossing is the in-time pileup of THIS crossing; the
+    // averageInteractionsPerCrossing is the mu the crossing was generated at, which for the
+    // HL-LHC samples is drawn from a flat profile (120-160 at PU140, 180-220 at PU200).
+    // Both are written so a study can pick either; -1 when EventInfo does not supply them.
+    float  actualInteractionsPerCrossing  = -1.0f;
+    float  averageInteractionsPerCrossing = -1.0f;
+
     // Truth Particle vectors
     //std::vector<int> truthParticlePDGId, truthParticleStatus; 
     //std::vector<double> truthParticleEtValues, truthParticleEnergyValues, truthParticlepTValues, truthParticlepxValues, truthParticlepyValues, truthParticlepzValues, truthParticleEtaValues, truthParticlePhiValues;
@@ -598,7 +603,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     std::vector<unsigned int> topIndexValues, indexOfTopValues;
     std::vector<double> truthTopEtValues, truthTopEnergyValues, truthToppTValues, truthTopEtaValues, truthTopPhiValues;
     // Tower / cluster vectors
-    std::vector<double> caloTopoTowerEtValues, caloTopoTowerEtaValues, caloTopoTowerPhiValues;
+    //std::vector<double> caloTopoTowerEtValues, caloTopoTowerEtaValues, caloTopoTowerPhiValues;  // disabled: caloTopoTowers no longer written out
     std::vector<double> gFexEmulatedTowersEtValues, gFexEmulatedTowersEtaValues, gFexEmulatedTowersPhiValues;
     std::vector<double> jFexEmulatedTowersEtValues, jFexEmulatedTowersEtaValues, jFexEmulatedTowersPhiValues;
     std::vector<double> gepBasicClustersEtValues, gepBasicClustersEtaValues, gepBasicClustersPhiValues;
@@ -611,7 +616,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     std::vector<double> gepCellsTowersSKEt_lValues[7];
     std::vector<double> gepCellsTowersEtaSKEt_lValues[7];
     std::vector<double> gepBasicClustersEtaSKEtValues, gepBasicClustersEtaSKEtaValues, gepBasicClustersEtaSKPhiValues;
-    std::vector<double> topo422EtValues, topo422EtaValues, topo422PhiValues;
+    //std::vector<double> topo422EtValues, topo422EtaValues, topo422PhiValues;  // disabled: topo422 clusters no longer written out
 
     // Cone jets from TrigGepPerf
     std::vector<double> gepWTAConeCellsTowersJetspTValues, gepWTAConeCellsTowersJetsEtaValues, gepWTAConeCellsTowersJetsPhiValues;
@@ -846,6 +851,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     eventInfoTree->Branch("dimuonMass", &dimuonMass);
     eventInfoTree->Branch("nTruthMuons", &nTruthMuons);
     eventInfoTree->Branch("nPrimaryVertices", &nPrimaryVertices);
+    eventInfoTree->Branch("actualInteractionsPerCrossing",  &actualInteractionsPerCrossing);
+    eventInfoTree->Branch("averageInteractionsPerCrossing", &averageInteractionsPerCrossing);
 
     // truthbTree
     truthbTree->Branch("higgsIndex", &higgsIndexValues);
@@ -888,10 +895,10 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     truthVBFQuark->Branch("pz", &truthVBFQuarkpzValues);
     truthVBFQuark->Branch("Energy", &truthVBFQuarkEnergyValues);*/
 
-    // caloTopoTowerTree
-    caloTopoTowerTree->Branch("Et", &caloTopoTowerEtValues);
-    caloTopoTowerTree->Branch("Eta", &caloTopoTowerEtaValues);
-    caloTopoTowerTree->Branch("Phi", &caloTopoTowerPhiValues);
+    // caloTopoTowerTree  // disabled: caloTopoTowers no longer written out
+    //caloTopoTowerTree->Branch("Et", &caloTopoTowerEtValues);
+    //caloTopoTowerTree->Branch("Eta", &caloTopoTowerEtaValues);
+    //caloTopoTowerTree->Branch("Phi", &caloTopoTowerPhiValues);
 
     // gFex / jFex emulated towers
     gFexEmulatedTowersTree->Branch("Et",  &gFexEmulatedTowersEtValues);
@@ -1243,10 +1250,10 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     gepSubleadingWTAConeBasicClustersEtaSKJetsTree->Branch("Ring3TobN", &gepSubleadingWTAConeBasicClustersEtaSKJetsRing3TobN);
     gepSubleadingWTAConeBasicClustersEtaSKJetsTree->Branch("Ring4TobN", &gepSubleadingWTAConeBasicClustersEtaSKJetsRing4TobN);
 
-    // topo422Tree
-    topo422Tree->Branch("Et", &topo422EtValues);
-    topo422Tree->Branch("Eta", &topo422EtaValues);
-    topo422Tree->Branch("Phi", &topo422PhiValues);
+    // topo422Tree  // disabled: topo422 clusters no longer written out
+    //topo422Tree->Branch("Et", &topo422EtValues);
+    //topo422Tree->Branch("Eta", &topo422EtaValues);
+    //topo422Tree->Branch("Phi", &topo422PhiValues);
 
     // gFexSRJTree
     gFexSRJTree->Branch("EtIndex", &gFexSRJEtIndexValues);
@@ -2445,19 +2452,19 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 continue;
             }
 
-            // Retrieve the CaloTopoClusters422 container
-            const DataVector<xAOD::CaloCluster_v1>* CaloTopoClusters422 = nullptr;
-            if (!event.retrieve(CaloTopoClusters422, "CaloTopoClusters422").isSuccess()) {
-                std::cerr << "Failed to retrieve CaloTopoClusters422" << std::endl;
-                continue;
-            }
+            // Retrieve the CaloTopoClusters422 container  // disabled: topo422 clusters no longer written out
+            //const DataVector<xAOD::CaloCluster_v1>* CaloTopoClusters422 = nullptr;
+            //if (!event.retrieve(CaloTopoClusters422, "CaloTopoClusters422").isSuccess()) {
+            //    std::cerr << "Failed to retrieve CaloTopoClusters422" << std::endl;
+            //    continue;
+            //}
 
-            // Retrieve the CaloCalAllTopoTowers container
-            const DataVector<xAOD::CaloCluster_v1>* CaloCalAllTopoTowers = nullptr;
-            if (!event.retrieve(CaloCalAllTopoTowers, "CaloCalAllTopoTowers").isSuccess()) {
-                std::cerr << "Failed to retrieve CaloCalAllTopoTowers" << std::endl;
-                continue;
-            }
+            // Retrieve the CaloCalAllTopoTowers container  // disabled: caloTopoTowers no longer written out
+            //const DataVector<xAOD::CaloCluster_v1>* CaloCalAllTopoTowers = nullptr;
+            //if (!event.retrieve(CaloCalAllTopoTowers, "CaloCalAllTopoTowers").isSuccess()) {
+            //    std::cerr << "Failed to retrieve CaloCalAllTopoTowers" << std::endl;
+            //    continue;
+            //}
 
             // FIXME add all this, fill trees and clear vectors:
             hltAntiKt4SRJEtaValues.clear();
@@ -2596,12 +2603,12 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             jFexLRJSubleadingEtValues.clear();
             jFexLRJSubleadingEtaValues.clear();
             jFexLRJSubleadingPhiValues.clear();
-            topo422EtValues.clear();
-            topo422EtaValues.clear();
-            topo422PhiValues.clear();
-            caloTopoTowerEtValues.clear();
-            caloTopoTowerEtaValues.clear();
-            caloTopoTowerPhiValues.clear();
+            //topo422EtValues.clear();       // disabled: topo422 clusters no longer written out
+            //topo422EtaValues.clear();
+            //topo422PhiValues.clear();
+            //caloTopoTowerEtValues.clear(); // disabled: caloTopoTowers no longer written out
+            //caloTopoTowerEtaValues.clear();
+            //caloTopoTowerPhiValues.clear();
             gFexEmulatedTowersEtValues.clear();
             gFexEmulatedTowersEtaValues.clear();
             gFexEmulatedTowersPhiValues.clear();
@@ -2778,6 +2785,11 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             float mcEventWeight = EventInfo->mcEventWeight();
             //std::cout << "iEvt: " << iEvt << " and event weight: " << eventWeight << "\n";
             mcEventWeights.push_back(mcEventWeight);
+
+            // Pileup of this crossing (see the declarations above). Read from the same EventInfo
+            // object as the weight, so no extra retrieve is needed.
+            actualInteractionsPerCrossing  = EventInfo->actualInteractionsPerCrossing();
+            averageInteractionsPerCrossing = EventInfo->averageInteractionsPerCrossing();
 
             // Compute weight for histograms
             double eventWeight = mcEventWeight * crossSectionsByJZSlice[jzSlice] * filterEffienciesByJZSlice[jzSlice] * reweightNormalizationForPU(pileup) / (sumOfEventWeightsForPU(jzSlice, pileup));
@@ -3063,25 +3075,27 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
             // Loop over clusters and fill Et, Eta, Phi
             // Ntuple branches only, no .dat memories written.
-            for (const auto* cluster : *CaloCalAllTopoTowers) {
-                if (!cluster) continue;
-
-                double et = cluster->e() / cosh(cluster->eta()) / 1000.0; // Et in GeV
-                caloTopoTowerEtValues.push_back(et);
-                caloTopoTowerEtaValues.push_back(cluster->eta());
-                caloTopoTowerPhiValues.push_back(cluster->phi());
-            }
+            // disabled: caloTopoTowers no longer written out
+            //for (const auto* cluster : *CaloCalAllTopoTowers) {
+            //    if (!cluster) continue;
+            //
+            //    double et = cluster->e() / cosh(cluster->eta()) / 1000.0; // Et in GeV
+            //    caloTopoTowerEtValues.push_back(et);
+            //    caloTopoTowerEtaValues.push_back(cluster->eta());
+            //    caloTopoTowerPhiValues.push_back(cluster->phi());
+            //}
 
             // Loop over the clusters and store Et, Eta, Phi
             // Ntuple branches only, no .dat memories written.
-            for (const auto* cluster : *CaloTopoClusters422) {
-                if (!cluster) continue;
-
-                double et = cluster->e() / cosh(cluster->eta()) / 1000.0; // Et in GeV
-                topo422EtValues.push_back(et);
-                topo422EtaValues.push_back(cluster->eta());
-                topo422PhiValues.push_back(cluster->phi());
-            }
+            // disabled: topo422 clusters no longer written out
+            //for (const auto* cluster : *CaloTopoClusters422) {
+            //    if (!cluster) continue;
+            //
+            //    double et = cluster->e() / cosh(cluster->eta()) / 1000.0; // Et in GeV
+            //    topo422EtValues.push_back(et);
+            //    topo422EtaValues.push_back(cluster->eta());
+            //    topo422PhiValues.push_back(cluster->phi());
+            //}
 
             // GEP cone jets from GEPCellsTowers
             {
@@ -4280,7 +4294,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             truthbTree->Fill();
             truthHiggsTree->Fill();
             // truthVBFQuark->Fill();  // commented out as in your declaration
-            caloTopoTowerTree->Fill();
+            //caloTopoTowerTree->Fill();  // disabled: caloTopoTowers no longer written out
             gFexEmulatedTowersTree->Fill();
             jFexEmulatedTowersTree->Fill();
             gepBasicClustersTree->Fill();
@@ -4300,7 +4314,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             gepLeadingWTAConeBasicClustersSKJetsTree->Fill();
             gepSubleadingWTAConeCellsTowersSKJetsTree->Fill();
             gepSubleadingWTAConeBasicClustersSKJetsTree->Fill();
-            topo422Tree->Fill();
+            //topo422Tree->Fill();  // disabled: topo422 clusters no longer written out
             gFexSRJTree->Fill();
             gFexLeadingSRJTree->Fill();
             gFexSubleadingSRJTree->Fill();
@@ -4377,7 +4391,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     truthbTree->Write("", TObject::kOverwrite);
     truthHiggsTree->Write("", TObject::kOverwrite);
     // truthVBFQuark->Write();  // Optional, if used
-    caloTopoTowerTree->Write("", TObject::kOverwrite);
+    //caloTopoTowerTree->Write("", TObject::kOverwrite);  // disabled: caloTopoTowers no longer written out
     gFexEmulatedTowersTree->Write("", TObject::kOverwrite);
     jFexEmulatedTowersTree->Write("", TObject::kOverwrite);
     gepBasicClustersTree->Write("", TObject::kOverwrite);
@@ -4397,7 +4411,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     gepSubleadingWTAConeBasicClustersJetsTree->Write("", TObject::kOverwrite);
     gepSubleadingWTAConeCellsTowersSKJetsTree->Write("", TObject::kOverwrite);
     gepSubleadingWTAConeBasicClustersSKJetsTree->Write("", TObject::kOverwrite);
-    topo422Tree->Write("", TObject::kOverwrite);
+    //topo422Tree->Write("", TObject::kOverwrite);  // disabled: topo422 clusters no longer written out
     gFexSRJTree->Write("", TObject::kOverwrite);
     gFexLeadingSRJTree->Write("", TObject::kOverwrite);
     gFexSubleadingSRJTree->Write("", TObject::kOverwrite);
@@ -4547,6 +4561,6 @@ void HERNTupler(bool signalBool, std::string signalString, unsigned int algoVers
     nTupler(signalBool, signalString, etaAltRange, algoVersion,
             jzSlice, specialJZ0,
             outputDir, /*writeDatFiles=*/true,
-            daodFile, gepFile, fileSuffix, /*trigGepPerfValidation=*/true, /*pileup=*/pileup);
+            daodFile, gepFile, fileSuffix, /*trigGepPerfValidation=*/false, /*pileup=*/pileup);
     gSystem->Exit(0);
 }

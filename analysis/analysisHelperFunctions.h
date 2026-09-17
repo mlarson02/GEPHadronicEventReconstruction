@@ -47,6 +47,15 @@ struct FileInfo {
     double jetRadiusSquared = 0.0;
     double subjetEtThreshold = 25.0;
     bool useSoftKiller = false;
+
+    // Pileup suppression applied to the input objects, exactly as makeOutputFileName writes
+    // it: "EtaSK", "SK" or "NoSK". Empty when the name carries no recognisable tag.
+    // Separate from useSoftKiller, which is a two-state flag and cannot tell EtaSK apart.
+    std::string puSuppression;
+    // E_T threshold [GeV] applied to the INPUT towers, from the _T<n> tag that follows the
+    // PU-suppression tag. Negative means the name predates that tag, so nothing is known and
+    // legends leave it out rather than claiming 0.
+    double inputTowerEtThreshold = -1.0;
 };
 
 std::string getSampleTag(const std::string& path) {
@@ -182,6 +191,25 @@ FileInfo ParseFileName(const std::string& path)
         const bool hasNoSK = rawSeed.find("_NoSK") != std::string::npos;
         const bool hasSK   = rawSeed.find("_SK")   != std::string::npos;
         info.useSoftKiller = hasSK && !hasNoSK;
+
+        // Which of the three suppressions was run. Order matters: "_EtaSK" and "_NoSK" both
+        // end in "SK", so they have to be tested before plain "_SK".
+        if      (rawSeed.find("_EtaSK") != std::string::npos) info.puSuppression = "EtaSK";
+        else if (hasNoSK)                                     info.puSuppression = "NoSK";
+        else if (hasSK)                                       info.puSuppression = "SK";
+
+        // Input-tower E_T cut, written as _T<n> right after the suppression tag.
+        {
+            std::smatch mT;
+            if (std::regex_search(rawSeed, mT, std::regex("_T(\\d+)$|_T(\\d+)_"))) {
+                const std::string digits = mT[1].matched ? mT[1].str() : mT[2].str();
+                try {
+                    info.inputTowerEtThreshold = std::stod(digits);
+                } catch (...) {
+                    std::cerr << "⚠️ Failed to parse input tower E_T threshold '" << digits << "'\n";
+                }
+            }
+        }
 
         if (rawSeed.find("gepWTAConeCellsTowersJets") != std::string::npos)
             info.seedObjectType = "ConeJet";
@@ -1396,6 +1424,345 @@ inline void DrawRateCurvesWithRatio(const std::vector<TH1*>& curves,
   c->SaveAs(outputPath);
 }
 
+// -----------------------------------------------------------------------------
+// TURN-ON CURVES — the one template both macros draw every turn-on through.
+//
+// Layout, and why it is this shape:
+//   * Ratio panel underneath, against the gFEX curve where the overlay has one (else the
+//     first curve drawn). Overlaying seven configurations puts every curve on top of every
+//     other one in the plateau; the ratio is the only place small differences are readable.
+//   * Main pad y axis runs to 4 while the curves live in 0-1.1. The headroom is where the
+//     legend goes.
+//   * Legend at the TOP, in columns, inside the frame — not down the right-hand side, which
+//     is what used to force the x axis out to 700 GeV just to make room for it.
+//   * x axis to 400 GeV by default, now that nothing needs that empty strip.
+//
+// This is the efficiency-axis sibling of DrawRateCurvesWithRatio above, and lifts that
+// function's ratio pairing wholesale (pair by x VALUE via FindFixBin, never by bin index —
+// the reference curve need not share the numerator's binning).
+//
+// Colours come from the CALLER, same as DrawRateCurvesWithRatio: the Petroff kP6/kP8/kP10
+// constants are TColor::GetColor() variables defined inside each macro after this header is
+// included, so they cannot be named here.
+struct TurnOnCurve {
+    TH1*        h      = nullptr;
+    std::string label;
+    Int_t       color  = kBlack;
+    Style_t     marker = 20;
+};
+
+struct TurnOnOpts {
+    double xMax        = 400.0;   // 0 or negative = keep the histogram's own upper edge
+    double yMax        = 1.4;     // curves occupy 0-1; the strip above is the legend's
+    double ratioMin    = 0.0;
+    double ratioMax    = 3.0;     // widened automatically if points fall outside, never narrowed
+    double ratioMaxCap = 10.0;
+    int    legendCols  = 0;       // 0 = pick from the entry count; clamped to 2 either way
+    int    refIndex    = -1;      // -1 = auto: "gFEX JwoJ", then "gFEX", then the first curve
+    std::string xTitle;
+    std::string yTitle = "Emulated Trigger Efficiency";
+    std::string legendHeader;     // drawn top-right under the process label, NOT as a legend row
+    // Placement of that header. Defaults are the original values, so a caller that does not set
+    // them gets exactly the layout this template has always drawn; the MET macro enlarges the
+    // text and pulls it in to the frame's right edge. headerX is a RIGHT edge (align 31) and
+    // headerY is the text baseline.
+    double      headerTextSize = 0.028;
+    double      headerX        = 0.99;
+    double      headerY        = 0.897;
+    std::string processLabel;     // e.g. "hh#rightarrow4b", drawn top-right above the frame
+    std::string refShortName;     // ratio axis reads "Ratio to <this>"; empty = derive from label
+    TH1*  spectrum     = nullptr; // grey reference distribution (offline LRJ E_T / truth MET)
+    std::string spectrumLabel;    // bottom-right key for it; empty = derived from xTitle
+};
+
+// Returns the canvas so a caller can draw extra annotation on it before it goes out of scope
+// (the seed-comparison turn-on prints per-curve integrated efficiencies under the process label).
+inline TCanvas* DrawTurnOnWithRatio(const std::vector<TurnOnCurve>& curves,
+                                    const TurnOnOpts& opts,
+                                    const TString& outputPath) {
+  // Drop empty slots up front so every index below is a real curve.
+  std::vector<TurnOnCurve> in;
+  for (const auto& c : curves) if (c.h) in.push_back(c);
+  if (in.empty()) return nullptr;
+
+  // ---- reference curve for the ratio -------------------------------------------------
+  // "gFEX JwoJ" before plain "gFEX": the MET overlays carry several gFEX algorithms and JwoJ
+  // is the baseline among them, while the large-R jet overlays have exactly one gFEX entry
+  // and land on the second test.
+  int ref = opts.refIndex;
+  if (ref < 0 || ref >= (int)in.size()) {
+    ref = 0;
+    bool found = false;
+    for (unsigned int i = 0; i < in.size() && !found; ++i)
+      if (in[i].label.find("gFEX JwoJ") != std::string::npos) { ref = (int)i; found = true; }
+    for (unsigned int i = 0; i < in.size() && !found; ++i)
+      if (in[i].label.find("gFEX") != std::string::npos)      { ref = (int)i; found = true; }
+  }
+  // One curve cannot be compared with anything: a ratio against itself is a flat line at 1.
+  const bool withRatio = (in.size() > 1);
+
+  // ---- canvas and pads ---------------------------------------------------------------
+  TCanvas* c = new TCanvas(("cTurnOn_" + outputPath).Data(),
+                           opts.legendHeader.empty() ? "turn-on" : opts.legendHeader.c_str(),
+                           800, withRatio ? 800 : 600);
+  TPad* padHi = nullptr;
+  TPad* padLo = nullptr;
+  if (withRatio) {
+    padHi = new TPad("padHiTurnOn", "", 0.0, 0.30, 1.0, 1.0);
+    padLo = new TPad("padLoTurnOn", "", 0.0, 0.00, 1.0, 0.30);
+    // Matched left margins or the two x axes do not line up; wide enough for the ratio pad's
+    // y title, which is drawn at a distance set by its larger (pad-relative) title size.
+    padHi->SetBottomMargin(0.02); padHi->SetLeftMargin(0.16); padHi->SetTicks(1, 1);
+    padLo->SetTopMargin(0.03);    padLo->SetLeftMargin(0.16); padLo->SetTicks(1, 1);
+    padLo->SetBottomMargin(0.32);
+    padHi->Draw(); padLo->Draw();
+    padHi->cd();
+  } else {
+    c->SetLeftMargin(0.16); c->SetBottomMargin(0.14); c->SetTicks(1, 1);
+    c->cd();
+  }
+
+  // ---- main pad ----------------------------------------------------------------------
+  // Cloned: callers' histograms are usually drawn on other canvases too, and both the axis
+  // ranges and the marker style live on the object.
+  std::vector<TH1*> drawn;
+  for (unsigned int i = 0; i < in.size(); ++i) {
+    TH1* h = (TH1*)in[i].h->Clone(Form("%s_turnOnClone_%u", in[i].h->GetName(), i));
+    h->SetDirectory(nullptr);
+    h->SetLineColor(in[i].color); h->SetMarkerColor(in[i].color);
+    h->SetMarkerStyle(in[i].marker); h->SetMarkerSize(0.8); h->SetLineWidth(2);
+    h->SetStats(0);
+    drawn.push_back(h);
+  }
+
+  const double xLo = drawn[0]->GetXaxis()->GetXmin();
+  const double xHi = (opts.xMax > 0.0) ? opts.xMax : drawn[0]->GetXaxis()->GetXmax();
+
+  drawn[0]->SetTitle("");
+  drawn[0]->GetYaxis()->SetTitle(opts.yTitle.c_str());
+  drawn[0]->GetXaxis()->SetRangeUser(xLo, xHi);
+  drawn[0]->SetMinimum(0.0);
+  drawn[0]->SetMaximum(opts.yMax);
+  if (withRatio) {
+    drawn[0]->GetYaxis()->SetTitleSize(0.050); drawn[0]->GetYaxis()->SetTitleOffset(1.30);
+    drawn[0]->GetYaxis()->SetLabelSize(0.042);
+    drawn[0]->GetXaxis()->SetLabelSize(0.0);      // x labels belong to the ratio pad
+    drawn[0]->GetXaxis()->SetTitleSize(0.0);
+  } else {
+    drawn[0]->GetXaxis()->SetTitle(opts.xTitle.c_str());
+  }
+  drawn[0]->Draw("P");
+
+  // Grey reference spectrum behind the curves, normalized so the bin contents SUM TO ONE —
+  // it is a probability distribution and the y axis it shares is an efficiency, so any other
+  // scaling (an earlier version stretched it to a fixed fraction of yMax) makes it a picture
+  // with no defined vertical meaning. Drawn after the frame owner so it inherits the axes;
+  // the curves are drawn again over it so the markers stay on top of the fill.
+  TH1* hSpec = nullptr;
+  if (opts.spectrum) {
+    hSpec = (TH1*)opts.spectrum->Clone(Form("%s_turnOnSpectrum", opts.spectrum->GetName()));
+    hSpec->SetDirectory(nullptr);
+    const double area = hSpec->Integral();
+    if (area > 0.0) hSpec->Scale(1.0 / area);
+    hSpec->SetFillColorAlpha(kGray + 1, 0.35);
+    hSpec->SetLineColor(kGray + 2);
+    hSpec->SetLineWidth(1);
+    hSpec->Draw("HIST SAME");
+  }
+  for (unsigned int i = 0; i < drawn.size(); ++i) drawn[i]->Draw("P SAME");
+
+  // Dashed line at full efficiency: the plateau is what every one of these curves is read
+  // against, and without it the eye has to walk back to the axis to see where 1 actually is.
+  {
+    TLine* plateauLine = new TLine(xLo, 1.0, xHi, 1.0);
+    plateauLine->SetLineStyle(2);
+    plateauLine->SetLineColor(kGray + 2);
+    plateauLine->SetLineWidth(1);
+    plateauLine->Draw("SAME");
+  }
+
+  // ---- legend: top of the pad, at most two columns ------------------------------------
+  // TWO constraints fight here, and the old code only respected one of them:
+  //   * vertical  — the rows have to fit in the strip between the plateau and the frame top;
+  //   * horizontal — each entry has to fit in its COLUMN, which is where the overlapping mess
+  //     came from: three narrow columns against labels carrying a threshold, a configuration
+  //     and an efficiency is hopeless however small the text.
+  // So the column count is chosen by trying 1 and 2 and keeping whichever allows the LARGER
+  // text once both constraints are applied. For long labels that is usually one tall column,
+  // which is legible where two short ones are not. Two is the hard ceiling either way.
+  const int nEntries = (int)drawn.size();
+
+  // Rendered length, not string length: "#varepsilon_{int}" is one glyph plus a subscript, not
+  // 17 characters. Crude but it only has to rank two layouts against each other.
+  auto renderedLen = [](const std::string& s) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+      if (s[i] == '#') { while (i < s.size() && s[i] != ' ' && s[i] != '{' && s[i] != ',') ++i; ++n; }
+      else if (s[i] == '{' || s[i] == '}') continue;
+      else ++n;
+    }
+    return n;
+  };
+  size_t maxLen = 1;
+  for (unsigned int i = 0; i < in.size(); ++i) maxLen = std::max(maxLen, renderedLen(in[i].label));
+
+  // Runs to the very edge of the pad: the entries are the widest thing on these canvases and
+  // any width left over here comes straight back as text size.
+  const double legX1 = 0.16, legX2 = 0.99;
+  const double legY2 = 0.855;
+  // Floor: where the plateau sits, so the box never grows down over the curves.
+  const double plateau  = 0.02 + (1.0 / opts.yMax) * (0.86 - 0.02);
+  const double rowHWant = withRatio ? 0.042 : 0.038;
+
+  auto textSizeFor = [&](int cols) {
+    const int rows = (nEntries + cols - 1) / cols;
+    const double rowH = std::min(rowHWant, (legY2 - plateau) / std::max(1, rows));
+    // ~0.38 em per character for ROOT font 42 at these sizes, and the marker box eats ~8% of
+    // the column. The earlier 0.45/0.12 pair was pessimistic enough to leave a visible gutter
+    // between the two columns and a strip of dead space at the right-hand end.
+    const double colW = 0.92 * (legX2 - legX1) / cols;
+    const double byWidth  = colW / (maxLen * 0.38);
+    const double byHeight = rowH * 0.58;
+    return std::min(std::min(byWidth, byHeight), 0.024);
+  };
+
+  int nCols = opts.legendCols > 0 ? std::min(opts.legendCols, 2)
+                                  : (textSizeFor(2) > textSizeFor(1) ? 2 : 1);
+  const int nRows = (nEntries + nCols - 1) / nCols;
+  const double rowH  = std::min(rowHWant, (legY2 - plateau) / std::max(1, nRows));
+  const double legY1 = legY2 - rowH * nRows;
+  double textSize = textSizeFor(nCols);
+  if (textSize < 0.009) textSize = 0.009;   // past this it is unreadable anyway; let it clip
+
+  TLegend* leg = new TLegend(legX1, legY1, legX2, legY2);
+  leg->SetBorderSize(0); leg->SetFillStyle(0);
+  leg->SetNColumns(nCols);
+  leg->SetTextSize(textSize);
+  for (unsigned int i = 0; i < drawn.size(); ++i) leg->AddEntry(drawn[i], in[i].label.c_str(), "lp");
+  leg->Draw();
+
+  DrawATLASLabel(0.16, 0.88, "Work in progress");
+  // Process and legend header both live in the strip above the frame, on the right: the header
+  // used to be a legend row, which cost a row of the little vertical space there is.
+  // RIGHT-ALIGNED at the pad edge (align 31) rather than left-anchored at 0.62 — a long header
+  // used to run straight off the canvas. Long ones are also split over two lines.
+  if (!opts.processLabel.empty()) {
+    TLatex pt; pt.SetNDC(); pt.SetTextFont(42); pt.SetTextSize(0.035); pt.SetTextAlign(31);
+    pt.DrawLatex(0.99, 0.945, opts.processLabel.c_str());
+  }
+  if (!opts.legendHeader.empty()) {
+    // The header sits on the SECOND line of the strip, never the first, whether or not this
+    // function drew the process label itself. The MET macro's own DrawATLASLabel right-aligns
+    // its process at (0.95, 0.945) without telling us, so a header on 0.945 landed on top of
+    // it. Line two is free on the right at either macro: the beam-energy/pileup line there is
+    // left-anchored at x = 0.20.
+    TLatex ht; ht.SetNDC(); ht.SetTextFont(42); ht.SetTextSize(opts.headerTextSize); ht.SetTextAlign(31);
+    // Break at the last space before the midpoint, so the two lines come out similar lengths.
+    const std::string& hd = opts.legendHeader;
+    size_t brk = std::string::npos;
+    if (renderedLen(hd) > 46) brk = hd.rfind(' ', hd.size() / 2 + hd.size() / 8);
+    if (brk == std::string::npos || brk == 0) {
+      ht.DrawLatex(opts.headerX, opts.headerY, hd.c_str());
+    } else {
+      // Two lines have to fit between the ATLAS line (0.945) and the frame top (0.86), so they
+      // straddle headerY rather than starting there. The half-separation follows the text size
+      // so a larger header does not overlap itself.
+      const double dy = 0.018 + 0.5 * opts.headerTextSize;
+      ht.DrawLatex(opts.headerX, opts.headerY + dy, hd.substr(0, brk).c_str());
+      ht.DrawLatex(opts.headerX, opts.headerY - dy, hd.substr(brk + 1).c_str());
+    }
+  }
+
+  // Key for the grey spectrum, in the bottom-right corner the plateau leaves empty.
+  if (hSpec) {
+    std::string specLabel = opts.spectrumLabel;
+    if (specLabel.empty()) {
+      // Derive from the x-axis title: "Offline Leading LRJ E_{T} [GeV]" -> that, minus units.
+      specLabel = opts.xTitle;
+      const size_t unit = specLabel.rfind(" [");
+      if (unit != std::string::npos) specLabel = specLabel.substr(0, unit);
+    }
+    TLegend* specKey = new TLegend(0.50, 0.13, 0.99, 0.21);
+    specKey->SetBorderSize(0); specKey->SetFillStyle(0);
+    // Fixed, and larger than the entry text: this is one short line in an empty corner, so it
+    // has no reason to shrink along with a crowded legend the way it did when it tracked
+    // textSize.
+    specKey->SetTextSize(0.030);
+    specKey->AddEntry(hSpec, specLabel.c_str(), "f");
+    specKey->Draw();
+  }
+
+  // ---- ratio pad ---------------------------------------------------------------------
+  if (withRatio) {
+    padLo->cd();
+    const TH1* href = in[ref].h;
+
+    // Build every ratio first, so the window can be widened to hold the points before any of
+    // them is drawn. Never narrowed below the requested ratioMax, and never past ratioMaxCap.
+    std::vector<std::vector<double>> xs(in.size()), rs(in.size()), ers(in.size());
+    double rMaxSeen = 0.0;
+    for (unsigned int i = 0; i < in.size(); ++i) {
+      for (int ib = 1; ib <= in[i].h->GetNbinsX(); ++ib) {
+        const double x = in[i].h->GetBinCenter(ib);
+        if (x < xLo || x > xHi) continue;
+        // Pair by x VALUE: the reference is often a different histogram and need not share
+        // this one's binning. Indexing both by ib silently divides different x points.
+        const int ibRef = href->GetXaxis()->FindFixBin(x);
+        if (ibRef < 1 || ibRef > href->GetNbinsX()) continue;
+        const double yr = href->GetBinContent(ibRef);
+        const double yi = in[i].h->GetBinContent(ib);
+        if (yr <= 0.0 || yi <= 0.0) continue;
+        const double rel = in[i].h->GetBinError(ib) / yi;   // this curve's own precision
+        xs[i].push_back(x);
+        rs[i].push_back(yi / yr);
+        ers[i].push_back((yi / yr) * rel);
+        if (yi / yr > rMaxSeen) rMaxSeen = yi / yr;
+      }
+    }
+    double ratioMax = opts.ratioMax;
+    if (rMaxSeen > ratioMax) ratioMax = std::min(opts.ratioMaxCap, std::ceil(rMaxSeen * 1.1));
+
+    bool firstRatio = true;
+    for (unsigned int i = 0; i < in.size(); ++i) {
+      if (xs[i].empty()) continue;
+      std::vector<double> ex(xs[i].size(), 0.0);
+      auto* gr = new TGraphErrors((int)xs[i].size(), xs[i].data(), rs[i].data(),
+                                  ex.data(), ers[i].data());
+      gr->SetLineColor(in[i].color); gr->SetMarkerColor(in[i].color);
+      gr->SetMarkerStyle(in[i].marker); gr->SetMarkerSize(0.8); gr->SetLineWidth(2);
+      gr->Draw(firstRatio ? "AP" : "P SAME");
+      if (firstRatio) {
+        // Just "Ratio" by default. The ratio pad is only 30% of the canvas, so its y title is
+        // drawn large in pad-relative units and anything longer gets clipped at the canvas
+        // edge — "Ratio to gFEX" already lost its first characters. What the denominator is
+        // gets stated in the figure caption instead. refShortName restores the long form for
+        // a plot that needs it to stand alone.
+        gr->GetYaxis()->SetTitle(opts.refShortName.empty()
+                                 ? "Ratio"
+                                 : ("Ratio to " + opts.refShortName).c_str());
+        gr->GetYaxis()->SetNdivisions(505);
+        gr->GetYaxis()->SetTitleSize(0.105); gr->GetYaxis()->SetTitleOffset(0.58);
+        gr->GetYaxis()->SetLabelSize(0.095);
+        gr->GetXaxis()->SetTitle(opts.xTitle.c_str());
+        gr->GetXaxis()->SetTitleSize(0.115); gr->GetXaxis()->SetTitleOffset(1.20);
+        gr->GetXaxis()->SetLabelSize(0.095);
+        gr->SetMinimum(opts.ratioMin); gr->SetMaximum(ratioMax);
+        gr->GetXaxis()->SetLimits(xLo, xHi);
+        firstRatio = false;
+      }
+    }
+    if (!firstRatio) {
+      TLine* unity = new TLine(xLo, 1.0, xHi, 1.0);
+      unity->SetLineStyle(2); unity->SetLineColor(kGray + 2);
+      unity->Draw("SAME");
+    }
+  }
+
+  c->cd();
+  c->SaveAs(outputPath);
+  return c;
+}
+
 // Function to generate background rate vs. signal efficiency plots
 RateEffOut MakeRateVsEff(TH1* hSig, TH1* hBkg) {
   // 1) cumulative from HIGH -> LOW threshold
@@ -1562,7 +1929,11 @@ void SaveRateVsThrGraphOverlay(const std::vector<TGraphErrors*>& graphs,
   c->SetLeftMargin(0.16); c->SetBottomMargin(0.16); c->SetTicks(1,1);
   c->SetLogy();
 
-  TLegend* leg = new TLegend(0.38, 0.66, 0.93, 0.90);
+  // Moved down and left from (0.38, 0.66, 0.93, 0.90): these labels end with
+  // "d_{search} disabled", whose subscript pushed the text past the right edge of the pad
+  // and out of the figure. The rate curve falls steeply from the top-left, so the freed
+  // space below is empty at the thresholds where the legend now sits.
+  TLegend* leg = new TLegend(0.30, 0.58, 0.88, 0.82);
   leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.024);
   if (!legendHeader.empty()) leg->SetHeader(legendHeader.c_str(), "C");
 

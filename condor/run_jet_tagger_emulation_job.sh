@@ -19,6 +19,8 @@
 #   $16 fileIndex           (integer index appended to output name to avoid collisions)
 #   $17 useEtaSKObjects     (true or false)
 #   $18 pileup              (200 or 140; tags the output name r16130 / r16129. Default 200.)
+#   $19 inputTowerEtCut     (E_T cut [GeV] on the input towers; 0 = no cut. Tagged _T<n> in
+#                            the output name. Default 0.)
 
 RMRG="$1"
 R2="$2"
@@ -38,6 +40,7 @@ INFILE="${15}"
 FIDX="${16}"
 ETASK="${17}"
 PILEUP="${18:-200}"
+TOWERET="${19:-0}"
 
 echo "=== JetTagger Emulation Condor job ==="
 echo "  rMerge=$RMRG  rSquared=$R2  nIOs=$NIOS  nSeeds=$NSEEDS  algo=$ALGOV"
@@ -90,6 +93,6 @@ cd "$JOBDIR"
 
 # --- Run emulation ---
 echo "Running emulation in: $JOBDIR"
-root -l -b -q "jetTaggerEmulation.cc+(${RMRG}, ${NIOS}, ${NSEEDS}, ${R2}, ${SIGNAL}, true, ${PUSUP}, \"${SIGSTR}\", \"${INOBJ}\", \"${SEEDOBJ}\", ${SJETT}, ${ETWM}, ${MINETO}, ${MINETC}, false, \"${INFILE}\", ${FIDX}, ${ETASK}, false, ${PILEUP})"
+root -l -b -q "jetTaggerEmulation.cc+(${RMRG}, ${NIOS}, ${NSEEDS}, ${R2}, ${SIGNAL}, true, ${PUSUP}, \"${SIGSTR}\", \"${INOBJ}\", \"${SEEDOBJ}\", ${SJETT}, ${ETWM}, ${MINETO}, ${MINETC}, false, \"${INFILE}\", ${FIDX}, ${ETASK}, false, ${PILEUP}, ${TOWERET})"
 
 echo "=== Job complete ==="

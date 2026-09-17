@@ -230,9 +230,17 @@ std::string makeOutputFileName(double rMergeCut,
                                bool enableEtWeightedMidpoint = false,
                                bool minEtSeedPosOptimization = true,
                                double minEtSeedPosOptimizationCut = 20.0,
+                               // Default kept for direct callers only; jetTaggerEmulation.cc passes
+                               // output_ntuple_dir_ explicitly and that constant is authoritative.
                                std::string outputRootFilePath = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/",
                                bool useEtaSKObjects = false,
-                               unsigned int pileup = 200) {
+                               unsigned int pileup = 200,
+                               // E_T threshold [GeV] applied to the INPUT towers fed to the
+                               // algorithm; tagged _T<n> in the name. 2 = the original
+                               // production, 0 = no cut. Without this in the filename the two
+                               // productions are indistinguishable by basename, which collides
+                               // their analysis state files (keyed on basename).
+                               double inputTowerEtThreshold = 0.0) {
     gSystem->mkdir(outputRootFilePath.c_str());
     std::string usePUSuppress;
     if(useEtaSKObjects){
@@ -263,6 +271,7 @@ std::string makeOutputFileName(double rMergeCut,
        << "IOs_" << NIOs << "_"
        << "Seeds_" << nSeeds << "_"
        << "R2_" << std::setprecision(3) << RSquaredCut << "_IO_" << inputObjectType << "_Seed_" << seedObjectType << "_" << usePUSuppress
+       << "_T" << static_cast<int>(inputTowerEtThreshold)
        << "_subjetEt" << static_cast<int>(subjetEtThreshold) << "GeV"
        << "_ewm" << static_cast<int>(enableEtWeightedMidpoint)
        << "_mep" << static_cast<int>(minEtSeedPosOptimization)

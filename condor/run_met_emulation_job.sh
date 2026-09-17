@@ -14,6 +14,11 @@
 #   ${10} towerScaleFactor   (scalar weight on tower MET in totalMET sum, e.g. 1.0)
 #   ${11} jetScaleFactor     (scalar weight on jet MET in totalMET sum, e.g. 0.4)
 #   ${12} pileup             (200 or 140; tags the output name r16130 / r16129. Default 200.)
+#   ${13} useGEPJwoJ         (true or false; writes the GEP JwoJ MET branches. Default false.)
+#   ${14} jwojHardEtThreshold(tower E_T [GeV] above which a tower joins the JwoJ hard term.
+#                             Default 10.0. Ignored unless ${13} is true. The JwoJ hard/soft
+#                             coefficients are ${11}/${10} — jetScaleFactor and
+#                             towerScaleFactor — not separate arguments.)
 #
 # Ordering: when $8 is a `;`-separated list, the wrapper hadds the inputs in
 # the EXACT order given. The submit script provides them in sorted-fidx order,
@@ -32,12 +37,15 @@ FIDX="$9"
 TWRSF="${10}"
 JETSF="${11}"
 PILEUP="${12:-200}"
+USEJWOJ="${13:-false}"
+JWOJHARDET="${14:-10.0}"
 
 echo "=== MET Emulation Condor job ==="
 echo "  signal=$SIGNAL  signalString=$SIGSTR  puSup=$PUSUP  etaSK=$ETASK  pileup=$PILEUP"
 echo "  jetEtThreshold=$JETET  doJetTowerOR=$JTOR  towerEtThreshold=$TOWERET"
 echo "  inputFile=$INFILE  fileIndex=$FIDX"
 echo "  towerScaleFactor=$TWRSF  jetScaleFactor=$JETSF"
+echo "  useGEPJwoJ=$USEJWOJ  jwojHardEtThreshold=$JWOJHARDET"
 echo ""
 
 # --- ATLAS/ROOT environment setup ---
@@ -84,6 +92,6 @@ fi
 
 # --- Run emulation ---
 echo "Running emulation in: $JOBDIR"
-root -l -b -q "metEmulation.cc+(${SIGNAL}, ${PUSUP}, \"${SIGSTR}\", ${JETET}, ${JTOR}, ${TOWERET}, ${ETASK}, \"${EMU_INPUT}\", ${FIDX}, ${TWRSF}, ${JETSF}, ${PILEUP})"
+root -l -b -q "metEmulation.cc+(${SIGNAL}, ${PUSUP}, \"${SIGSTR}\", ${JETET}, ${JTOR}, ${TOWERET}, ${ETASK}, \"${EMU_INPUT}\", ${FIDX}, ${TWRSF}, ${JETSF}, ${PILEUP}, ${USEJWOJ}, ${JWOJHARDET})"
 
 echo "=== Job complete ==="

@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <cmath>
+#include <vector>   // for the GEP JwoJ per-eta-bin parameter table
 #include "metConstants/constants.h"
 
 // Wrap unsigned phi index into [0, two_pi_digitized_in_phi_]
@@ -95,6 +96,89 @@ unsigned int digitize(double value, int bit_length, double min_val, double max_v
     return static_cast<unsigned int>(std::round((value - min_val) * scale));
 }
 
+// --- GEP JwoJ MET parameters ------------------------------------------------------------
+// The GEP JwoJ MET algorithm splits the tower collection in two, in the spirit of the gFEX
+// "jets without jets" algorithm but on single towers rather than on gBlocks:
+//
+//   hard term : towers with E_T strictly above hardEtThreshold
+//   soft term : every other tower that survived the tower E_T threshold
+//
+// and recombines them as
+//
+//   MET_{x,y} = -( hardCoeff * SUM_hard E_T{x,y} + softCoeff * SUM_soft E_T{x,y} )
+//
+// The three numbers are held as per-eta-bin vectors rather than as scalars so an
+// eta-dependent calibration can be dropped in later without the event loop changing: the
+// loop already looks each tower's parameters up by its digitized eta code. What exists today
+// is the single-bin table makeUniformGEPJwoJParams builds, which spans the whole eta range
+// and so reproduces the scalar behaviour exactly.
+//
+// The binning is on the digitized eta CODE and not on the double, for the same reason the
+// rest of this chain works in codes: a bin boundary has to fall between two towers of the
+// grid rather than part way through one, or the firmware and the emulator will disagree
+// about which side of it a tower sits on.
+struct GEPJwoJParams {
+    // Inclusive upper eta code of each bin, ascending. The last entry must be eta_range_ - 1
+    // so that every code on the grid lands in a bin.
+    std::vector<unsigned int> etaCodeUpperEdges;
+    std::vector<double>       hardEtThreshold;   // [GeV], one per bin
+    std::vector<double>       hardCoeff;         // one per bin
+    std::vector<double>       softCoeff;         // one per bin
+
+    unsigned int nBins() const { return static_cast<unsigned int>(etaCodeUpperEdges.size()); }
+
+    // Bin holding this eta code. A linear scan: the table is one entry today and would be a
+    // handful at most, so anything cleverer would cost more than it saves. A code past the
+    // last edge -- which digitize() should never produce, since it saturates at range - 1 --
+    // falls into the last bin rather than off the end of the vectors.
+    unsigned int binForEtaCode(unsigned int etaCode) const {
+        for (unsigned int iBin = 0; iBin + 1 < nBins(); ++iBin)
+            if (etaCode <= etaCodeUpperEdges[iBin]) return iBin;
+        return nBins() - 1;
+    }
+};
+
+// One eta bin covering the whole grid: what the scalar command-line parameters mean.
+inline GEPJwoJParams makeUniformGEPJwoJParams(double hardEtThreshold,
+                                              double hardCoeff,
+                                              double softCoeff) {
+    GEPJwoJParams params;
+    params.etaCodeUpperEdges = { eta_range_ - 1 };
+    params.hardEtThreshold   = { hardEtThreshold };
+    params.hardCoeff         = { hardCoeff };
+    params.softCoeff         = { softCoeff };
+    return params;
+}
+
+// Build an eta-binned table from physical eta upper edges, for when the calibration exists.
+// The edges are digitized onto the tower grid here, once, so the event loop never sees a
+// double; the last bin is forced to eta_range_ - 1 whatever was passed, so no code can fall
+// outside the table.
+//
+// Nothing calls this yet -- it is the entry point the eta-dependent calibration is meant to
+// arrive through, kept beside the uniform builder so the two cannot drift apart.
+inline GEPJwoJParams makeEtaBinnedGEPJwoJParams(const std::vector<double>& etaUpperEdges,
+                                                const std::vector<double>& hardEtThresholds,
+                                                const std::vector<double>& hardCoeffs,
+                                                const std::vector<double>& softCoeffs) {
+    const size_t nBins = etaUpperEdges.size();
+    if (nBins == 0 || hardEtThresholds.size() != nBins ||
+        hardCoeffs.size() != nBins || softCoeffs.size() != nBins) {
+        std::cerr << "Error: GEP JwoJ eta-binned parameter vectors have mismatched sizes"
+                  << " -- falling back to unit coefficients with no hard term" << std::endl;
+        return makeUniformGEPJwoJParams(0.0, 1.0, 1.0);
+    }
+    GEPJwoJParams params;
+    params.hardEtThreshold = hardEtThresholds;
+    params.hardCoeff       = hardCoeffs;
+    params.softCoeff       = softCoeffs;
+    params.etaCodeUpperEdges.reserve(nBins);
+    for (size_t iBin = 0; iBin < nBins; ++iBin)
+        params.etaCodeUpperEdges.push_back(digitize(etaUpperEdges[iBin], eta_bit_length_, eta_min_, eta_max_));
+    params.etaCodeUpperEdges.back() = eta_range_ - 1;
+    return params;
+}
+
 // Sign-magnitude: MSB = sign bit, remaining signed_et_bit_length_-1 bits = magnitude
 template<size_t signed_et_bit_length_>
 inline double undigitize_signed_et(const std::bitset<signed_et_bit_length_>& bits) {
@@ -119,11 +203,13 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
                                   double jetEtThreshold,
                                   double towerEtThreshold,
                                   bool doJetTowerOverlapRemoval,
-                                  std::string outputRootFilePath = "/data/larsonma/GEPMET/outputNTuplesDev_METv2/",
+                                  std::string outputRootFilePath = "/data/larsonma/GEPMET/outputNTuplesDev_METv3/",
                                   bool useEtaSKObjects = false,
                                   double towerScaleFactor = 1.0,
                                   double jetScaleFactor   = 1.0,
-                                  unsigned int pileup     = 200) {
+                                  unsigned int pileup     = 200,
+                                  bool useGEPJwoJ              = false,
+                                  double jwojHardEtThreshold   = 0.0) {
     gSystem->mkdir(outputRootFilePath.c_str());
     std::string usePUSuppress = useEtaSKObjects ? "EtaSK" : (useSKObjects ? "SK" : "NoSK");
     std::string overlapTag    = doJetTowerOverlapRemoval ? "OR" : "NoOR";
@@ -170,7 +256,14 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
        << "_"         << usePUSuppress
        << "_"         << overlapTag
        << "_twrSF"    << twrSFTag
-       << "_jetSF"    << jetSFTag
-       << ".root";
+       << "_jetSF"    << jetSFTag;
+    // GEP JwoJ tag, written ONLY when that algorithm is enabled, so every filename produced
+    // before it existed comes out byte-identical and nothing already on disk has to move.
+    // The hard/soft coefficients are not repeated here: in JwoJ mode they ARE twrSF (soft)
+    // and jetSF (hard), so the two tags above already carry them. The hard-term threshold is
+    // the only genuinely new number, so it is the only new tag.
+    // metAnalysisAndRates.C keys its GEP JwoJ path on the "_GEPJwoJ_" substring.
+    if (useGEPJwoJ) ss << "_GEPJwoJ_hardEt" << formatThreshold(jwojHardEtThreshold);
+    ss << ".root";
     return applyPileupTags(ss.str(), pileup);
 }

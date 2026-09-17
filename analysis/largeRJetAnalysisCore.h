@@ -1,5 +1,19 @@
+// largeRJetAnalysisCore.h — shared body of the compute/plot split (largeRJetSplitPlan.md).
+// This file IS the pre-split largeRJetAnalysisAndRates.C (cached in cachedScripts/) with:
+//   * every `new TH1F/TH2F/TH3F/TProfile(` rewritten to `bookTH1F(...)` etc.
+//     (largeRJetStateRegistry.h) so histograms are saved (compute) / loaded (plot),
+//   * the event loops guarded by LRJRunEventLoops(), the drawing by LRJDrawPlots(),
+//   * a state checkpoint at the end of each file pair's fill region,
+//   * per-event summary trees for the threshold-dependent turn-on fills,
+//   * entry-range + sample-selection parameters for chunked compute jobs.
+// Drivers: largeRJetCompute.C, largeRJetPlot.C. The original monolithic macro is left
+// untouched and still runs on its own.
+#ifndef LARGERJET_ANALYSIS_CORE_H
+#define LARGERJET_ANALYSIS_CORE_H
+
 #include "analysisHelperFunctions.h"
 #include "chainSource.h"
+#include "largeRJetStateRegistry.h"
 
 // Used by the debug error handler below (DefaultErrorHandler, gPad, TIter).
 #include "TError.h"
@@ -48,6 +62,57 @@ const int kP10Cyan   = TColor::GetColor("#92dadd");
 // consistent across loops.
 constexpr int kMaxEventsPerSlice = -1;
 
+// --- Binomial per-crossing conversion on the rate-vs-threshold plots ------------------------
+// Converts a curve to a per-crossing rate with R_BX = f_BX (1 - (1-p)^mu),
+// p = R_coll / (f_BX mu), mu taken from the sample's own r-tag (gPileup, set per file by
+// SetPileupFromPath). Set PER PILEUP, because the two currently need opposite treatment.
+//
+// *** INTERIM, NOT A PHYSICS RESULT. *** Whichever setting lands nearer f_BX = 30.9 MHz is
+// what is switched on here, so that plots can be produced while the underlying question is
+// still open. The two pileups therefore receive DIFFERENT treatment, and a plot overlaying
+// them is not internally consistent — say so when showing it.
+//   PU200: conversion ON  — as filled it sits well above f_BX; converted it lands near
+//                           25 MHz, i.e. closer to the crossing rate.
+//   PU140: conversion OFF — as filled it is already ~33.6 MHz, close to f_BX; converting
+//                           it pushes it DOWN to ~18 MHz, i.e. further away.
+//
+// The real question, for the expert discussion, is what R_coll should be after the HSTP
+// filter. Measured on the r16129 state file: JZ0 with no HSTP gives 3.84 GHz (89% of
+// mu x f_BX = 4.33 GHz, so the unfiltered sample does span the inelastic rate), while all
+// JZ with HSTP applied gives 33.6 MHz — the filter removes ~99% of the weight and nothing
+// renormalises it. metAnalysisAndRates.C faces the same thing and rescales every weighted
+// background histogram so the rate at threshold 0 equals kCrossingRateHz
+// (normalizeRateToTarget); this macro has no equivalent. Settling that is what should
+// replace these two flags.
+constexpr bool kApplyBinomialRateVsThr140 = false;
+constexpr bool kApplyBinomialRateVsThr200 = true;
+
+// Per-pileup correction applied to R_coll BEFORE p is formed, i.e. the `collisionRateScale`
+// argument of MakeBinomialCrossingRateHist. This is a PLOT-STAGE multiplier, so it fixes a
+// wrong collision-rate normalisation WITHOUT re-running HERNTupler — the event weights in
+// the ntuples are left alone and simply scaled here.
+//
+// Use it to repair the luminosity inconsistency noted above: the weights carry
+// sigma x L_inst with L = 7.5e10 (PU200) and 5.0e10 (PU140), a ratio of 1.50 where mu says
+// 1.43. Making L track mu means scaling PU140 by (7.5e10 x 140/200) / 5.0e10 = 1.05:
+//     kBinomialCollisionRateScale140 = 1.05;
+//
+// HONEST LIMIT: that is a 5% correction. It will NOT by itself lift PU140 from ~18 MHz to
+// f_BX = 30.9 MHz, which needs R_coll roughly two orders of magnitude larger. So either the
+// sample genuinely does not span the full inelastic cross section at threshold 0 — the HSTP
+// filter removes most of JZ0, in which case saturating below f_BX is correct and expected —
+// or the overall rate normalisation is off by a large factor that this knob would have to
+// absorb. Measure R_coll(0) from a state file and compare against mu x f_BX
+// (4.33 GHz at PU140, 6.18 GHz at PU200) before choosing a value: if it already equals that,
+// the luminosity ratio is the only thing to fix; if it is far below, the deficit is physics
+// (the filter) and forcing both to 30.9 MHz with this knob would be fabricating agreement.
+// Set to 1.05 = 5.25e10 / 5.0e10: the PU140 weights were made with L = 5.0e10, and 5.25e10
+// (= 7.5e10 x 140/200) is the value that makes L track mu. Applying it here reproduces an
+// L = 5.25e10 ntuple without regenerating one. When HERNTupler is next re-run with
+// reweightLuminosity_PU140 = 5.25e10, set this back to 1.0 or the correction is applied twice.
+constexpr double kBinomialCollisionRateScale140 = 1.05;
+constexpr double kBinomialCollisionRateScale200 = 1.0;
+
 // Every rate-vs-threshold plot is written twice: once over the full threshold range and once
 // truncated here, where the interesting part of the trigger rate curves lives.
 constexpr double kRateVsThrZoomXMax = 600.0;
@@ -62,6 +127,164 @@ constexpr double kRateVsThrZoomXMax = 600.0;
 // so backgroundFiles.size() is 1 and every per-file vector and post-loop overlay stays
 // index-consistent — which a `continue` inside the file loop would not.
 constexpr int kDebugOnlyFileIndex = -1;
+
+// --- compute/plot split runtime configuration, set by the drivers ------------------------
+// (largeRJetCompute.C / largeRJetPlot.C). Defaults reproduce whole-sample processing.
+//
+// The split line through this file is: the two RAW background event loops (loop 1 "rate"
+// and loop 2 "detailed" — 88% of the runtime, and verified to use no scan-derived
+// thresholds) run in the COMPUTE stage and fill the state file. Everything else — the
+// signal loops, the threshold derivations, and the threshold-dependent loops in the
+// leadingLRJSubjetScan block (which include one BACKGROUND loop cut on bestEtCut/10 kHz
+// thresholds) — runs in the PLOT stage exactly as in the monolith, because those fills
+// depend on thresholds only the full merged background sample defines. Signal event
+// loops in compute jobs are therefore deliberately NOT supported: after hadd they would
+// double-count signal fills N-chunk times.
+//
+// lrj_only_pair_index_: process a single file pair (compute jobs are per pair); -1 = all.
+//   Every name saved into a state file is pair-index FREE (the 12 fileIt-suffixed
+//   declarations were normalized to a fixed "_p" suffix), so state computed against one
+//   pair list serves any later plot subset or ordering — compute the superset once,
+//   --select what to plot (see condor/submit_largeRJetCompute.py). Pairs that share a
+//   background tagger config also share one state file for the same reason.
+// lrj_first_entry_/lrj_num_entries_: this chunk's slice of the GLOBAL background entry
+//   index (the ChainSource order — identical to the merged files' entry order, see
+//   largeRJetSplitPlan.md §4). -1 entries = through the end. Only the background loops
+//   read these; defaults leave mono/plot behavior untouched.
+int      lrj_only_pair_index_ = -1;
+Long64_t lrj_first_entry_     = 0;
+Long64_t lrj_num_entries_     = -1;
+// --- Jet-tagger output directory ----------------------------------------------------------
+// ONE directory holds every production. What used to be two directories is now distinguished
+// by the _T<n> tag in the filename, where <n> is the E_T threshold [GeV] applied to the INPUT
+// towers (emulationHelperFunctions.h makeOutputFileName):
+//   _T2_ : the original production, 2 GeV cut APPLIED
+//   _T0_ : cut REMOVED
+// Putting it in the NAME rather than the path is what lets both be analysed in one run: the
+// analysis state file is keyed on the tagger basename (LRJStateRegistry::mergedPath), so two
+// productions sharing a basename would silently share one state file. With the tag they
+// cannot collide.
+//
+// Note the cut also decided whether the input-object count mattered: with it applied,
+// objectsProcessed was overwritten by the surviving-tower count, so IOs_128 and IOs_256 gave
+// identical output. Without it the cap binds, so the two IO settings genuinely differ — which
+// is only meaningful in the _T0_ files.
+// Production the hardcoded fallback lists below point at. The generated pair list
+// (lrj_file_pairs_path_) overrides these entirely and carries absolute paths, so this only
+// matters for a legacy run with the pair list disabled. Keep it in step with
+// TAGGER_DIRS in condor/submit_largeRJetCompute.py and output_ntuple_dir_ in
+// algorithm/emulation/jetTaggerEmulation.cc.
+const std::string lrj_tagger_dir_ = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples_towerEtCutFixed/";
+// Generated pair-list file (condor/submit_largeRJetCompute.py --pairs-only writes it, both
+// drivers read it by default). Non-empty = REPLACE the hardcoded signalFiles /
+// backgroundFiles lists in largeRJetRun with the file's pairs, which is what guarantees
+// the compute and plot stages index the same pairs. Empty = legacy hardcoded lists.
+std::string lrj_file_pairs_path_ = "";
+// --- PLOT-STAGE pair selection, set in largeRJetPlot.C -----------------------------------
+// Generate the pair list ONCE with `submit_largeRJetCompute.py --pairs-only` (no --select,
+// so it holds every pair), then choose what to actually plot/overlay here in the macro —
+// no need to regenerate the list to change a study. A pair is kept when its description
+// AND its two tagger paths together contain EVERY string listed, e.g.
+//     lrj_plot_select_ = { "ggF", "rMerge_0.001", "EtaSK" };
+// Empty = plot every pair in the file. Safe because state files carry no pair index, so
+// any subset or ordering works against already-computed state.
+std::vector<std::string> lrj_plot_select_;
+// --- PLOT-STAGE pair ORDER, set in largeRJetPlot.C ---------------------------------------
+// Which pair is drawn FIRST, second, ... Everything downstream keys off the pair index:
+// draw order, colour from the Petroff palette, legend row order, and which curve owns the
+// axes. So this one list controls the appearance of EVERY plot, not just one.
+// Each entry is a substring, matched the same way lrj_plot_select_ matches. A pair is
+// ranked by the FIRST entry it contains; pairs matching nothing go last. The sort is
+// stable, so pairs of equal rank keep their pair-list order (e.g. d_search 0.001 before 2).
+//     lrj_plot_order_ = { "Seed_gepWTAConeCellsTowersJets", "Seed_jFEXSRJ", "Seed_gFEXSRJ" };
+// Empty = leave the pair-list order alone (which is alphabetical by tagger filename, so
+// gFEX lands before cone-jet before jFEX — rarely the order you want to read).
+std::vector<std::string> lrj_plot_order_;
+// Overrides the `overlaydir` line in the pair list; "" keeps whatever the file says.
+std::string lrj_plot_overlay_dir_ = "";
+
+// Parse the generated pairs file. Grammar (one directive per line, '#' = comment):
+//   overlaydir <dir>                                        (optional, at most once)
+//   pair <sigNtuple> <sigTagger> <bkgNtuple> <bkgTagger>    (one per pair, in pair order)
+// Returns false (with a message) on any malformed line — a truncated or hand-mangled
+// file must not silently configure a partial run.
+inline bool lrjLoadFilePairs(const std::string& path,
+                             std::vector<std::pair<std::string,std::string>>& sig,
+                             std::vector<std::pair<std::string,std::string>>& bkg,
+                             TString& overlayDir,
+                             std::vector<std::string>* descOut = nullptr) {
+    std::ifstream in(path);
+    if (!in) {
+        std::cerr << "[pairs] cannot open pair-list file: " << path << "\n"
+                  << "[pairs] generate it with: cd ../condor && "
+                  << "python3 submit_largeRJetCompute.py --pairs-only\n";
+        return false;
+    }
+    sig.clear(); bkg.clear();
+    if (descOut) descOut->clear();
+    std::string pendingDesc;   // text of the "# pair N: ..." comment above each pair line
+    std::string line;
+    int nLine = 0;
+    while (std::getline(in, line)) {
+        ++nLine;
+        std::istringstream ss(line);
+        std::string tok; ss >> tok;
+        if (tok.empty() || tok[0] == '#') {
+            // "# pair 12: sample=ggF_hh_bbbb PU200 rMerge=0.001 ..." — kept so the plot-stage
+            // selection can match the readable description, not only the file paths.
+            const size_t c = line.find(':');
+            if (line.find("# pair ") == 0 && c != std::string::npos)
+                pendingDesc = line.substr(c + 1);
+            continue;
+        }
+        if (tok == "overlaydir") {
+            std::string d; ss >> d;
+            if (!d.empty()) overlayDir = d.c_str();
+            continue;
+        }
+        if (tok == "pair") {
+            std::string a, b, c, d; ss >> a >> b >> c >> d;
+            if (d.empty()) {
+                std::cerr << "[pairs] " << path << ":" << nLine
+                          << ": 'pair' needs 4 paths (sigNtuple sigTagger bkgNtuple bkgTagger)\n";
+                return false;
+            }
+            sig.emplace_back(a, b);
+            bkg.emplace_back(c, d);
+            if (descOut) descOut->push_back(pendingDesc);
+            pendingDesc.clear();
+            continue;
+        }
+        std::cerr << "[pairs] " << path << ":" << nLine << ": unknown directive '" << tok << "'\n";
+        return false;
+    }
+    if (sig.empty()) {
+        std::cerr << "[pairs] " << path << " contains no pairs\n";
+        return false;
+    }
+    std::cout << "[pairs] " << sig.size() << " pair(s) loaded from " << path << "\n";
+    for (unsigned int i = 0; i < sig.size(); ++i)
+        std::cout << "[pairs]   pair " << i << ": "
+                  << gSystem->BaseName(sig[i].second.c_str()) << "\n";
+    return true;
+}
+// Alternative chunking by job count: job lrj_job_index_ of lrj_n_jobs_ takes the matching
+// 1/N slice of the total, computed here once the total is known — so submit scripts never
+// have to count entries. Takes precedence over first/num when lrj_n_jobs_ > 0.
+int      lrj_n_jobs_          = 0;
+int      lrj_job_index_       = 0;
+
+// Entry bounds for one of this job's event loops: [first, end) clipped to nTotal.
+inline void lrjChunkBounds(Long64_t nTotal, Long64_t& first, Long64_t& end) {
+    if (lrj_n_jobs_ > 0) {
+        first = nTotal *  (Long64_t)lrj_job_index_      / lrj_n_jobs_;
+        end   = nTotal * ((Long64_t)lrj_job_index_ + 1) / lrj_n_jobs_;
+        return;
+    }
+    first = std::min<Long64_t>(lrj_first_entry_, nTotal);
+    end   = (lrj_num_entries_ < 0) ? nTotal
+                                   : std::min<Long64_t>(first + lrj_num_entries_, nTotal);
+}
 
 // gSystem->RedirectOutput(path) freopen()s BOTH stdout and stderr onto the same path, and
 // each stream then carries its own independent file offset starting at zero. stderr
@@ -488,8 +711,8 @@ std::map<std::string, std::string> rateVsThr_graph_xTitle;
 
 
 
-TH1F* sig_h_leading_offlineLRJ_Et = new TH1F("sig_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading Offline LRJs / 20 GeV", 40, 0, 800); // moved outside scope of file loop for use afterwards
-TH1F* sig_h_subleading_offlineLRJ_Et = new TH1F("sig_h_subleading_offlineLRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading Offline LRJs / 20 GeV", 40, 0, 800); // now will only fill for first file as is same for each
+TH1F* sig_h_leading_offlineLRJ_Et = bookTH1F("sig_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading Offline LRJs / 20 GeV", 40, 0, 800); // moved outside scope of file loop for use afterwards
+TH1F* sig_h_subleading_offlineLRJ_Et = bookTH1F("sig_h_subleading_offlineLRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading Offline LRJs / 20 GeV", 40, 0, 800); // now will only fill for first file as is same for each
 
 std::cout << "Processing : " << backgroundFiles.size() << " files. " << "\n";
 std::vector<std::string > algorithmConfigurations;
@@ -510,6 +733,13 @@ std::vector<TH1F*> sig_h_ConstituentMass_vec;
 std::vector<TH1F*> back_h_ConstituentMass_vec;
 std::vector<unsigned int> nInputObjects_vec;
 for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
+    // State registry: names the state file after the background tagger output; in the plot
+    // stage this opens <base>__state.root for the book() fetches below. Closes the
+    // previous pair's file if one is still open.
+    if (gLRJState.stage != LRJStage::kMono) {
+        gLRJState.EndPair();
+        gLRJState.BeginPair(backgroundFiles[fileIt].second);
+    }
     double sumOfBackgroundEventWeight = 0;
     // Parse file info from jet tagger file name (contains algorithm config tags)
     std::string inputObjectType = ParseFileName(backgroundFiles[fileIt].second).inputObjectType;
@@ -585,8 +815,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* eventInfoTreeSignal = (TTree*)signalInputFile->Get("eventInfoTree"); if (eventInfoTreeSignal) { eventInfoTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* truthbTreeSignal = (TTree*)signalInputFile->Get("truthbTree"); if (truthbTreeSignal) { truthbTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* truthHiggsTreeSignal = (TTree*)signalInputFile->Get("truthHiggsTree"); if (truthHiggsTreeSignal) { truthHiggsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* caloTopoTowerTreeSignal = (TTree*)signalInputFile->Get("caloTopoTowerTree"); if (caloTopoTowerTreeSignal) { caloTopoTowerTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* topo422TreeSignal = (TTree*)signalInputFile->Get("topo422Tree"); if (topo422TreeSignal) { topo422TreeSignal->SetCacheSize(30*1024*1024); }
+    //TTree* caloTopoTowerTreeSignal = (TTree*)signalInputFile->Get("caloTopoTowerTree"); if (caloTopoTowerTreeSignal) { caloTopoTowerTreeSignal->SetCacheSize(30*1024*1024); }  // disabled: no longer written by HERNTupler
+    //TTree* topo422TreeSignal = (TTree*)signalInputFile->Get("topo422Tree"); if (topo422TreeSignal) { topo422TreeSignal->SetCacheSize(30*1024*1024); }  // disabled: no longer written by HERNTupler
     TTree* gepBasicClustersTreeSignal = (TTree*)signalInputFile->Get("gepBasicClustersTree"); if (gepBasicClustersTreeSignal) { gepBasicClustersTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersTree"); if (gepCellsTowersTreeSignal) { gepCellsTowersTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepBasicClustersSKTreeSignal = (TTree*)signalInputFile->Get("gepBasicClustersSKTree"); if (gepBasicClustersSKTreeSignal) { gepBasicClustersSKTreeSignal->SetCacheSize(30*1024*1024); }
@@ -663,8 +893,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* emulEventInfoTreeBack = (TTree*)backgroundJetTaggerFile->Get("emulEventInfoTree"); if (emulEventInfoTreeBack) { emulEventInfoTreeBack->SetCacheSize(30*1024*1024); }
     TTree* emulEventInfoTreeSignal = (TTree*)signalJetTaggerFile->Get("emulEventInfoTree"); if (emulEventInfoTreeSignal) { emulEventInfoTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* eventInfoTreeBack = (TTree*)backgroundInputFile->Get("eventInfoTree"); if (eventInfoTreeBack) { eventInfoTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* caloTopoTowerTreeBack = (TTree*)backgroundInputFile->Get("caloTopoTowerTree"); if (caloTopoTowerTreeBack) { caloTopoTowerTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* topo422TreeBack = (TTree*)backgroundInputFile->Get("topo422Tree"); if (topo422TreeBack) { topo422TreeBack->SetCacheSize(30*1024*1024); }
+    //TTree* caloTopoTowerTreeBack = (TTree*)backgroundInputFile->Get("caloTopoTowerTree"); if (caloTopoTowerTreeBack) { caloTopoTowerTreeBack->SetCacheSize(30*1024*1024); }  // disabled: no longer written by HERNTupler
+    //TTree* topo422TreeBack = (TTree*)backgroundInputFile->Get("topo422Tree"); if (topo422TreeBack) { topo422TreeBack->SetCacheSize(30*1024*1024); }  // disabled: no longer written by HERNTupler
     TTree* gepBasicClustersTreeBack = (TTree*)backgroundInputFile->Get("gepBasicClustersTree"); if (gepBasicClustersTreeBack) { gepBasicClustersTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersTree"); if (gepCellsTowersTreeBack) { gepCellsTowersTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepBasicClustersSKTreeBack = (TTree*)backgroundInputFile->Get("gepBasicClustersSKTree"); if (gepBasicClustersSKTreeBack) { gepBasicClustersSKTreeBack->SetCacheSize(30*1024*1024); }
@@ -794,12 +1024,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double>* truthHiggsEtaValuesSignal = nullptr;
     std::vector<double>* truthHiggsPhiValuesSignal = nullptr;
     std::vector<double>* truthHiggsInvMassValuesSignal = nullptr;
-    std::vector<double>* caloTopoTowerEtValuesSignal = nullptr;
-    std::vector<double>* caloTopoTowerEtaValuesSignal = nullptr;
-    std::vector<double>* caloTopoTowerPhiValuesSignal = nullptr;
-    std::vector<double>* topo422EtValuesSignal = nullptr;
-    std::vector<double>* topo422EtaValuesSignal = nullptr;
-    std::vector<double>* topo422PhiValuesSignal = nullptr;
+    // disabled: caloTopoTowers / topo422 no longer written by HERNTupler
+    //std::vector<double>* caloTopoTowerEtValuesSignal = nullptr;
+    //std::vector<double>* caloTopoTowerEtaValuesSignal = nullptr;
+    //std::vector<double>* caloTopoTowerPhiValuesSignal = nullptr;
+    //std::vector<double>* topo422EtValuesSignal = nullptr;
+    //std::vector<double>* topo422EtaValuesSignal = nullptr;
+    //std::vector<double>* topo422PhiValuesSignal = nullptr;
     std::vector<double>* gepBasicClustersEtValuesSignal = nullptr;
     std::vector<double>* gepBasicClustersEtaValuesSignal = nullptr;
     std::vector<double>* gepBasicClustersPhiValuesSignal = nullptr;
@@ -1123,12 +1354,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double>* jetTaggerSubleadingLRJSubjetEtValuesBack = nullptr;
     std::vector<double>* jetTaggerSubleadingLRJSubjetEtaValuesBack = nullptr;
     std::vector<double>* jetTaggerSubleadingLRJSubjetPhiValuesBack = nullptr;
-    std::vector<double>* caloTopoTowerEtValuesBack = nullptr;
-    std::vector<double>* caloTopoTowerEtaValuesBack = nullptr;
-    std::vector<double>* caloTopoTowerPhiValuesBack = nullptr;
-    std::vector<double>* topo422EtValuesBack = nullptr;
-    std::vector<double>* topo422EtaValuesBack = nullptr;
-    std::vector<double>* topo422PhiValuesBack = nullptr;
+    // disabled: caloTopoTowers / topo422 no longer written by HERNTupler
+    //std::vector<double>* caloTopoTowerEtValuesBack = nullptr;
+    //std::vector<double>* caloTopoTowerEtaValuesBack = nullptr;
+    //std::vector<double>* caloTopoTowerPhiValuesBack = nullptr;
+    //std::vector<double>* topo422EtValuesBack = nullptr;
+    //std::vector<double>* topo422EtaValuesBack = nullptr;
+    //std::vector<double>* topo422PhiValuesBack = nullptr;
     std::vector<double>* gepBasicClustersEtValuesBack = nullptr;
     std::vector<double>* gepBasicClustersEtaValuesBack = nullptr;
     std::vector<double>* gepBasicClustersPhiValuesBack = nullptr;
@@ -1454,15 +1686,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     truthHiggsTreeSignal->SetBranchAddress("Eta", &truthHiggsEtaValuesSignal);
     truthHiggsTreeSignal->SetBranchAddress("Phi", &truthHiggsPhiValuesSignal);
 
-    // === caloTopoTowerTreeSignal ===
-    caloTopoTowerTreeSignal->SetBranchAddress("Et", &caloTopoTowerEtValuesSignal);
-    caloTopoTowerTreeSignal->SetBranchAddress("Eta", &caloTopoTowerEtaValuesSignal);
-    caloTopoTowerTreeSignal->SetBranchAddress("Phi", &caloTopoTowerPhiValuesSignal);
+    // === caloTopoTowerTreeSignal ===  // disabled: no longer written by HERNTupler
+    //caloTopoTowerTreeSignal->SetBranchAddress("Et", &caloTopoTowerEtValuesSignal);
+    //caloTopoTowerTreeSignal->SetBranchAddress("Eta", &caloTopoTowerEtaValuesSignal);
+    //caloTopoTowerTreeSignal->SetBranchAddress("Phi", &caloTopoTowerPhiValuesSignal);
 
-    // === topo422TreeSignal ===
-    topo422TreeSignal->SetBranchAddress("Et", &topo422EtValuesSignal);
-    topo422TreeSignal->SetBranchAddress("Eta", &topo422EtaValuesSignal);
-    topo422TreeSignal->SetBranchAddress("Phi", &topo422PhiValuesSignal);
+    // === topo422TreeSignal ===  // disabled: no longer written by HERNTupler
+    //topo422TreeSignal->SetBranchAddress("Et", &topo422EtValuesSignal);
+    //topo422TreeSignal->SetBranchAddress("Eta", &topo422EtaValuesSignal);
+    //topo422TreeSignal->SetBranchAddress("Phi", &topo422PhiValuesSignal);
 
     // === gepBasicClustersTree ===
     gepBasicClustersTreeSignal->SetBranchAddress("Et", &gepBasicClustersEtValuesSignal);
@@ -1899,15 +2131,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     jetTaggerSubleadingLRJsBack->SetBranchAddress("SubjetEta", &jetTaggerSubleadingLRJSubjetEtaValuesBack);
     jetTaggerSubleadingLRJsBack->SetBranchAddress("SubjetPhi", &jetTaggerSubleadingLRJSubjetPhiValuesBack);
 
-    // === caloTopoTowerTreeBack ===
-    caloTopoTowerTreeBack->SetBranchAddress("Et", &caloTopoTowerEtValuesBack);
-    caloTopoTowerTreeBack->SetBranchAddress("Eta", &caloTopoTowerEtaValuesBack);
-    caloTopoTowerTreeBack->SetBranchAddress("Phi", &caloTopoTowerPhiValuesBack);
+    // === caloTopoTowerTreeBack ===  // disabled: no longer written by HERNTupler
+    //caloTopoTowerTreeBack->SetBranchAddress("Et", &caloTopoTowerEtValuesBack);
+    //caloTopoTowerTreeBack->SetBranchAddress("Eta", &caloTopoTowerEtaValuesBack);
+    //caloTopoTowerTreeBack->SetBranchAddress("Phi", &caloTopoTowerPhiValuesBack);
 
-    // === topo422TreeBack ===
-    topo422TreeBack->SetBranchAddress("Et", &topo422EtValuesBack);
-    topo422TreeBack->SetBranchAddress("Eta", &topo422EtaValuesBack);
-    topo422TreeBack->SetBranchAddress("Phi", &topo422PhiValuesBack);
+    // === topo422TreeBack ===  // disabled: no longer written by HERNTupler
+    //topo422TreeBack->SetBranchAddress("Et", &topo422EtValuesBack);
+    //topo422TreeBack->SetBranchAddress("Eta", &topo422EtaValuesBack);
+    //topo422TreeBack->SetBranchAddress("Phi", &topo422PhiValuesBack);
 
     // === gepBasicClustersTreeBack ===
     gepBasicClustersTreeBack->SetBranchAddress("Et", &gepBasicClustersEtValuesBack);
@@ -2308,6 +2540,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     subleadingOutOfTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Eta", &outOfTimeAntiKt4TruthSRJSubleadingEtaValuesBack);
     subleadingOutOfTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Phi", &outOfTimeAntiKt4TruthSRJSubleadingPhiValuesBack);
     _lap(Form("[file %u] branch address setup", fileIt));
+    // The declarations region that follows books every raw event-loop histogram. In the
+    // plot stage a fetch miss here means the compute and plot code disagree on a name —
+    // silent empties would follow — so misses are fatal until the region ends.
+    gLRJState.strict = true;
 
     // --- Prune branches this macro never reads ---
     // Every SetBranchAddress above has been issued and the first GetEntry is far below in the
@@ -2351,45 +2587,45 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     // Histograms for making overlaid plots between multiple files.
     // make unique names so ROOT doesn't overwrite
-    auto h_sig_num100 = new TH1F(Form("sig_h_offlineLRJ_Et_num100_%d", fileIt),
+    auto h_sig_num100 = bookTH1F("sig_h_offlineLRJ_Et_num100_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)",
         100, 0, 1000);
-    auto h_sig_denom100 = new TH1F(Form("sig_h_offlineLRJ_Et_denom100_%d", fileIt),
-        "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)",
-        100, 0, 1000);
-
-    auto h_sig_num250 = new TH1F(Form("sig_h_offlineLRJ_Et_num250_%d", fileIt),
-        "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)",
-        100, 0, 1000);
-    auto h_sig_denom250 = new TH1F(Form("sig_h_offlineLRJ_Et_denom250_%d", fileIt),
+    auto h_sig_denom100 = bookTH1F("sig_h_offlineLRJ_Et_denom100_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)",
         100, 0, 1000);
 
-    auto h_sig_num400 = new TH1F(Form("sig_h_offlineLRJ_Et_num400_%d", fileIt),
+    auto h_sig_num250 = bookTH1F("sig_h_offlineLRJ_Et_num250_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)",
         100, 0, 1000);
-    auto h_sig_denom400 = new TH1F(Form("sig_h_offlineLRJ_Et_denom400_%d", fileIt),
+    auto h_sig_denom250 = bookTH1F("sig_h_offlineLRJ_Et_denom250_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)",
         100, 0, 1000);
 
-    auto h_back_num100 = new TH1F(Form("back_h_offlineLRJ_Et_num100_%d", fileIt),
+    auto h_sig_num400 = bookTH1F("sig_h_offlineLRJ_Et_num400_p",
+        "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)",
+        100, 0, 1000);
+    auto h_sig_denom400 = bookTH1F("sig_h_offlineLRJ_Et_denom400_p",
+        "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)",
+        100, 0, 1000);
+
+    auto h_back_num100 = bookTH1F("back_h_offlineLRJ_Et_num100_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)",
         45, 50, 500);
-    auto h_back_denom100 = new TH1F(Form("back_h_offlineLRJ_Et_denom100_%d", fileIt),
+    auto h_back_denom100 = bookTH1F("back_h_offlineLRJ_Et_denom100_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)",
         45, 50, 500);
 
-    auto h_back_num200 = new TH1F(Form("back_h_offlineLRJ_Et_num200_%d", fileIt),
+    auto h_back_num200 = bookTH1F("back_h_offlineLRJ_Et_num200_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)",
         45, 50, 500);
-    auto h_back_denom200 = new TH1F(Form("back_h_offlineLRJ_Et_denom200_%d", fileIt),
+    auto h_back_denom200 = bookTH1F("back_h_offlineLRJ_Et_denom200_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)",
         45, 50, 500);
 
-    auto h_back_num300 = new TH1F(Form("back_h_offlineLRJ_Et_num300_%d", fileIt),
+    auto h_back_num300 = bookTH1F("back_h_offlineLRJ_Et_num300_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)",
         45, 50, 500);
-    auto h_back_denom300 = new TH1F(Form("back_h_offlineLRJ_Et_denom300_%d", fileIt),
+    auto h_back_denom300 = bookTH1F("back_h_offlineLRJ_Et_denom300_p",
         "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)",
         45, 50, 500);
 
@@ -2456,143 +2692,143 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TH1F* back_h_jFEX_Sim_subleading_SRJ_Et_arr[nJZSlices_];
 
     for (unsigned int i = 0; i < nJZSlices_; ++i) {
-        back_h_leading_LRJ_Et_arr[i] = new TH1F(
+        back_h_leading_LRJ_Et_arr[i] = bookTH1F(
             Form("back_h_leading_LRJ_Et_%d", i),
             "Leading LRJ Et Distribution; Leading JetTagger LRJ E_{T} [GeV]; Events / 10 GeV",
             110, 0, 1100);
 
-        back_h_subleading_LRJ_Et_arr[i] = new TH1F(
+        back_h_subleading_LRJ_Et_arr[i] = bookTH1F(
             Form("back_h_subleading_LRJ_Et_%d", i),
             "Subleading LRJ Et Distribution;Subleading JetTagger LRJ E_{T} [GeV]; Events / 10 GeV",
             110, 0, 1100);
 
-        back_h_gFEX_leading_LRJ_Et_arr[i] = new TH1F(
+        back_h_gFEX_leading_LRJ_Et_arr[i] = bookTH1F(
             Form("back_h_gFEX_leading_LRJ_Et_%d", i),
             "Leading gFEX LRJ Et Distribution;Leading gFEX LRJ E_{T} [GeV]; Events / 10 GeV",
             85, 0, 850);
 
-        back_h_gFEX_subleading_LRJ_Et_arr[i] = new TH1F(
+        back_h_gFEX_subleading_LRJ_Et_arr[i] = bookTH1F(
             Form("back_h_gFEX_subleading_LRJ_Et_%d", i),
             "Subleading gFEX LRJ Et Distribution;Subleading gFEX LRJ E_{T} [GeV]; Events / 10 GeV",
             85, 0, 850);
 
-        back_h_gFEX_leading_SRJ_Et_arr[i] = new TH1F(
+        back_h_gFEX_leading_SRJ_Et_arr[i] = bookTH1F(
             Form("back_h_gFEX_leading_SRJ_Et_%d", i),
             "Leading gFEX SRJ Et Distribution;Leading gFEX SRJ E_{T} [GeV]; Events / 10 GeV",
             85, 0, 850);
 
-        back_h_gFEX_subleading_SRJ_Et_arr[i] = new TH1F(
+        back_h_gFEX_subleading_SRJ_Et_arr[i] = bookTH1F(
             Form("back_h_gFEX_subleading_SRJ_Et_%d", i),
             "Subleading gFEX SRJ Et Distribution;Subleading gFEX SRJ E_{T} [GeV]; Events / 10 GeV",
             85, 0, 850);
 
-        back_h_jFEX_leading_LRJ_Et_arr[i] = new TH1F(
+        back_h_jFEX_leading_LRJ_Et_arr[i] = bookTH1F(
             Form("back_h_jFEX_leading_LRJ_Et_%d", i),
             "Leading jFEX LRJ Et Distribution;Leading jFEX LRJ E_{T} [GeV]; Events / 10 GeV",
             170, 0, 1700);
 
-        back_h_jFEX_subleading_LRJ_Et_arr[i] = new TH1F(
+        back_h_jFEX_subleading_LRJ_Et_arr[i] = bookTH1F(
             Form("back_h_jFEX_subleading_LRJ_Et_%d", i),
             "Subleading jFEX LRJ Et Distribution;Subleading jFEX LRJ E_{T} [GeV]; Events / 10 GeV",
             170, 0, 1700);
 
-        back_h_jFEX_leading_SRJ_Et_arr[i] = new TH1F(
+        back_h_jFEX_leading_SRJ_Et_arr[i] = bookTH1F(
             Form("back_h_jFEX_leading_SRJ_Et_%d", i),
             "Leading jFEX SRJ Et Distribution;Leading jFEX SRJ E_{T} [GeV]; Events / 10 GeV",
             50, 0, 500);
 
-        back_h_jFEX_subleading_SRJ_Et_arr[i] = new TH1F(
+        back_h_jFEX_subleading_SRJ_Et_arr[i] = bookTH1F(
             Form("back_h_jFEX_subleading_SRJ_Et_%d", i),
             "Subleading jFEX SRJ Et Distribution;Subleading jFEX SRJ E_{T} [GeV]; Events / 10 GeV",
             50, 0, 500);
 
-        back_h_leading_offlineLRJ_Et_arr[i] = new TH1F(
+        back_h_leading_offlineLRJ_Et_arr[i] = bookTH1F(
             Form("back_h_leading_offlineLRJ_Et_%d", i),
             "Leading Offline LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV]; Events / 25 GeV",
             160, 0, 4000);
 
-        back_h_subleading_offlineLRJ_Et_arr[i] = new TH1F(
+        back_h_subleading_offlineLRJ_Et_arr[i] = bookTH1F(
             Form("back_h_subleading_offlineLRJ_Et_%d", i),
             "Subleading Offline LRJ Et Distribution;Subleading Offline LRJ E_{T} [GeV]; Events / 25 GeV",
             160, 0, 4000);
 
-        back_h_leading_truthSRJs_Et_arr[i] = new TH1F(
+        back_h_leading_truthSRJs_Et_arr[i] = bookTH1F(
             Form("back_h_leading_truthSRJs_Et_%d", i),
             "Leading Truth Small-R Jet Et Distribution;Leading Truth SRJ E_{T} [GeV]; Events / 25 GeV",
             160, 0, 4000);
 
-        back_h_subleading_truthSRJs_Et_arr[i] = new TH1F(
+        back_h_subleading_truthSRJs_Et_arr[i] = bookTH1F(
             Form("back_h_subleading_truthSRJs_Et_%d", i),
             "Subleading Truth Small-R Jet Et Distribution;Subleading Truth SRJ E_{T} [GeV];Subleading Truth SRJs / 25 GeV",
             160, 0, 4000);
 
-        back_h_leading_conejets_cellstowers_pT_arr[i] = new TH1F(
+        back_h_leading_conejets_cellstowers_pT_arr[i] = bookTH1F(
             Form("back_h_leading_conejets_cellstowers_pT_%d", i),
             "Leading Offline LRJ Et Distribution;Leading CellsTowers Cone Jet p_{T} [GeV]; Events / 25 GeV",
             120, 0, 3000);
 
-        back_h_subleading_conejets_cellstowers_pT_arr[i] = new TH1F(
+        back_h_subleading_conejets_cellstowers_pT_arr[i] = bookTH1F(
             Form("back_h_subleading_conejets_cellstowers_pT_%d", i),
             "Subleading Offline LRJ Et Distribution;Subleading CellsTowers Cone Jet p_{T} [GeV];Events / 25 GeV",
             120, 0, 3000);
 
-        back_h_leading_WTA_conejets_cellstowers_pT_arr[i] = new TH1F(
+        back_h_leading_WTA_conejets_cellstowers_pT_arr[i] = bookTH1F(
             Form("back_h_leading_WTA_conejets_cellstowers_pT_%d", i),
             "Leading Offline LRJ Et Distribution;Leading WTA CellsTowers Cone Jet p_{T} [GeV]; Events / 25 GeV",
             120, 0, 3000);
 
-        back_h_subleading_WTA_conejets_cellstowers_pT_arr[i] = new TH1F(
+        back_h_subleading_WTA_conejets_cellstowers_pT_arr[i] = bookTH1F(
             Form("back_h_subleading_WTA_conejets_cellstowers_pT_%d", i),
             "Subleading Offline LRJ Et Distribution;Subleading WTA CellsTowers Cone Jet p_{T} [GeV];Events / 25 GeV",
             120, 0, 3000);
 
-        back_h_leading_conejets_basicclusters_pT_arr[i] = new TH1F(
+        back_h_leading_conejets_basicclusters_pT_arr[i] = bookTH1F(
             Form("back_h_leading_conejets_basicclusters_pT_%d", i),
             "Leading Offline LRJ Et Distribution;Leading BasicClusters Cone Jet p_{T} [GeV]; Events / 25 GeV",
             120, 0, 3000);
 
-        back_h_subleading_conejets_basicclusters_pT_arr[i] = new TH1F(
+        back_h_subleading_conejets_basicclusters_pT_arr[i] = bookTH1F(
             Form("back_h_subleading_conejets_basicclusters_pT_%d", i),
             "Subleading Offline LRJ Et Distribution;Subleading BasicClusters Cone Jet p_{T} [GeV];Events / 25 GeV",
             120, 0, 3000);
 
-        back_h_leading_WTA_conejets_basicclusters_pT_arr[i] = new TH1F(
+        back_h_leading_WTA_conejets_basicclusters_pT_arr[i] = bookTH1F(
             Form("back_h_leading_WTA_conejets_basicclusters_pT_%d", i),
             "Leading Offline LRJ Et Distribution;Leading WTA BasicClusters Cone Jet p_{T} [GeV]; Events / 25 GeV",
             120, 0, 3000);
 
-        back_h_subleading_WTA_conejets_basicclusters_pT_arr[i] = new TH1F(
+        back_h_subleading_WTA_conejets_basicclusters_pT_arr[i] = bookTH1F(
             Form("back_h_subleading_WTA_conejets_basicclusters_pT_%d", i),
             "Subleading Offline LRJ Et Distribution;Subleading WTA BasicClusters Cone Jet p_{T} [GeV];Events / 25 GeV",
             120, 0, 3000);
 
-        back_h_gFEX_Sim_leading_LRJ_Et_arr[i] = new TH1F(
+        back_h_gFEX_Sim_leading_LRJ_Et_arr[i] = bookTH1F(
             Form("back_h_gFEX_Sim_leading_LRJ_Et_%d", i),
             "Leading gFEX (Resim) LRJ E_{T} Distribution;Leading gFEX (Resim) LRJ E_{T} [GeV]; Events / 10 GeV",
             85, 0, 850);
 
-        back_h_gFEX_Sim_subleading_LRJ_Et_arr[i] = new TH1F(
+        back_h_gFEX_Sim_subleading_LRJ_Et_arr[i] = bookTH1F(
             Form("back_h_gFEX_Sim_subleading_LRJ_Et_%d", i),
             "Subleading gFEX (Resim) LRJ E_{T} Distribution;Subleading gFEX (Resim) LRJ E_{T} [GeV]; Events / 10 GeV",
             85, 0, 850);
 
         // TODO: uncomment once ntuples with gFexSRJSimTree are regenerated
-        // back_h_gFEX_Sim_leading_SRJ_Et_arr[i] = new TH1F(
+        // back_h_gFEX_Sim_leading_SRJ_Et_arr[i] = bookTH1F(
         //     Form("back_h_gFEX_Sim_leading_SRJ_Et_%d", i),
         //     "Leading gFEX (Resim) SRJ E_{T} Distribution;Leading gFEX (Resim) SRJ E_{T} [GeV]; Events / 10 GeV",
         //     85, 0, 850);
 
-        // back_h_gFEX_Sim_subleading_SRJ_Et_arr[i] = new TH1F(
+        // back_h_gFEX_Sim_subleading_SRJ_Et_arr[i] = bookTH1F(
         //     Form("back_h_gFEX_Sim_subleading_SRJ_Et_%d", i),
         //     "Subleading gFEX (Resim) SRJ E_{T} Distribution;Subleading gFEX (Resim) SRJ E_{T} [GeV]; Events / 10 GeV",
         //     85, 0, 850);
 
-        back_h_jFEX_Sim_leading_SRJ_Et_arr[i] = new TH1F(
+        back_h_jFEX_Sim_leading_SRJ_Et_arr[i] = bookTH1F(
             Form("back_h_jFEX_Sim_leading_SRJ_Et_%d", i),
             "Leading jFEX (Resim) SRJ E_{T} Distribution;Leading jFEX (Resim) SRJ E_{T} [GeV]; Events / 10 GeV",
             50, 0, 500);
 
-        back_h_jFEX_Sim_subleading_SRJ_Et_arr[i] = new TH1F(
+        back_h_jFEX_Sim_subleading_SRJ_Et_arr[i] = bookTH1F(
             Form("back_h_jFEX_Sim_subleading_SRJ_Et_%d", i),
             "Subleading jFEX (Resim) SRJ E_{T} Distribution;Subleading jFEX (Resim) SRJ E_{T} [GeV]; Events / 10 GeV",
             50, 0, 500);
@@ -2636,17 +2872,34 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     for (int i = 1; i <= 13; ++i)
         rateVsEffBins_ConeLeadSingle.push_back(400.0 + i * 50.0);
 
+    // E_T-ONLY THRESHOLD GRID — 1 GeV below 400 GeV, same coarse tail as rateVsEffBins.
+    // Every E_T-only threshold is read off one of these histograms (as a bin low edge for the
+    // 10/40 kHz jet-tagger legs, by interpolation between bin centres for the FEX ones), so the
+    // bin width IS the rounding of every threshold quoted on an E_T-only turn-on. At 5 GeV the
+    // legends could only ever say 85, 90, 95 GeV; at 1 GeV they say what the rate target
+    // actually asks for.
+    //
+    // DELIBERATELY NOT used for the per-category histograms feeding the combined
+    // five-category (subjet-based) scan, which keep rateVsEffBins. That scan enumerates the
+    // PRODUCT of the categories' frontier points — 33 x 36 x 30 x 28 ~ 1e6 combinations at
+    // 5 GeV — and five times as many points per category is ~600x that, with an O(frontier)
+    // dominance test inside the innermost loop. The subjet-based thresholds therefore stay on
+    // the 5 GeV grid on purpose; see the comment on the E_T-only threshold search.
+    std::vector<Double_t> rateVsEffBins_EtOnly;
+    for (int i = 0; i <= 400; ++i) rateVsEffBins_EtOnly.push_back(i * 1.0);
+    for (int i = 1; i <= 13; ++i)  rateVsEffBins_EtOnly.push_back(400.0 + i * 50.0);
+
     // ---------------- Histograms / Profiles ----------------
     const double ptMin = 25., ptMax = 500.;
     const int    nPtBins = 19;   // 20 GeV per bin like the screenshot
 
     TProfile* prof_AvgDR_vs_HpT =
-    new TProfile("prof_AvgDR_vs_HpT",
+    bookTProfile("prof_AvgDR_vs_HpT",
                 "Average #DeltaR(b,b̄) vs Higgs p_{T};Higgs p_{T} [GeV];Average #DeltaR(b,#bar{b})",
                 nPtBins, ptMin, ptMax);
 
     TH2F* h2_DR_vs_HpT =
-    new TH2F("h2_DR_vs_HpT",
+    bookTH2F("h2_DR_vs_HpT",
             "#DeltaR(b,b̄) vs Higgs p_{T};Higgs p_{T} [GeV];#DeltaR(b,#bar{b})",
             nPtBins, ptMin, ptMax,
             30, 0.0, 6.0);    // y-range wide enough for low-pt cases
@@ -2657,7 +2910,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     prof_AvgDR_vs_HpT->SetLineColor(kBlack);
     prof_AvgDR_vs_HpT->SetMarkerColor(kBlack);
 
-    TH1F* sig_h_leading_offlineLRJ_Et_byfile = new TH1F("sig_h_leading_offlineLRJ_Et_byfile", "Leading Offline LRJ E_{T};Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000);
+    TH1F* sig_h_leading_offlineLRJ_Et_byfile = bookTH1F("sig_h_leading_offlineLRJ_Et_byfile", "Leading Offline LRJ E_{T};Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000);
     // Variable binning for unique offline LRJ distributions:
     // 0-200 in 10 GeV steps, 200-500 in 25 GeV steps, 500-1500 in 100 GeV steps
     std::vector<Double_t> offlineLRJEtBins_unique;
@@ -2669,535 +2922,538 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     for (int i = 0; i <= 30; ++i) offlineLRJMassBins_unique.push_back(i * 10.0);
 
     // All events (before any baseline selection) — same binning as unique for overlay
-    TH1F* sig_h_leading_offlineLRJ_Et_before  = new TH1F("sig_h_leading_offlineLRJ_Et_before",
+    TH1F* sig_h_leading_offlineLRJ_Et_before  = bookTH1F("sig_h_leading_offlineLRJ_Et_before",
         "Leading Offline LRJ E_{T} (All);Leading Offline LRJ E_{T} [GeV];Fraction of Events",
         offlineLRJEtBins_unique.size()-1, offlineLRJEtBins_unique.data());
-    TH1F* sig_h_leading_offlineLRJ_Mass_before = new TH1F("sig_h_leading_offlineLRJ_Mass_before",
+    TH1F* sig_h_leading_offlineLRJ_Mass_before = bookTH1F("sig_h_leading_offlineLRJ_Mass_before",
         "Leading Offline LRJ Mass (All);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV",
         offlineLRJMassBins_unique.size()-1, offlineLRJMassBins_unique.data());
-    TH1F* back_h_leading_offlineLRJ_Et_before  = new TH1F("back_h_leading_offlineLRJ_Et_before",
+    TH1F* back_h_leading_offlineLRJ_Et_before  = bookTH1F("back_h_leading_offlineLRJ_Et_before",
         "Leading Offline LRJ E_{T} (All);Leading Offline LRJ E_{T} [GeV];Fraction of Events",
         offlineLRJEtBins_unique.size()-1, offlineLRJEtBins_unique.data());
-    TH1F* back_h_leading_offlineLRJ_Mass_before = new TH1F("back_h_leading_offlineLRJ_Mass_before",
+    TH1F* back_h_leading_offlineLRJ_Mass_before = bookTH1F("back_h_leading_offlineLRJ_Mass_before",
         "Leading Offline LRJ Mass (All);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV",
         offlineLRJMassBins_unique.size()-1, offlineLRJMassBins_unique.data());
 
     // Events uniquely selected (failing all 3 baseline cone-jet triggers)
-    TH1F* sig_h_leading_offlineLRJ_Et_unique  = new TH1F("sig_h_leading_offlineLRJ_Et_unique",
+    TH1F* sig_h_leading_offlineLRJ_Et_unique  = bookTH1F("sig_h_leading_offlineLRJ_Et_unique",
         "Leading Offline LRJ E_{T} (Unique);Leading Offline LRJ E_{T} [GeV];Fraction of Events",
         offlineLRJEtBins_unique.size()-1, offlineLRJEtBins_unique.data());
-    TH1F* sig_h_leading_offlineLRJ_Mass_unique = new TH1F("sig_h_leading_offlineLRJ_Mass_unique",
+    TH1F* sig_h_leading_offlineLRJ_Mass_unique = bookTH1F("sig_h_leading_offlineLRJ_Mass_unique",
         "Leading Offline LRJ Mass (Unique);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV",
         offlineLRJMassBins_unique.size()-1, offlineLRJMassBins_unique.data());
-    TH1F* back_h_leading_offlineLRJ_Et_unique  = new TH1F("back_h_leading_offlineLRJ_Et_unique",
+    TH1F* back_h_leading_offlineLRJ_Et_unique  = bookTH1F("back_h_leading_offlineLRJ_Et_unique",
         "Leading Offline LRJ E_{T} (Unique);Leading Offline LRJ E_{T} [GeV];Fraction of Events",
         offlineLRJEtBins_unique.size()-1, offlineLRJEtBins_unique.data());
-    TH1F* back_h_leading_offlineLRJ_Mass_unique = new TH1F("back_h_leading_offlineLRJ_Mass_unique",
+    TH1F* back_h_leading_offlineLRJ_Mass_unique = bookTH1F("back_h_leading_offlineLRJ_Mass_unique",
         "Leading Offline LRJ Mass (Unique);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV",
         offlineLRJMassBins_unique.size()-1, offlineLRJMassBins_unique.data());
-    TH1F* sig_h_subleading_offlineLRJ_Et_byfile = new TH1F("sig_h_subleading_offlineLRJ_Et_byfile", "Subleading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000); // now will only fill for first file as is same for each
+    TH1F* sig_h_subleading_offlineLRJ_Et_byfile = bookTH1F("sig_h_subleading_offlineLRJ_Et_byfile", "Subleading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000); // now will only fill for first file as is same for each
 
-    TH1F* sig_h_leading_offlineLRJ_Mass_byfile = new TH1F("sig_h_leading_offlineLRJ_Mass_byfile", "Leading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // moved outside scope of file loop for use afterwards
-    TH1F* sig_h_subleading_offlineLRJ_Mass_byfile = new TH1F("sig_h_subleading_offlineLRJ_Mass_byfile", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // now will only fill for first file as is same for each
+    TH1F* sig_h_leading_offlineLRJ_Mass_byfile = bookTH1F("sig_h_leading_offlineLRJ_Mass_byfile", "Leading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // moved outside scope of file loop for use afterwards
+    TH1F* sig_h_subleading_offlineLRJ_Mass_byfile = bookTH1F("sig_h_subleading_offlineLRJ_Mass_byfile", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // now will only fill for first file as is same for each
     
-    TH1F* back_h_leading_offlineLRJ_Et_byfile = new TH1F("back_h_leading_offlineLRJ_Et_byfile", "Leading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000); // moved outside scope of file loop for use afterwards
-    TH1F* back_h_subleading_offlineLRJ_Et_byfile = new TH1F("back_h_subleading_offlineLRJ_Et_byfile", "Subleading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000); // now will only fill for first file as is same for each
+    TH1F* back_h_leading_offlineLRJ_Et_byfile = bookTH1F("back_h_leading_offlineLRJ_Et_byfile", "Leading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000); // moved outside scope of file loop for use afterwards
+    TH1F* back_h_subleading_offlineLRJ_Et_byfile = bookTH1F("back_h_subleading_offlineLRJ_Et_byfile", "Subleading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];Fraction of Events / 50 GeV", 19, 50, 1000); // now will only fill for first file as is same for each
 
-    TH1F* back_h_leading_offlineLRJ_Mass_byfile = new TH1F("back_h_leading_offlineLRJ_Et_byfile", "Leading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // moved outside scope of file loop for use afterwards
-    TH1F* back_h_subleading_offlineLRJ_Mass_byfile = new TH1F("back_h_subleading_offlineLRJ_Et_byfile", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // now will only fill for first file as is same for each
+    // Name string fixed for the state registry: the monolith had copy-pasted the Et name onto
+    // the Mass histograms (harmless in-memory beyond a ROOT "Replacing" warning, fatal as a
+    // state-file key). Name-only change; nothing looks these up by string.
+    TH1F* back_h_leading_offlineLRJ_Mass_byfile = bookTH1F("back_h_leading_offlineLRJ_Mass_byfile","Leading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // moved outside scope of file loop for use afterwards
+    TH1F* back_h_subleading_offlineLRJ_Mass_byfile = bookTH1F("back_h_subleading_offlineLRJ_Mass_byfile","Subleading LRJ Et Distribution;Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 30, 0, 300); // now will only fill for first file as is same for each
 
-    TH2F *leadingHiggsVsSubleadingHiggspT = new TH2F("leadingHiggsVsSubleadingHiggspT", "Sum of Topo422 E_{T} in Each Bin; Leading Higgs p_{T} [GeV]; Subleading Higgs p_{T}", 
+    TH2F *leadingHiggsVsSubleadingHiggspT = bookTH2F("leadingHiggsVsSubleadingHiggspT", "Sum of Topo422 E_{T} in Each Bin; Leading Higgs p_{T} [GeV]; Subleading Higgs p_{T}", 
                         60, 0, 1000,  
                         60, 0, 1000);  
 
-    TH2F *leadingbVsSubleadingbpT_LeadingHiggs = new TH2F("leadingbVsSubleadingbpT_LeadingHiggs", "Sum of Topo422 E_{T} in Each Bin; Leading b p_{T} [GeV] [Leading Higgs]; Subleading b p_{T} [Leading Higgs]", 
+    TH2F *leadingbVsSubleadingbpT_LeadingHiggs = bookTH2F("leadingbVsSubleadingbpT_LeadingHiggs", "Sum of Topo422 E_{T} in Each Bin; Leading b p_{T} [GeV] [Leading Higgs]; Subleading b p_{T} [Leading Higgs]", 
                         50, 0, 1000,
                         50, 0, 1000); 
 
-    TH2F *leadingbVsSubleadingbpT_SubleadingHiggs = new TH2F("leadingbVsSubleadingbpT_SubleadingHiggs", "Sum of Topo422 E_{T} in Each Bin; Leading b p_{T} [GeV] [Leading Higgs]; Subleading b p_{T} [Subleading Higgs]", 
+    TH2F *leadingbVsSubleadingbpT_SubleadingHiggs = bookTH2F("leadingbVsSubleadingbpT_SubleadingHiggs", "Sum of Topo422 E_{T} in Each Bin; Leading b p_{T} [GeV] [Leading Higgs]; Subleading b p_{T} [Subleading Higgs]", 
                         50, 0, 1000, 
                         50, 0, 1000); 
 
-    TH1F* sig_h_LRJ_substruct = new TH1F("sig_h_LRJ_substruct", "LRJ 'Diameter';LRJ 'Diameter';% of LRJs / ~0.03", 32, 0, 1);
-    TH2F *sigDiamvsEt = new TH2F("sigDiamvsEt", "Sum of Topo422 E_{T} in Each Bin; LRJ E_{T} [GeV];LRJ 'Diameter'", 
+    TH1F* sig_h_LRJ_substruct = bookTH1F("sig_h_LRJ_substruct", "LRJ 'Diameter';LRJ 'Diameter';% of LRJs / ~0.03", 32, 0, 1);
+    TH2F *sigDiamvsEt = bookTH2F("sigDiamvsEt", "Sum of Topo422 E_{T} in Each Bin; LRJ E_{T} [GeV];LRJ 'Diameter'", 
                         20, 0, 800,  
                         32, 0, 1.0);
 
-    TH2F *sigOfflineLeadingLRJMassvsEt = new TH2F("sigOfflineLeadingLRJMassvsEt", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV];Offline Leading LRJ Mass [GeV]", 
+    TH2F *sigOfflineLeadingLRJMassvsEt = bookTH2F("sigOfflineLeadingLRJMassvsEt", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV];Offline Leading LRJ Mass [GeV]", 
                         60, 0, 3000,   
                         50, 0, 500);  
 
-    TH2F *sigOfflineSubleadingLRJMassvsEt = new TH2F("sigOfflineSubleadingLRJMassvsEt", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV];Offline Subleading LRJ Mass [GeV]", 
+    TH2F *sigOfflineSubleadingLRJMassvsEt = bookTH2F("sigOfflineSubleadingLRJMassvsEt", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV];Offline Subleading LRJ Mass [GeV]", 
                         60, 0, 1200,   
                         25, 0, 250);  
 
-    TH2F *sigOfflineSubleadingLRJMassvsLeadingLRJMass = new TH2F("sigOfflineSubleadingLRJMassvsLeadingLRJMass", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ Mass [GeV];Offline Subleading LRJ Mass [GeV]", 
+    TH2F *sigOfflineSubleadingLRJMassvsLeadingLRJMass = bookTH2F("sigOfflineSubleadingLRJMassvsLeadingLRJMass", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ Mass [GeV];Offline Subleading LRJ Mass [GeV]", 
                         25, 0, 250,   
                         25, 0, 250);  
 
-    TH2F *backOfflineLeadingLRJMassvsEt = new TH2F("backOfflineLeadingLRJMassvsEt", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV];Offline Leading LRJ Mass [GeV]", 
+    TH2F *backOfflineLeadingLRJMassvsEt = bookTH2F("backOfflineLeadingLRJMassvsEt", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV];Offline Leading LRJ Mass [GeV]", 
                         60, 0, 1200,   
                         25, 0, 250);  
 
-    TH2F *backOfflineSubleadingLRJMassvsEt = new TH2F("backOfflineSubleadingLRJMassvsEt", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV];Offline Subleading LRJ Mass [GeV]", 
+    TH2F *backOfflineSubleadingLRJMassvsEt = bookTH2F("backOfflineSubleadingLRJMassvsEt", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV];Offline Subleading LRJ Mass [GeV]", 
                         60, 0, 1200,   
                         25, 0, 250);  
     
-    TH2F *backOfflineSubleadingLRJMassvsLeadingLRJMass = new TH2F("backOfflineSubleadingLRJMassvsLeadingLRJMass", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ Mass [GeV];Offline Subleading LRJ Mass [GeV]",
+    TH2F *backOfflineSubleadingLRJMassvsLeadingLRJMass = bookTH2F("backOfflineSubleadingLRJMassvsLeadingLRJMass", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ Mass [GeV];Offline Subleading LRJ Mass [GeV]",
                         25, 0, 250,
                         25, 0, 250);
 
     // === Jet-type comparison TH2Fs (0–600 GeV, 60 bins) ===
     // Pair 1: Offline Large-R Jet vs. Offline SoftDrop Large-R Jet
-    TH2F *sig_h2_recoVsRecoSD_leading_Et   = new TH2F("sig_h2_recoVsRecoSD_leading_Et",   "Signal Leading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",   60,0,600, 60,0,600);
-    TH2F *sig_h2_recoVsRecoSD_subleading_Et= new TH2F("sig_h2_recoVsRecoSD_subleading_Et","Signal Subleading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
-    TH2F *sig_h2_recoVsRecoSD_leading_Mass = new TH2F("sig_h2_recoVsRecoSD_leading_Mass",  "Signal Leading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",       40,0,400, 40,0,400);
-    TH2F *sig_h2_recoVsRecoSD_subleading_Mass=new TH2F("sig_h2_recoVsRecoSD_subleading_Mass","Signal Subleading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
-    TH2F *back_h2_recoVsRecoSD_leading_Et  = new TH2F("back_h2_recoVsRecoSD_leading_Et",  "Background Leading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
-    TH2F *back_h2_recoVsRecoSD_subleading_Et=new TH2F("back_h2_recoVsRecoSD_subleading_Et","Background Subleading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
-    TH2F *back_h2_recoVsRecoSD_leading_Mass = new TH2F("back_h2_recoVsRecoSD_leading_Mass", "Background Leading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
-    TH2F *back_h2_recoVsRecoSD_subleading_Mass=new TH2F("back_h2_recoVsRecoSD_subleading_Mass","Background Subleading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
+    TH2F *sig_h2_recoVsRecoSD_leading_Et   = bookTH2F("sig_h2_recoVsRecoSD_leading_Et",   "Signal Leading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",   60,0,600, 60,0,600);
+    TH2F *sig_h2_recoVsRecoSD_subleading_Et= bookTH2F("sig_h2_recoVsRecoSD_subleading_Et","Signal Subleading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *sig_h2_recoVsRecoSD_leading_Mass = bookTH2F("sig_h2_recoVsRecoSD_leading_Mass",  "Signal Leading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",       40,0,400, 40,0,400);
+    TH2F *sig_h2_recoVsRecoSD_subleading_Mass=bookTH2F("sig_h2_recoVsRecoSD_subleading_Mass","Signal Subleading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
+    TH2F *back_h2_recoVsRecoSD_leading_Et  = bookTH2F("back_h2_recoVsRecoSD_leading_Et",  "Background Leading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_recoVsRecoSD_subleading_Et=bookTH2F("back_h2_recoVsRecoSD_subleading_Et","Background Subleading Jet E_{T}: Offline vs. Offline SoftDrop;Offline Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_recoVsRecoSD_leading_Mass = bookTH2F("back_h2_recoVsRecoSD_leading_Mass", "Background Leading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
+    TH2F *back_h2_recoVsRecoSD_subleading_Mass=bookTH2F("back_h2_recoVsRecoSD_subleading_Mass","Background Subleading Jet Mass: Offline vs. Offline SoftDrop;Offline Large-R Jet Mass [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
 
     // Pair 2: Offline Large-R Jet vs. Truth Large-R Jet
-    TH2F *sig_h2_recoVsTruth_leading_Et    = new TH2F("sig_h2_recoVsTruth_leading_Et",    "Signal Leading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",         60,0,600, 60,0,600);
-    TH2F *sig_h2_recoVsTruth_subleading_Et = new TH2F("sig_h2_recoVsTruth_subleading_Et", "Signal Subleading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",     60,0,600, 60,0,600);
-    TH2F *sig_h2_recoVsTruth_leading_Mass  = new TH2F("sig_h2_recoVsTruth_leading_Mass",   "Signal Leading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",           40,0,400, 40,0,400);
-    TH2F *sig_h2_recoVsTruth_subleading_Mass=new TH2F("sig_h2_recoVsTruth_subleading_Mass","Signal Subleading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",       40,0,400, 40,0,400);
-    TH2F *back_h2_recoVsTruth_leading_Et   = new TH2F("back_h2_recoVsTruth_leading_Et",   "Background Leading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",   60,0,600, 60,0,600);
-    TH2F *back_h2_recoVsTruth_subleading_Et= new TH2F("back_h2_recoVsTruth_subleading_Et","Background Subleading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
-    TH2F *back_h2_recoVsTruth_leading_Mass  = new TH2F("back_h2_recoVsTruth_leading_Mass",  "Background Leading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",     40,0,400, 40,0,400);
-    TH2F *back_h2_recoVsTruth_subleading_Mass=new TH2F("back_h2_recoVsTruth_subleading_Mass","Background Subleading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
+    TH2F *sig_h2_recoVsTruth_leading_Et    = bookTH2F("sig_h2_recoVsTruth_leading_Et",    "Signal Leading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",         60,0,600, 60,0,600);
+    TH2F *sig_h2_recoVsTruth_subleading_Et = bookTH2F("sig_h2_recoVsTruth_subleading_Et", "Signal Subleading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",     60,0,600, 60,0,600);
+    TH2F *sig_h2_recoVsTruth_leading_Mass  = bookTH2F("sig_h2_recoVsTruth_leading_Mass",   "Signal Leading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",           40,0,400, 40,0,400);
+    TH2F *sig_h2_recoVsTruth_subleading_Mass=bookTH2F("sig_h2_recoVsTruth_subleading_Mass","Signal Subleading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",       40,0,400, 40,0,400);
+    TH2F *back_h2_recoVsTruth_leading_Et   = bookTH2F("back_h2_recoVsTruth_leading_Et",   "Background Leading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",   60,0,600, 60,0,600);
+    TH2F *back_h2_recoVsTruth_subleading_Et= bookTH2F("back_h2_recoVsTruth_subleading_Et","Background Subleading Jet E_{T}: Offline vs. Truth;Offline Large-R Jet E_{T} [GeV];Truth Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_recoVsTruth_leading_Mass  = bookTH2F("back_h2_recoVsTruth_leading_Mass",  "Background Leading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]",     40,0,400, 40,0,400);
+    TH2F *back_h2_recoVsTruth_subleading_Mass=bookTH2F("back_h2_recoVsTruth_subleading_Mass","Background Subleading Jet Mass: Offline vs. Truth;Offline Large-R Jet Mass [GeV];Truth Large-R Jet Mass [GeV]", 40,0,400, 40,0,400);
 
     // Pair 3: Truth Large-R Jet vs. Truth SoftDrop Large-R Jet
-    TH2F *sig_h2_truthVsTruthSD_leading_Et    = new TH2F("sig_h2_truthVsTruthSD_leading_Et",    "Signal Leading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",    60,0,600, 60,0,600);
-    TH2F *sig_h2_truthVsTruthSD_subleading_Et = new TH2F("sig_h2_truthVsTruthSD_subleading_Et", "Signal Subleading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
-    TH2F *sig_h2_truthVsTruthSD_leading_Mass  = new TH2F("sig_h2_truthVsTruthSD_leading_Mass",   "Signal Leading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",      40,0,400, 40,0,400);
-    TH2F *sig_h2_truthVsTruthSD_subleading_Mass=new TH2F("sig_h2_truthVsTruthSD_subleading_Mass","Signal Subleading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",  40,0,400, 40,0,400);
-    TH2F *back_h2_truthVsTruthSD_leading_Et   = new TH2F("back_h2_truthVsTruthSD_leading_Et",   "Background Leading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
-    TH2F *back_h2_truthVsTruthSD_subleading_Et= new TH2F("back_h2_truthVsTruthSD_subleading_Et","Background Subleading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
-    TH2F *back_h2_truthVsTruthSD_leading_Mass  = new TH2F("back_h2_truthVsTruthSD_leading_Mass",  "Background Leading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
-    TH2F *back_h2_truthVsTruthSD_subleading_Mass=new TH2F("back_h2_truthVsTruthSD_subleading_Mass","Background Subleading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
+    TH2F *sig_h2_truthVsTruthSD_leading_Et    = bookTH2F("sig_h2_truthVsTruthSD_leading_Et",    "Signal Leading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",    60,0,600, 60,0,600);
+    TH2F *sig_h2_truthVsTruthSD_subleading_Et = bookTH2F("sig_h2_truthVsTruthSD_subleading_Et", "Signal Subleading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *sig_h2_truthVsTruthSD_leading_Mass  = bookTH2F("sig_h2_truthVsTruthSD_leading_Mass",   "Signal Leading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",      40,0,400, 40,0,400);
+    TH2F *sig_h2_truthVsTruthSD_subleading_Mass=bookTH2F("sig_h2_truthVsTruthSD_subleading_Mass","Signal Subleading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",  40,0,400, 40,0,400);
+    TH2F *back_h2_truthVsTruthSD_leading_Et   = bookTH2F("back_h2_truthVsTruthSD_leading_Et",   "Background Leading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_truthVsTruthSD_subleading_Et= bookTH2F("back_h2_truthVsTruthSD_subleading_Et","Background Subleading Jet E_{T}: Truth vs. Truth SoftDrop;Truth Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet E_{T} [GeV]",60,0,600, 60,0,600);
+    TH2F *back_h2_truthVsTruthSD_leading_Mass  = bookTH2F("back_h2_truthVsTruthSD_leading_Mass",  "Background Leading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
+    TH2F *back_h2_truthVsTruthSD_subleading_Mass=bookTH2F("back_h2_truthVsTruthSD_subleading_Mass","Background Subleading Jet Mass: Truth vs. Truth SoftDrop;Truth Large-R Jet Mass [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",40,0,400, 40,0,400);
 
     // === E_T vs. Mass TH2Fs per collection (60 Et bins 0–600, 40 Mass bins 0–400) ===
-    TH2F *sig_h2_reco_leading_EtVsMass      = new TH2F("sig_h2_reco_leading_EtVsMass",      "Signal Leading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                           60,0,600, 40,0,400);
-    TH2F *sig_h2_reco_subleading_EtVsMass   = new TH2F("sig_h2_reco_subleading_EtVsMass",   "Signal Subleading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                        60,0,600, 40,0,400);
-    TH2F *sig_h2_recoSD_leading_EtVsMass    = new TH2F("sig_h2_recoSD_leading_EtVsMass",    "Signal Leading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
-    TH2F *sig_h2_recoSD_subleading_EtVsMass = new TH2F("sig_h2_recoSD_subleading_EtVsMass", "Signal Subleading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
-    TH2F *sig_h2_truth_leading_EtVsMass     = new TH2F("sig_h2_truth_leading_EtVsMass",     "Signal Leading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                                 60,0,600, 40,0,400);
-    TH2F *sig_h2_truth_subleading_EtVsMass  = new TH2F("sig_h2_truth_subleading_EtVsMass",  "Signal Subleading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                              60,0,600, 40,0,400);
-    TH2F *sig_h2_truthSD_leading_EtVsMass   = new TH2F("sig_h2_truthSD_leading_EtVsMass",   "Signal Leading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",      60,0,600, 40,0,400);
-    TH2F *sig_h2_truthSD_subleading_EtVsMass= new TH2F("sig_h2_truthSD_subleading_EtVsMass","Signal Subleading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",   60,0,600, 40,0,400);
-    TH2F *back_h2_reco_leading_EtVsMass     = new TH2F("back_h2_reco_leading_EtVsMass",     "Background Leading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                       60,0,600, 40,0,400);
-    TH2F *back_h2_reco_subleading_EtVsMass  = new TH2F("back_h2_reco_subleading_EtVsMass",  "Background Subleading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                    60,0,600, 40,0,400);
-    TH2F *back_h2_recoSD_leading_EtVsMass   = new TH2F("back_h2_recoSD_leading_EtVsMass",   "Background Leading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
-    TH2F *back_h2_recoSD_subleading_EtVsMass= new TH2F("back_h2_recoSD_subleading_EtVsMass","Background Subleading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
-    TH2F *back_h2_truth_leading_EtVsMass    = new TH2F("back_h2_truth_leading_EtVsMass",    "Background Leading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                              60,0,600, 40,0,400);
-    TH2F *back_h2_truth_subleading_EtVsMass = new TH2F("back_h2_truth_subleading_EtVsMass", "Background Subleading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                           60,0,600, 40,0,400);
-    TH2F *back_h2_truthSD_leading_EtVsMass  = new TH2F("back_h2_truthSD_leading_EtVsMass",  "Background Leading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",  60,0,600, 40,0,400);
-    TH2F *back_h2_truthSD_subleading_EtVsMass=new TH2F("back_h2_truthSD_subleading_EtVsMass","Background Subleading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *sig_h2_reco_leading_EtVsMass      = bookTH2F("sig_h2_reco_leading_EtVsMass",      "Signal Leading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                           60,0,600, 40,0,400);
+    TH2F *sig_h2_reco_subleading_EtVsMass   = bookTH2F("sig_h2_reco_subleading_EtVsMass",   "Signal Subleading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                        60,0,600, 40,0,400);
+    TH2F *sig_h2_recoSD_leading_EtVsMass    = bookTH2F("sig_h2_recoSD_leading_EtVsMass",    "Signal Leading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *sig_h2_recoSD_subleading_EtVsMass = bookTH2F("sig_h2_recoSD_subleading_EtVsMass", "Signal Subleading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *sig_h2_truth_leading_EtVsMass     = bookTH2F("sig_h2_truth_leading_EtVsMass",     "Signal Leading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                                 60,0,600, 40,0,400);
+    TH2F *sig_h2_truth_subleading_EtVsMass  = bookTH2F("sig_h2_truth_subleading_EtVsMass",  "Signal Subleading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                              60,0,600, 40,0,400);
+    TH2F *sig_h2_truthSD_leading_EtVsMass   = bookTH2F("sig_h2_truthSD_leading_EtVsMass",   "Signal Leading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",      60,0,600, 40,0,400);
+    TH2F *sig_h2_truthSD_subleading_EtVsMass= bookTH2F("sig_h2_truthSD_subleading_EtVsMass","Signal Subleading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",   60,0,600, 40,0,400);
+    TH2F *back_h2_reco_leading_EtVsMass     = bookTH2F("back_h2_reco_leading_EtVsMass",     "Background Leading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                       60,0,600, 40,0,400);
+    TH2F *back_h2_reco_subleading_EtVsMass  = bookTH2F("back_h2_reco_subleading_EtVsMass",  "Background Subleading Offline Large-R Jet;Offline Large-R Jet E_{T} [GeV];Offline Large-R Jet Mass [GeV]",                    60,0,600, 40,0,400);
+    TH2F *back_h2_recoSD_leading_EtVsMass   = bookTH2F("back_h2_recoSD_leading_EtVsMass",   "Background Leading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *back_h2_recoSD_subleading_EtVsMass= bookTH2F("back_h2_recoSD_subleading_EtVsMass","Background Subleading Offline SoftDrop Large-R Jet;Offline SoftDrop Large-R Jet E_{T} [GeV];Offline SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
+    TH2F *back_h2_truth_leading_EtVsMass    = bookTH2F("back_h2_truth_leading_EtVsMass",    "Background Leading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                              60,0,600, 40,0,400);
+    TH2F *back_h2_truth_subleading_EtVsMass = bookTH2F("back_h2_truth_subleading_EtVsMass", "Background Subleading Truth Large-R Jet;Truth Large-R Jet E_{T} [GeV];Truth Large-R Jet Mass [GeV]",                           60,0,600, 40,0,400);
+    TH2F *back_h2_truthSD_leading_EtVsMass  = bookTH2F("back_h2_truthSD_leading_EtVsMass",  "Background Leading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",  60,0,600, 40,0,400);
+    TH2F *back_h2_truthSD_subleading_EtVsMass=bookTH2F("back_h2_truthSD_subleading_EtVsMass","Background Subleading Truth SoftDrop Large-R Jet;Truth SoftDrop Large-R Jet E_{T} [GeV];Truth SoftDrop Large-R Jet Mass [GeV]",60,0,600, 40,0,400);
 
     // === TH1Fs for 4-collection overlay (60 Et bins 0–600, 40 Mass bins 0–400) ===
     // Axis labels use the observable name; the legend (set at draw time) identifies the collection.
-    TH1F *sig_h1_reco_leading_Et       = new TH1F("sig_h1_reco_leading_Et",       "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
-    TH1F *sig_h1_recoSD_leading_Et     = new TH1F("sig_h1_recoSD_leading_Et",     "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
-    TH1F *sig_h1_truth_leading_Et      = new TH1F("sig_h1_truth_leading_Et",      "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
-    TH1F *sig_h1_truthSD_leading_Et    = new TH1F("sig_h1_truthSD_leading_Et",    "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
-    TH1F *sig_h1_reco_subleading_Et    = new TH1F("sig_h1_reco_subleading_Et",    "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
-    TH1F *sig_h1_recoSD_subleading_Et  = new TH1F("sig_h1_recoSD_subleading_Et",  "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
-    TH1F *sig_h1_truth_subleading_Et   = new TH1F("sig_h1_truth_subleading_Et",   "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
-    TH1F *sig_h1_truthSD_subleading_Et = new TH1F("sig_h1_truthSD_subleading_Et", "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
-    TH1F *sig_h1_reco_leading_Mass     = new TH1F("sig_h1_reco_leading_Mass",     "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
-    TH1F *sig_h1_recoSD_leading_Mass   = new TH1F("sig_h1_recoSD_leading_Mass",   "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
-    TH1F *sig_h1_truth_leading_Mass    = new TH1F("sig_h1_truth_leading_Mass",    "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
-    TH1F *sig_h1_truthSD_leading_Mass  = new TH1F("sig_h1_truthSD_leading_Mass",  "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
-    TH1F *sig_h1_reco_subleading_Mass  = new TH1F("sig_h1_reco_subleading_Mass",  "Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
-    TH1F *sig_h1_recoSD_subleading_Mass= new TH1F("sig_h1_recoSD_subleading_Mass","Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
-    TH1F *sig_h1_truth_subleading_Mass = new TH1F("sig_h1_truth_subleading_Mass", "Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
-    TH1F *sig_h1_truthSD_subleading_Mass=new TH1F("sig_h1_truthSD_subleading_Mass","Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
-    TH1F *back_h1_reco_leading_Et      = new TH1F("back_h1_reco_leading_Et",      "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
-    TH1F *back_h1_recoSD_leading_Et    = new TH1F("back_h1_recoSD_leading_Et",    "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
-    TH1F *back_h1_truth_leading_Et     = new TH1F("back_h1_truth_leading_Et",     "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
-    TH1F *back_h1_truthSD_leading_Et   = new TH1F("back_h1_truthSD_leading_Et",   "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
-    TH1F *back_h1_reco_subleading_Et   = new TH1F("back_h1_reco_subleading_Et",   "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
-    TH1F *back_h1_recoSD_subleading_Et = new TH1F("back_h1_recoSD_subleading_Et", "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
-    TH1F *back_h1_truth_subleading_Et  = new TH1F("back_h1_truth_subleading_Et",  "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
-    TH1F *back_h1_truthSD_subleading_Et= new TH1F("back_h1_truthSD_subleading_Et","Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
-    TH1F *back_h1_reco_leading_Mass    = new TH1F("back_h1_reco_leading_Mass",    "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
-    TH1F *back_h1_recoSD_leading_Mass  = new TH1F("back_h1_recoSD_leading_Mass",  "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
-    TH1F *back_h1_truth_leading_Mass   = new TH1F("back_h1_truth_leading_Mass",   "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
-    TH1F *back_h1_truthSD_leading_Mass = new TH1F("back_h1_truthSD_leading_Mass", "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
-    TH1F *back_h1_reco_subleading_Mass = new TH1F("back_h1_reco_subleading_Mass", "Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
-    TH1F *back_h1_recoSD_subleading_Mass=new TH1F("back_h1_recoSD_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
-    TH1F *back_h1_truth_subleading_Mass= new TH1F("back_h1_truth_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
-    TH1F *back_h1_truthSD_subleading_Mass=new TH1F("back_h1_truthSD_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *sig_h1_reco_leading_Et       = bookTH1F("sig_h1_reco_leading_Et",       "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *sig_h1_recoSD_leading_Et     = bookTH1F("sig_h1_recoSD_leading_Et",     "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *sig_h1_truth_leading_Et      = bookTH1F("sig_h1_truth_leading_Et",      "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *sig_h1_truthSD_leading_Et    = bookTH1F("sig_h1_truthSD_leading_Et",    "Signal Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *sig_h1_reco_subleading_Et    = bookTH1F("sig_h1_reco_subleading_Et",    "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *sig_h1_recoSD_subleading_Et  = bookTH1F("sig_h1_recoSD_subleading_Et",  "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *sig_h1_truth_subleading_Et   = bookTH1F("sig_h1_truth_subleading_Et",   "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *sig_h1_truthSD_subleading_Et = bookTH1F("sig_h1_truthSD_subleading_Et", "Signal Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *sig_h1_reco_leading_Mass     = bookTH1F("sig_h1_reco_leading_Mass",     "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *sig_h1_recoSD_leading_Mass   = bookTH1F("sig_h1_recoSD_leading_Mass",   "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *sig_h1_truth_leading_Mass    = bookTH1F("sig_h1_truth_leading_Mass",    "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *sig_h1_truthSD_leading_Mass  = bookTH1F("sig_h1_truthSD_leading_Mass",  "Signal Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *sig_h1_reco_subleading_Mass  = bookTH1F("sig_h1_reco_subleading_Mass",  "Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *sig_h1_recoSD_subleading_Mass= bookTH1F("sig_h1_recoSD_subleading_Mass","Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *sig_h1_truth_subleading_Mass = bookTH1F("sig_h1_truth_subleading_Mass", "Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *sig_h1_truthSD_subleading_Mass=bookTH1F("sig_h1_truthSD_subleading_Mass","Signal Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *back_h1_reco_leading_Et      = bookTH1F("back_h1_reco_leading_Et",      "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *back_h1_recoSD_leading_Et    = bookTH1F("back_h1_recoSD_leading_Et",    "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *back_h1_truth_leading_Et     = bookTH1F("back_h1_truth_leading_Et",     "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *back_h1_truthSD_leading_Et   = bookTH1F("back_h1_truthSD_leading_Et",   "Background Leading Large-R Jet E_{T};Leading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",    60,0,600);
+    TH1F *back_h1_reco_subleading_Et   = bookTH1F("back_h1_reco_subleading_Et",   "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *back_h1_recoSD_subleading_Et = bookTH1F("back_h1_recoSD_subleading_Et", "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *back_h1_truth_subleading_Et  = bookTH1F("back_h1_truth_subleading_Et",  "Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *back_h1_truthSD_subleading_Et= bookTH1F("back_h1_truthSD_subleading_Et","Background Subleading Large-R Jet E_{T};Subleading Large-R Jet E_{T} [GeV];Fraction / 10 GeV",60,0,600);
+    TH1F *back_h1_reco_leading_Mass    = bookTH1F("back_h1_reco_leading_Mass",    "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *back_h1_recoSD_leading_Mass  = bookTH1F("back_h1_recoSD_leading_Mass",  "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *back_h1_truth_leading_Mass   = bookTH1F("back_h1_truth_leading_Mass",   "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *back_h1_truthSD_leading_Mass = bookTH1F("back_h1_truthSD_leading_Mass", "Background Leading Large-R Jet Mass;Leading Large-R Jet Mass [GeV];Fraction / 10 GeV",    40,0,400);
+    TH1F *back_h1_reco_subleading_Mass = bookTH1F("back_h1_reco_subleading_Mass", "Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *back_h1_recoSD_subleading_Mass=bookTH1F("back_h1_recoSD_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *back_h1_truth_subleading_Mass= bookTH1F("back_h1_truth_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
+    TH1F *back_h1_truthSD_subleading_Mass=bookTH1F("back_h1_truthSD_subleading_Mass","Background Subleading Large-R Jet Mass;Subleading Large-R Jet Mass [GeV];Fraction / 10 GeV",40,0,400);
 
-    TH2F *sigOfflineLeadingLRJMassvsSubjetMult = new TH2F("sigOfflineLeadingLRJMassvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Number of Subjets; Offline Leading LRJ Mass [GeV]",
+    TH2F *sigOfflineLeadingLRJMassvsSubjetMult = bookTH2F("sigOfflineLeadingLRJMassvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Number of Subjets; Offline Leading LRJ Mass [GeV]",
                         4, 0, 4, // x axis
                         25, 0, 250 ); //y axis
-    TH2F *backOfflineLeadingLRJMassvsSubjetMult = new TH2F("backOfflineLeadingLRJMassvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Number of Subjets; Offline Leading LRJ Mass [GeV]", 
+    TH2F *backOfflineLeadingLRJMassvsSubjetMult = bookTH2F("backOfflineLeadingLRJMassvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Number of Subjets; Offline Leading LRJ Mass [GeV]", 
                         4, 0, 4, // x axis
                         25, 0, 250 ); //y axis
 
-    TH2F *sigOfflineLeadingLRJEtvsSubjetMult = new TH2F("sigOfflineLeadingLRJEtvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV]; Number of Subjets", 
+    TH2F *sigOfflineLeadingLRJEtvsSubjetMult = bookTH2F("sigOfflineLeadingLRJEtvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV]; Number of Subjets", 
                         40, 0, 800,  //x axis
                         4, 0, 4 );  // y axis
-    TH2F *backOfflineLeadingLRJEtvsSubjetMult = new TH2F("backOfflineLeadingLRJEtvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV]; Number of Subjets", 
+    TH2F *backOfflineLeadingLRJEtvsSubjetMult = bookTH2F("backOfflineLeadingLRJEtvsSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Offline Leading LRJ E_{T} [GeV]; Number of Subjets", 
                         40, 0, 800,// x axis
                         4, 0, 4 ); //y axis
 
     // TOB E_T vs. Offline LRJ E_T — resolution / calibration view
     // x: offline LRJ E_T, y: TOB E_T (both 0–1000 GeV, 50×50 bins of 20 GeV)
-    TH2F *sig_h2_JetTagger_lead_TOBEt_vs_offlineEt = new TH2F(
+    TH2F *sig_h2_JetTagger_lead_TOBEt_vs_offlineEt = bookTH2F(
         "sig_h2_JetTagger_lead_TOBEt_vs_offlineEt",
         "Signal;Offline Leading LRJ E_{T} [GeV];JetTagger Leading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
-    TH2F *sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt = new TH2F(
+    TH2F *sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt = bookTH2F(
         "sig_h2_JetTagger_sublead_TOBEt_vs_offlineEt",
         "Signal;Offline Subleading LRJ E_{T} [GeV];JetTagger Subleading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
-    TH2F *sig_h2_gFEX_lead_TOBEt_vs_offlineEt = new TH2F(
+    TH2F *sig_h2_gFEX_lead_TOBEt_vs_offlineEt = bookTH2F(
         "sig_h2_gFEX_lead_TOBEt_vs_offlineEt",
         "Signal;Offline Leading LRJ E_{T} [GeV];gFEX Leading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
-    TH2F *sig_h2_gFEX_sublead_TOBEt_vs_offlineEt = new TH2F(
+    TH2F *sig_h2_gFEX_sublead_TOBEt_vs_offlineEt = bookTH2F(
         "sig_h2_gFEX_sublead_TOBEt_vs_offlineEt",
         "Signal;Offline Subleading LRJ E_{T} [GeV];gFEX Subleading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
-    TH2F *back_h2_JetTagger_lead_TOBEt_vs_offlineEt = new TH2F(
+    TH2F *back_h2_JetTagger_lead_TOBEt_vs_offlineEt = bookTH2F(
         "back_h2_JetTagger_lead_TOBEt_vs_offlineEt",
         "Background;Offline Leading LRJ E_{T} [GeV];JetTagger Leading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
-    TH2F *back_h2_JetTagger_sublead_TOBEt_vs_offlineEt = new TH2F(
+    TH2F *back_h2_JetTagger_sublead_TOBEt_vs_offlineEt = bookTH2F(
         "back_h2_JetTagger_sublead_TOBEt_vs_offlineEt",
         "Background;Offline Subleading LRJ E_{T} [GeV];JetTagger Subleading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
-    TH2F *back_h2_gFEX_lead_TOBEt_vs_offlineEt = new TH2F(
+    TH2F *back_h2_gFEX_lead_TOBEt_vs_offlineEt = bookTH2F(
         "back_h2_gFEX_lead_TOBEt_vs_offlineEt",
         "Background;Offline Leading LRJ E_{T} [GeV];gFEX Leading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
-    TH2F *back_h2_gFEX_sublead_TOBEt_vs_offlineEt = new TH2F(
+    TH2F *back_h2_gFEX_sublead_TOBEt_vs_offlineEt = bookTH2F(
         "back_h2_gFEX_sublead_TOBEt_vs_offlineEt",
         "Background;Offline Subleading LRJ E_{T} [GeV];gFEX Subleading LRJ E_{T} [GeV]",
         40, 0, 800, 40, 0, 800);
 
     // JetTagger TOB constituent mass vs. reference mass (offline / truth / truth+SD)
     // x: reference mass, y: constituent mass (both 0–400 GeV, 40×40 bins of 10 GeV)
-    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_offlineMass = new TH2F(
+    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_offlineMass = bookTH2F(
         "sig_h2_JetTagger_lead_ConstituentMass_vs_offlineMass",
         "Signal;Offline Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass = new TH2F(
+    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass = bookTH2F(
         "sig_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass",
         "Signal;Offline Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_truthMass = new TH2F(
+    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_truthMass = bookTH2F(
         "sig_h2_JetTagger_lead_ConstituentMass_vs_truthMass",
         "Signal;Truth Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_truthMass = new TH2F(
+    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_truthMass = bookTH2F(
         "sig_h2_JetTagger_sublead_ConstituentMass_vs_truthMass",
         "Signal;Truth Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass = new TH2F(
+    TH2F *sig_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass = bookTH2F(
         "sig_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass",
         "Signal;Truth SoftDrop Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass = new TH2F(
+    TH2F *sig_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass = bookTH2F(
         "sig_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass",
         "Signal;Truth SoftDrop Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_offlineMass = new TH2F(
+    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_offlineMass = bookTH2F(
         "back_h2_JetTagger_lead_ConstituentMass_vs_offlineMass",
         "Background;Offline Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass = new TH2F(
+    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass = bookTH2F(
         "back_h2_JetTagger_sublead_ConstituentMass_vs_offlineMass",
         "Background;Offline Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_truthMass = new TH2F(
+    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_truthMass = bookTH2F(
         "back_h2_JetTagger_lead_ConstituentMass_vs_truthMass",
         "Background;Truth Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_truthMass = new TH2F(
+    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_truthMass = bookTH2F(
         "back_h2_JetTagger_sublead_ConstituentMass_vs_truthMass",
         "Background;Truth Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass = new TH2F(
+    TH2F *back_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass = bookTH2F(
         "back_h2_JetTagger_lead_ConstituentMass_vs_truthSDMass",
         "Background;Truth SoftDrop Leading LRJ Mass [GeV];JetTagger Leading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
-    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass = new TH2F(
+    TH2F *back_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass = bookTH2F(
         "back_h2_JetTagger_sublead_ConstituentMass_vs_truthSDMass",
         "Background;Truth SoftDrop Subleading LRJ Mass [GeV];JetTagger Subleading LRJ Constituent Mass [GeV]",
         40, 0, 400, 40, 0, 400);
 
-    TH2F *sigJetTaggerLeadingLRJEtvsSubleadingLRJEt = new TH2F("sigJetTaggerLeadingLRJEtvsSubleadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; JetTagger Subleading LRJ E_{T} [GeV]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsSubleadingLRJEt = bookTH2F("sigJetTaggerLeadingLRJEtvsSubleadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; JetTagger Subleading LRJ E_{T} [GeV]", 
                         52, 0, 1040,  //x axis
                         52, 0, 1040);  // y axis
-    TH2F *backJetTaggerLeadingLRJEtvsSubleadingLRJEt = new TH2F("backJetTaggerLeadingLRJEtvsSubleadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; JetTagger Subleading LRJ E_{T} [GeV]", 
+    TH2F *backJetTaggerLeadingLRJEtvsSubleadingLRJEt = bookTH2F("backJetTaggerLeadingLRJEtvsSubleadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; JetTagger Subleading LRJ E_{T} [GeV]", 
                         40, 0, 800,// x axis
                         40, 0, 800); //y axis
 
-    TH1F* sigOfflineLeadingLRJMass = new TH1F("sigOfflineLeadingLRJMass", "LRJ Et Distribution;Offline Leading LRJ Mass [GeV];% of Leading LRJs / 10 GeV", 20, 0, 200);
-    TH1F* backOfflineLeadingLRJMass = new TH1F("backOfflineLeadingLRJMass", "LRJ Et Distribution;Offline Leading LRJ Mass [GeV];% of Leading LRJs / 10 GeV", 20, 0, 200);
+    TH1F* sigOfflineLeadingLRJMass = bookTH1F("sigOfflineLeadingLRJMass", "LRJ Et Distribution;Offline Leading LRJ Mass [GeV];% of Leading LRJs / 10 GeV", 20, 0, 200);
+    TH1F* backOfflineLeadingLRJMass = bookTH1F("backOfflineLeadingLRJMass", "LRJ Et Distribution;Offline Leading LRJ Mass [GeV];% of Leading LRJs / 10 GeV", 20, 0, 200);
 
-    TH1F* sigOfflineSubleadingLRJMass = new TH1F("sigOfflineSubleadingLRJMass", "LRJ Et Distribution;Offline Subleading LRJ Mass [GeV];% of Leading LRJs / 10 GeV", 25, 0, 250);
-    TH1F* backOfflineSubleadingLRJMass = new TH1F("backOfflineSubleadingLRJMass", "LRJ Et Distribution;Offline Subleading LRJ Mass [GeV];% of Leading LRJs / 10 GeV", 25, 0, 250);
+    TH1F* sigOfflineSubleadingLRJMass = bookTH1F("sigOfflineSubleadingLRJMass", "LRJ Et Distribution;Offline Subleading LRJ Mass [GeV];% of Leading LRJs / 10 GeV", 25, 0, 250);
+    TH1F* backOfflineSubleadingLRJMass = bookTH1F("backOfflineSubleadingLRJMass", "LRJ Et Distribution;Offline Subleading LRJ Mass [GeV];% of Leading LRJs / 10 GeV", 25, 0, 250);
 
-    TH1F* sigDeltaRLeadingSubleadingTruthJets = new TH1F("sigDeltaRLeadingSubleadingTruthJets", "LRJ Et Distribution;#Delta R Leading, Subleading Truth Jets / 0.2", 50, 0, 10);
-    TH1F* backDeltaRLeadingSubleadingTruthJets = new TH1F("backDeltaRLeadingSubleadingTruthJets", "LRJ Et Distribution;#Delta R Leading, Subleading Truth Jets / 0.2", 50, 0, 10);
+    TH1F* sigDeltaRLeadingSubleadingTruthJets = bookTH1F("sigDeltaRLeadingSubleadingTruthJets", "LRJ Et Distribution;#Delta R Leading, Subleading Truth Jets / 0.2", 50, 0, 10);
+    TH1F* backDeltaRLeadingSubleadingTruthJets = bookTH1F("backDeltaRLeadingSubleadingTruthJets", "LRJ Et Distribution;#Delta R Leading, Subleading Truth Jets / 0.2", 50, 0, 10);
 
-    TH1F* sig_h_LeadingOfflineLRJ_SubjetMultiplicity = new TH1F("sig_h_LeadingOfflineLRJ_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets;% of Leading LRJs", 4, 0, 4);
-    TH1F* back_h_LeadingOfflineLRJ_SubjetMultiplicity = new TH1F("back_h_LeadingOfflineLRJ_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets;% of Leading LRJs", 4, 0, 4);
+    TH1F* sig_h_LeadingOfflineLRJ_SubjetMultiplicity = bookTH1F("sig_h_LeadingOfflineLRJ_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets;% of Leading LRJs", 4, 0, 4);
+    TH1F* back_h_LeadingOfflineLRJ_SubjetMultiplicity = bookTH1F("back_h_LeadingOfflineLRJ_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets;% of Leading LRJs", 4, 0, 4);
 
-    TH1F* sig_h_SubleadingOfflineLRJ_SubjetMultiplicity = new TH1F("sig_h_SubleadingOfflineLRJ_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets;% of Subleading LRJs", 4, 0, 4);
-    TH1F* back_h_SubleadingOfflineLRJ_SubjetMultiplicity = new TH1F("back_h_SubleadingOfflineLRJ_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets;% of Subleading LRJs", 4, 0, 4);
+    TH1F* sig_h_SubleadingOfflineLRJ_SubjetMultiplicity = bookTH1F("sig_h_SubleadingOfflineLRJ_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets;% of Subleading LRJs", 4, 0, 4);
+    TH1F* back_h_SubleadingOfflineLRJ_SubjetMultiplicity = bookTH1F("back_h_SubleadingOfflineLRJ_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets;% of Subleading LRJs", 4, 0, 4);
 
-    TH1F* sig_h_JetTagger_CellTowerSK_Multiplicity = new TH1F("sig_h_JetTagger_CellTowerSK_Multiplicity", "LRJ Et Distribution;Number of CellTowers (SK Applied);Normalized Events / 5 Towers", 40, 0, 200);
-    TH1F* back_h_JetTagger_CellTowerSK_Multiplicity = new TH1F("back_h_JetTagger_CellTowerSK_Multiplicity", "LRJ Et Distribution;Number of CellTowers (SK Applied);Normalized Events / 5 Towers", 40, 0, 200);
-    TH1F* sig_h_JetTagger_CellTowerEtaSK_Multiplicity = new TH1F("sig_h_JetTagger_CellTowerEtaSK_Multiplicity", "LRJ Et Distribution;Number of CellTowers (EtaSK Applied);Normalized Events / 5 Towers", 40, 0, 200);
-    TH1F* back_h_JetTagger_CellTowerEtaSK_Multiplicity = new TH1F("back_h_JetTagger_CellTowerEtaSK_Multiplicity", "LRJ Et Distribution;Number of CellTowers (EtaSK Applied);Normalized Events / 5 Towers", 40, 0, 200);
+    TH1F* sig_h_JetTagger_CellTowerSK_Multiplicity = bookTH1F("sig_h_JetTagger_CellTowerSK_Multiplicity", "LRJ Et Distribution;Number of CellTowers (SK Applied);Normalized Events / 5 Towers", 40, 0, 200);
+    TH1F* back_h_JetTagger_CellTowerSK_Multiplicity = bookTH1F("back_h_JetTagger_CellTowerSK_Multiplicity", "LRJ Et Distribution;Number of CellTowers (SK Applied);Normalized Events / 5 Towers", 40, 0, 200);
+    TH1F* sig_h_JetTagger_CellTowerEtaSK_Multiplicity = bookTH1F("sig_h_JetTagger_CellTowerEtaSK_Multiplicity", "LRJ Et Distribution;Number of CellTowers (EtaSK Applied);Normalized Events / 5 Towers", 40, 0, 200);
+    TH1F* back_h_JetTagger_CellTowerEtaSK_Multiplicity = bookTH1F("back_h_JetTagger_CellTowerEtaSK_Multiplicity", "LRJ Et Distribution;Number of CellTowers (EtaSK Applied);Normalized Events / 5 Towers", 40, 0, 200);
 
-    TH1F* sig_h_JetTagger_Leading_MergedIO_Multiplicity = new TH1F("sig_h_JetTagger_Leading_MergedIO_Multiplicity", "LRJ Et Distribution;Number of Merged IOs;% of Leading JetTagger Jets / 2 IOs", 32, 0, 64);
-    TH1F* back_h_JetTagger_Leading_MergedIO_Multiplicity = new TH1F("back_h_JetTagger_Leading_MergedIO_Multiplicity", "LRJ Et Distribution;Number of Merged IOs;% of Leading JetTagger Jets / 2 IOs", 32, 0, 64);
+    TH1F* sig_h_JetTagger_Leading_MergedIO_Multiplicity = bookTH1F("sig_h_JetTagger_Leading_MergedIO_Multiplicity", "LRJ Et Distribution;Number of Merged IOs;% of Leading JetTagger Jets / 2 IOs", 32, 0, 64);
+    TH1F* back_h_JetTagger_Leading_MergedIO_Multiplicity = bookTH1F("back_h_JetTagger_Leading_MergedIO_Multiplicity", "LRJ Et Distribution;Number of Merged IOs;% of Leading JetTagger Jets / 2 IOs", 32, 0, 64);
 
-    TH1F* sig_h_JetTagger_Subleading_MergedIO_Multiplicity = new TH1F("sig_h_JetTagger_Subleading_MergedIO_Multiplicity", "LRJ Et Distribution;Number of Merged IOs;% of Subleading JetTagger Jets / 2 IOs", 32, 0, 64);
-    TH1F* back_h_JetTagger_Subleading_MergedIO_Multiplicity = new TH1F("back_h_JetTagger_Subleading_MergedIO_Multiplicity", "LRJ Et Distribution;Number of Merged IOs;% of Subleading JetTagger Jets / 2 IOs", 32, 0, 64);
+    TH1F* sig_h_JetTagger_Subleading_MergedIO_Multiplicity = bookTH1F("sig_h_JetTagger_Subleading_MergedIO_Multiplicity", "LRJ Et Distribution;Number of Merged IOs;% of Subleading JetTagger Jets / 2 IOs", 32, 0, 64);
+    TH1F* back_h_JetTagger_Subleading_MergedIO_Multiplicity = bookTH1F("back_h_JetTagger_Subleading_MergedIO_Multiplicity", "LRJ Et Distribution;Number of Merged IOs;% of Subleading JetTagger Jets / 2 IOs", 32, 0, 64);
 
     const double inputObjectEtBinsEdges[] = {0.1, 1, 2, 5, 10, 25, 50, 100, 200, 400, 1000};
     const int inputObjectNBins = (int)(sizeof(inputObjectEtBinsEdges)/sizeof(inputObjectEtBinsEdges[0])) - 1;
 
-    TH1F* sig_h_JetTagger_CellsTowersEt = new TH1F("sig_h_JetTagger_CellsTowersEt", "LRJ Et Distribution;CellsTowers E_{T}; CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
-    TH1F* back_h_JetTagger_CellsTowersEt = new TH1F("back_h_JetTagger_CellsTowersEt", "LRJ Et Distribution;CellsTowers E_{T};CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
-    TH1F* sig_h_JetTagger_CellsTowersSKEt = new TH1F("sig_h_JetTagger_CellsTowersSKEt", "CellsTowers E_{T} Comparison;CellsTowers E_{T} [GeV];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
-    TH1F* back_h_JetTagger_CellsTowersSKEt = new TH1F("back_h_JetTagger_CellsTowersSKEt", "CellsTowers E_{T} Comparison;CellsTowers E_{T} [GeV];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
-    TH1F* sig_h_JetTagger_CellsTowersEtaSKEt = new TH1F("sig_h_JetTagger_CellsTowersEtaSKEt", "CellsTowers E_{T} Comparison;CellsTowers E_{T} [GeV];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
-    TH1F* back_h_JetTagger_CellsTowersEtaSKEt = new TH1F("back_h_JetTagger_CellsTowersEtaSKEt", "CellsTowers E_{T} Comparison;CellsTowers E_{T} [GeV];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* sig_h_JetTagger_CellsTowersEt = bookTH1F("sig_h_JetTagger_CellsTowersEt", "LRJ Et Distribution;CellsTowers E_{T}; CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* back_h_JetTagger_CellsTowersEt = bookTH1F("back_h_JetTagger_CellsTowersEt", "LRJ Et Distribution;CellsTowers E_{T};CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* sig_h_JetTagger_CellsTowersSKEt = bookTH1F("sig_h_JetTagger_CellsTowersSKEt", "CellsTowers E_{T} Comparison;CellsTowers E_{T} [GeV];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* back_h_JetTagger_CellsTowersSKEt = bookTH1F("back_h_JetTagger_CellsTowersSKEt", "CellsTowers E_{T} Comparison;CellsTowers E_{T} [GeV];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* sig_h_JetTagger_CellsTowersEtaSKEt = bookTH1F("sig_h_JetTagger_CellsTowersEtaSKEt", "CellsTowers E_{T} Comparison;CellsTowers E_{T} [GeV];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* back_h_JetTagger_CellsTowersEtaSKEt = bookTH1F("back_h_JetTagger_CellsTowersEtaSKEt", "CellsTowers E_{T} Comparison;CellsTowers E_{T} [GeV];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
     
 
-    TH1F* sig_h_jFEX_Et = new TH1F("sig_h_jFEX_Et", "LRJ Et Distribution;jFEX SRJ E_{T} [GeV]; jFEX Jets / 10 GeV / Event", 41, 0, 410);
-    TH1F* back_h_jFEX_Et = new TH1F("back_h_jFEX_Et", "LRJ Et Distribution;jFEX SRJ E_{T} [GeV];jFEX Jets / 10 GeV / Event", 41, 0, 410);
+    TH1F* sig_h_jFEX_Et = bookTH1F("sig_h_jFEX_Et", "LRJ Et Distribution;jFEX SRJ E_{T} [GeV]; jFEX Jets / 10 GeV / Event", 41, 0, 410);
+    TH1F* back_h_jFEX_Et = bookTH1F("back_h_jFEX_Et", "LRJ Et Distribution;jFEX SRJ E_{T} [GeV];jFEX Jets / 10 GeV / Event", 41, 0, 410);
 
-    TH1F* sig_h_jFEX_Mult = new TH1F("sig_h_jFEX_Mult", "LRJ Et Distribution;jFEX SRJ Multiplicity; Fraction of Events / 5 Jets", 22, 0, 110);
-    TH1F* back_h_jFEX_Mult = new TH1F("back_h_jFEX_Mult", "LRJ Et Distribution;jFEX SRJ Multiplicity;Fraction of Events / 5 Jets", 22, 0, 110);
+    TH1F* sig_h_jFEX_Mult = bookTH1F("sig_h_jFEX_Mult", "LRJ Et Distribution;jFEX SRJ Multiplicity; Fraction of Events / 5 Jets", 22, 0, 110);
+    TH1F* back_h_jFEX_Mult = bookTH1F("back_h_jFEX_Mult", "LRJ Et Distribution;jFEX SRJ Multiplicity;Fraction of Events / 5 Jets", 22, 0, 110);
 
-    TH1F* sig_h_jFEX_Sim_Et = new TH1F("sig_h_jFEX_Sim_Et", "LRJ Et Distribution;jFEX (Resim) SRJ E_{T} [GeV]; jFEX Jets / 10 GeV / Event", 41, 0, 410);
-    TH1F* back_h_jFEX_Sim_Et = new TH1F("back_h_jFEX_Sim_Et", "LRJ Et Distribution;jFEX (Resim) SRJ E_{T} [GeV];jFEX Jets / 10 GeV / Event", 41, 0, 410);
-    TH1F* sig_h_jFEX_Sim_Mult = new TH1F("sig_h_jFEX_Sim_Mult", "LRJ Et Distribution;jFEX (Resim) SRJ Multiplicity; Fraction of Events / 5 Jets", 22, 0, 110);
-    TH1F* back_h_jFEX_Sim_Mult = new TH1F("back_h_jFEX_Sim_Mult", "LRJ Et Distribution;jFEX (Resim) SRJ Multiplicity;Fraction of Events / 5 Jets", 22, 0, 110);
+    TH1F* sig_h_jFEX_Sim_Et = bookTH1F("sig_h_jFEX_Sim_Et", "LRJ Et Distribution;jFEX (Resim) SRJ E_{T} [GeV]; jFEX Jets / 10 GeV / Event", 41, 0, 410);
+    TH1F* back_h_jFEX_Sim_Et = bookTH1F("back_h_jFEX_Sim_Et", "LRJ Et Distribution;jFEX (Resim) SRJ E_{T} [GeV];jFEX Jets / 10 GeV / Event", 41, 0, 410);
+    TH1F* sig_h_jFEX_Sim_Mult = bookTH1F("sig_h_jFEX_Sim_Mult", "LRJ Et Distribution;jFEX (Resim) SRJ Multiplicity; Fraction of Events / 5 Jets", 22, 0, 110);
+    TH1F* back_h_jFEX_Sim_Mult = bookTH1F("back_h_jFEX_Sim_Mult", "LRJ Et Distribution;jFEX (Resim) SRJ Multiplicity;Fraction of Events / 5 Jets", 22, 0, 110);
 
-    TH1F* sig_h_inTimeAntiKt4Truth_PileupJet_Mult = new TH1F("sig_h_inTimeAntiKt4Truth_PileupJet_Mult", "inTimeAntiKt4Truth Pileup Jet Multiplicity (E_{T} > 15 GeV);Jet Multiplicity;Fraction of Events", 60, 0, 60);
-    TH1F* back_h_inTimeAntiKt4Truth_PileupJet_Mult = new TH1F("back_h_inTimeAntiKt4Truth_PileupJet_Mult", "inTimeAntiKt4Truth Pileup Jet Multiplicity (E_{T} > 15 GeV);Jet Multiplicity;Fraction of Events", 60, 0, 60);
-    TH1F* sig_h_outOfTimeAntiKt4Truth_PileupJet_Mult = new TH1F("sig_h_outOfTimeAntiKt4Truth_PileupJet_Mult",
+    TH1F* sig_h_inTimeAntiKt4Truth_PileupJet_Mult = bookTH1F("sig_h_inTimeAntiKt4Truth_PileupJet_Mult", "inTimeAntiKt4Truth Pileup Jet Multiplicity (E_{T} > 15 GeV);Jet Multiplicity;Fraction of Events", 60, 0, 60);
+    TH1F* back_h_inTimeAntiKt4Truth_PileupJet_Mult = bookTH1F("back_h_inTimeAntiKt4Truth_PileupJet_Mult", "inTimeAntiKt4Truth Pileup Jet Multiplicity (E_{T} > 15 GeV);Jet Multiplicity;Fraction of Events", 60, 0, 60);
+    TH1F* sig_h_outOfTimeAntiKt4Truth_PileupJet_Mult = bookTH1F("sig_h_outOfTimeAntiKt4Truth_PileupJet_Mult",
         "outOfTimeAntiKt4Truth Pileup Jet Multiplicity (E_{T} > 15 GeV);Jet Multiplicity;Fraction of Events", 60, 0, 60);
-    TH1F* back_h_outOfTimeAntiKt4Truth_PileupJet_Mult = new TH1F("back_h_outOfTimeAntiKt4Truth_PileupJet_Mult",
+    TH1F* back_h_outOfTimeAntiKt4Truth_PileupJet_Mult = bookTH1F("back_h_outOfTimeAntiKt4Truth_PileupJet_Mult",
         "outOfTimeAntiKt4Truth Pileup Jet Multiplicity (E_{T} > 15 GeV);Jet Multiplicity;Fraction of Events", 60, 0, 60);
-    TH1F* sig_h_outOfTimeAntiKt4Truth_LeadingJet_Et = new TH1F("sig_h_outOfTimeAntiKt4Truth_LeadingJet_Et",
+    TH1F* sig_h_outOfTimeAntiKt4Truth_LeadingJet_Et = bookTH1F("sig_h_outOfTimeAntiKt4Truth_LeadingJet_Et",
         "outOfTimeAntiKt4Truth Leading Pileup Jet E_{T};E_{T} [GeV];Fraction of Events", 100, 0, 500);
-    TH1F* back_h_outOfTimeAntiKt4Truth_LeadingJet_Et = new TH1F("back_h_outOfTimeAntiKt4Truth_LeadingJet_Et",
+    TH1F* back_h_outOfTimeAntiKt4Truth_LeadingJet_Et = bookTH1F("back_h_outOfTimeAntiKt4Truth_LeadingJet_Et",
         "outOfTimeAntiKt4Truth Leading Pileup Jet E_{T};E_{T} [GeV];Fraction of Events", 100, 0, 500);
 
-    TH1F* sig_h_gFEX_Et = new TH1F("sig_h_gFEX_Et", "LRJ Et Distribution;gFEX SRJ E_{T} [GeV]; gFEX Jets / 10 GeV / Event", 41, 0, 410);
-    TH1F* back_h_gFEX_Et = new TH1F("back_h_gFEX_Et", "LRJ Et Distribution;gFEX SRJ E_{T} [GeV];gFEX Jets / 10 GeV / Event", 41, 0, 410);
+    TH1F* sig_h_gFEX_Et = bookTH1F("sig_h_gFEX_Et", "LRJ Et Distribution;gFEX SRJ E_{T} [GeV]; gFEX Jets / 10 GeV / Event", 41, 0, 410);
+    TH1F* back_h_gFEX_Et = bookTH1F("back_h_gFEX_Et", "LRJ Et Distribution;gFEX SRJ E_{T} [GeV];gFEX Jets / 10 GeV / Event", 41, 0, 410);
 
-    TH1F* sig_h_gFEX_Mult = new TH1F("sig_h_gFEX_Mult", "LRJ Et Distribution;gFEX SRJ Multiplicity; Fraction of Events / 5 Jets", 22, 0, 110);
-    TH1F* back_h_gFEX_Mult = new TH1F("back_h_gFEX_Mult", "LRJ Et Distribution;gFEX SRJ Multiplicity;Fraction of Events / 5 Jets", 22, 0, 110);
+    TH1F* sig_h_gFEX_Mult = bookTH1F("sig_h_gFEX_Mult", "LRJ Et Distribution;gFEX SRJ Multiplicity; Fraction of Events / 5 Jets", 22, 0, 110);
+    TH1F* back_h_gFEX_Mult = bookTH1F("back_h_gFEX_Mult", "LRJ Et Distribution;gFEX SRJ Multiplicity;Fraction of Events / 5 Jets", 22, 0, 110);
 
-    TH1F* sig_h_JetTagger_Considered_CellsTowersEt = new TH1F("sig_h_JetTagger_Considered_CellsTowersEt", "LRJ Et Distribution;CellsTowers E_{T} [Considered]; CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
-    TH1F* back_h_JetTagger_Considered_CellsTowersEt = new TH1F("back_h_JetTagger_Considered_CellsTowersEt", "LRJ Et Distribution;CellsTowers E_{T} [Considered];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* sig_h_JetTagger_Considered_CellsTowersEt = bookTH1F("sig_h_JetTagger_Considered_CellsTowersEt", "LRJ Et Distribution;CellsTowers E_{T} [Considered]; CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* back_h_JetTagger_Considered_CellsTowersEt = bookTH1F("back_h_JetTagger_Considered_CellsTowersEt", "LRJ Et Distribution;CellsTowers E_{T} [Considered];CellsTowers / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
 
-    TH1F* sig_h_JetTagger_Leading_MergedIO_Et = new TH1F("sig_h_JetTagger_Leading_MergedIO_Et", "LRJ Et Distribution;Merged IOs E_{T}; Merged IOs [Leading Jet] / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
-    TH1F* back_h_JetTagger_Leading_MergedIO_Et = new TH1F("back_h_JetTagger_Leading_MergedIO_Et", "LRJ Et Distribution;Merged IOs E_{T};Merged IOs [Leading Jet] / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* sig_h_JetTagger_Leading_MergedIO_Et = bookTH1F("sig_h_JetTagger_Leading_MergedIO_Et", "LRJ Et Distribution;Merged IOs E_{T}; Merged IOs [Leading Jet] / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* back_h_JetTagger_Leading_MergedIO_Et = bookTH1F("back_h_JetTagger_Leading_MergedIO_Et", "LRJ Et Distribution;Merged IOs E_{T};Merged IOs [Leading Jet] / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
 
-    TH1F* sig_h_JetTagger_Subleading_MergedIO_Et = new TH1F("sig_h_JetTagger_Subleading_MergedIO_Et", "LRJ Et Distribution;Merged IOs E_{T};Merged IOs [Sublead. Jet] / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
-    TH1F* back_h_JetTagger_Subleading_MergedIO_Et = new TH1F("back_h_JetTagger_Subleading_MergedIO_Et", "LRJ Et Distribution;Merged IOs E_{T};Merged IOs [Sublead. Jet] / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* sig_h_JetTagger_Subleading_MergedIO_Et = bookTH1F("sig_h_JetTagger_Subleading_MergedIO_Et", "LRJ Et Distribution;Merged IOs E_{T};Merged IOs [Sublead. Jet] / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
+    TH1F* back_h_JetTagger_Subleading_MergedIO_Et = bookTH1F("back_h_JetTagger_Subleading_MergedIO_Et", "LRJ Et Distribution;Merged IOs E_{T};Merged IOs [Sublead. Jet] / Bin / Event", inputObjectNBins, inputObjectEtBinsEdges);
 
-    TH1F* sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity = new TH1F("sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [jFEX SRJs];% of Leading LRJs", 4, 0, 4);
-    TH1F* back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity = new TH1F("back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [jFEX SRJs];% of Leading LRJs", 4, 0, 4);
+    TH1F* sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity = bookTH1F("sig_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [jFEX SRJs];% of Leading LRJs", 4, 0, 4);
+    TH1F* back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity = bookTH1F("back_h_LeadingJetTaggerLRJ_jFEX_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [jFEX SRJs];% of Leading LRJs", 4, 0, 4);
 
-    TH1F* sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity = new TH1F("sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [Cone CellsTowers Jets];% of Leading LRJs", 4, 0, 4);
-    TH1F* back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity = new TH1F("back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [Cone CellsTowers Jets];% of Leading LRJs", 4, 0, 4);
-    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity = new TH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity", "Leading LRJ;Subjet Multiplicity [Ntuple Tree];% of Events", 4, 0, 4);
-    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity = new TH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity", "Leading LRJ;Subjet Multiplicity [Ntuple Tree];% of Events", 4, 0, 4);
+    TH1F* sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity = bookTH1F("sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [Cone CellsTowers Jets];% of Leading LRJs", 4, 0, 4);
+    TH1F* back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity = bookTH1F("back_h_LeadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [Cone CellsTowers Jets];% of Leading LRJs", 4, 0, 4);
+    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity = bookTH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity", "Leading LRJ;Subjet Multiplicity [Ntuple Tree];% of Events", 4, 0, 4);
+    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity = bookTH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity", "Leading LRJ;Subjet Multiplicity [Ntuple Tree];% of Events", 4, 0, 4);
 
-    TH1F* sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity = new TH1F("sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [jFEX SRJs];% of Leading LRJs", 4, 0, 4);
-    TH1F* back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity = new TH1F("back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [jFEX SRJs];% of Leading LRJs", 4, 0, 4);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity = bookTH1F("sig_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [jFEX SRJs];% of Leading LRJs", 4, 0, 4);
+    TH1F* back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity = bookTH1F("back_h_SubleadingJetTaggerLRJ_jFEX_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [jFEX SRJs];% of Leading LRJs", 4, 0, 4);
 
-    TH1F* sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity = new TH1F("sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [Cone CellsTowers Jets];% of Leading LRJs", 4, 0, 4);
-    TH1F* back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity = new TH1F("back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [Cone CellsTowers Jets];% of Leading LRJs", 4, 0, 4);
-    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity = new TH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity", "Subleading LRJ;Subjet Multiplicity [Emulation];% of Events", 4, 0, 4);
-    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity = new TH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity", "Subleading LRJ;Subjet Multiplicity [Emulation];% of Events", 4, 0, 4);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity = bookTH1F("sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [Cone CellsTowers Jets];% of Leading LRJs", 4, 0, 4);
+    TH1F* back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity = bookTH1F("back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_SubjetMultiplicity", "LRJ Et Distribution;Number of Subjets [Cone CellsTowers Jets];% of Leading LRJs", 4, 0, 4);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity = bookTH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity", "Subleading LRJ;Subjet Multiplicity [Emulation];% of Events", 4, 0, 4);
+    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity = bookTH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_SubjetMultiplicity", "Subleading LRJ;Subjet Multiplicity [Emulation];% of Events", 4, 0, 4);
 
-    TH1F* sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1 = new TH1F("sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1 = new TH1F("back_h_LeadingJetTaggerLRJ_jFEX_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1 = bookTH1F("sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1 = bookTH1F("back_h_LeadingJetTaggerLRJ_jFEX_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2 = new TH1F("sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2", "LRJ Et Distribution;#tau_{2, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2 = new TH1F("back_h_LeadingJetTaggerLRJ_jFEX_Tau_2", "LRJ Et Distribution;tau_{2, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2 = bookTH1F("sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2", "LRJ Et Distribution;#tau_{2, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_2 = bookTH1F("back_h_LeadingJetTaggerLRJ_jFEX_Tau_2", "LRJ Et Distribution;tau_{2, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12 = new TH1F("sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1}  [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12 = new TH1F("back_h_LeadingJetTaggerLRJ_jFEX_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12 = bookTH1F("sig_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1}  [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_12 = bookTH1F("back_h_LeadingJetTaggerLRJ_jFEX_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12 = new TH1F("sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1}  [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12 = new TH1F("back_h_SubleadingJetTaggerLRJ_jFEX_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1}  [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_12 = bookTH1F("back_h_SubleadingJetTaggerLRJ_jFEX_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1 = new TH1F("sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1 = new TH1F("back_h_SubleadingJetTaggerLRJ_jFEX_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1 = bookTH1F("back_h_SubleadingJetTaggerLRJ_jFEX_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2 = new TH1F("sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2", "LRJ Et Distribution;#tau_{2, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2 = new TH1F("back_h_SubleadingJetTaggerLRJ_jFEX_Tau_2", "LRJ Et Distribution;tau_{2, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2", "LRJ Et Distribution;#tau_{2, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_2 = bookTH1F("back_h_SubleadingJetTaggerLRJ_jFEX_Tau_2", "LRJ Et Distribution;tau_{2, Lead. JetTag LRJ} [jFEX SRJs as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1 = new TH1F("sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1 = new TH1F("back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1 = bookTH1F("sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1 = bookTH1F("back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12 = new TH1F("sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12 = new TH1F("back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12 = bookTH1F("sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12 = bookTH1F("back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product = new TH1F("sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product", "LRJ Et Distribution;#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [ConeCellsTowers Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product = new TH1F("back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product", "LRJ Et Distribution;#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [ConeCellsTowers Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product = bookTH1F("sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product", "LRJ Et Distribution;#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [ConeCellsTowers Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product = bookTH1F("back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product", "LRJ Et Distribution;#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [ConeCellsTowers Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product = new TH1F("sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product", "LRJ Et Distribution;#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product = new TH1F("back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product", "LRJ Et Distribution;#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product = bookTH1F("sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product", "LRJ Et Distribution;#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product = bookTH1F("back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product", "LRJ Et Distribution;#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2 = new TH1F("sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2", "LRJ Et Distribution;#tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2 = new TH1F("back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Tau_2", "LRJ Et Distribution;tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1 = new TH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1", "Leading LRJ;#tau_{1} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1 = new TH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1", "Leading LRJ;#tau_{1} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
-    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2 = new TH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2", "Leading LRJ;#tau_{2} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2 = new TH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2", "Leading LRJ;#tau_{2} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
-    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21 = new TH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21", "Leading LRJ;#tau_{21} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21 = new TH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21", "Leading LRJ;#tau_{21} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2 = bookTH1F("sig_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2", "LRJ Et Distribution;#tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2 = bookTH1F("back_h_LeadingJetTaggerLRJ_ConeCellsTowers_Tau_2", "LRJ Et Distribution;tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1 = bookTH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1", "Leading LRJ;#tau_{1} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1 = bookTH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_1", "Leading LRJ;#tau_{1} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2 = bookTH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2", "Leading LRJ;#tau_{2} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2 = bookTH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_2", "Leading LRJ;#tau_{2} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21 = bookTH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21", "Leading LRJ;#tau_{21} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21 = bookTH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_Tau_21", "Leading LRJ;#tau_{21} [Ntuple Tree];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1 = new TH1F("sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1 = new TH1F("back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1 = bookTH1F("back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Tau_1", "LRJ Et Distribution;#tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12 = new TH1F("sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12 = new TH1F("back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12 = bookTH1F("back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_12", "LRJ Et Distribution;#tau_{2} / #tau_{1} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2 = new TH1F("sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2", "LRJ Et Distribution;#tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2 = new TH1F("back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Tau_2", "LRJ Et Distribution;tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
-    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1 = new TH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1", "Subleading LRJ;#tau_{1} [Emulation];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1 = new TH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1", "Subleading LRJ;#tau_{1} [Emulation];% of Events / 0.05", 20, 0, 1);
-    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2 = new TH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2", "Subleading LRJ;#tau_{2} [Emulation];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2 = new TH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2", "Subleading LRJ;#tau_{2} [Emulation];% of Events / 0.05", 20, 0, 1);
-    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21 = new TH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21", "Subleading LRJ;#tau_{21} [Emulation];% of Events / 0.05", 20, 0, 1);
-    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21 = new TH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21", "Subleading LRJ;#tau_{21} [Emulation];% of Events / 0.05", 20, 0, 1);
-    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox = new TH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox", "Subleading LRJ;Mass Approx [Emulation] [GeV];% of Events / 10 GeV", 103, 0, 2060);
-    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox = new TH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox", "Subleading LRJ;Mass Approx [Emulation] [GeV];% of Events / 10 GeV", 103, 0, 2060);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2", "LRJ Et Distribution;#tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_2 = bookTH1F("back_h_SubleadingJetTaggerLRJ_ConeCellsTowers_Tau_2", "LRJ Et Distribution;tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1", "Subleading LRJ;#tau_{1} [Emulation];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1 = bookTH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_1", "Subleading LRJ;#tau_{1} [Emulation];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2", "Subleading LRJ;#tau_{2} [Emulation];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2 = bookTH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_2", "Subleading LRJ;#tau_{2} [Emulation];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21 = bookTH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21", "Subleading LRJ;#tau_{21} [Emulation];% of Events / 0.05", 20, 0, 1);
+    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21 = bookTH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_Tau_21", "Subleading LRJ;#tau_{21} [Emulation];% of Events / 0.05", 20, 0, 1);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox = bookTH1F("sig_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox", "Subleading LRJ;Mass Approx [Emulation] [GeV];% of Events / 10 GeV", 103, 0, 2060);
+    TH1F* back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox = bookTH1F("back_h_SubleadingJetTaggerLRJ_NtupleTree_MassApprox", "Subleading LRJ;Mass Approx [Emulation] [GeV];% of Events / 10 GeV", 103, 0, 2060);
 
-    TH2F *sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt = new TH2F("sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]", 
+    TH2F *sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt = bookTH2F("sig_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]", 
                         52, 0, 1040,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt = new TH2F("back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]", 
+    TH2F *back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt = bookTH2F("back_h_JetTaggerLRJ_ConeCellsTowers_Subjet_Tau_21_Product_vsLeadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]", 
                         52, 0, 1040,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt = new TH2F("sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]", 
+    TH2F *sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt = bookTH2F("sig_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]", 
                         52, 0, 1040,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt = new TH2F("back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]", 
+    TH2F *back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt = bookTH2F("back_h_JetTaggerLRJ_jFEX_Subjet_Tau_21_Product_vsLeadingLRJEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]", 
                         52, 0, 1040,// x axis
                         20, 0, 1 ); //y axis
     
-    TH2F *sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2 = new TH2F("sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
+    TH2F *sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2 = bookTH2F("sig_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2 = new TH2F("sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
+    TH2F *sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2 = bookTH2F("sig_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2 = new TH2F("sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]",
+    TH2F *sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2 = bookTH2F("sig_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]",
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2 = new TH2F("sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2", "Leading LRJ [Ntuple Tree]; #tau_{1} [Ntuple Tree]; #tau_{2} [Ntuple Tree]",
+    TH2F *sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2 = bookTH2F("sig_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2", "Leading LRJ [Ntuple Tree]; #tau_{1} [Ntuple Tree]; #tau_{2} [Ntuple Tree]",
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
-    TH2F *back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2 = new TH2F("back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2", "Leading LRJ [Ntuple Tree]; #tau_{1} [Ntuple Tree]; #tau_{2} [Ntuple Tree]",
-                        20, 0, 1,// x axis
-                        20, 0, 1 ); //y axis
-
-    TH2F *sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2 = new TH2F("sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2", "Subleading LRJ [Emulation]; #tau_{1} [Emulation]; #tau_{2} [Emulation]",
-                        20, 0, 1,// x axis
-                        20, 0, 1 ); //y axis
-    TH2F *back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2 = new TH2F("back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2", "Subleading LRJ [Emulation]; #tau_{1} [Emulation]; #tau_{2} [Emulation]",
+    TH2F *back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2 = bookTH2F("back_LeadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2", "Leading LRJ [Ntuple Tree]; #tau_{1} [Ntuple Tree]; #tau_{2} [Ntuple Tree]",
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2 = new TH2F("sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
+    TH2F *sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2 = bookTH2F("sig_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2", "Subleading LRJ [Emulation]; #tau_{1} [Emulation]; #tau_{2} [Emulation]",
+                        20, 0, 1,// x axis
+                        20, 0, 1 ); //y axis
+    TH2F *back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2 = bookTH2F("back_SubleadingJetTaggerLRJ_NtupleTree_Tau_1_vs_Tau_2", "Subleading LRJ [Emulation]; #tau_{1} [Emulation]; #tau_{2} [Emulation]",
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12 = new TH2F("sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12", "Sum of Topo422 E_{T} in Each Bin; #tau_{2} / #tau_{1} (Lead.) [jFEX SRJs as Subjets]; #tau_{2} / #tau_{1} (Sublead.) [jFEX SRJs as Subjets]", 
+    TH2F *sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2 = bookTH2F("sig_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12 = new TH2F("sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12", "Sum of Topo422 E_{T} in Each Bin; #tau_{2} / #tau_{1} (Lead.) [ConeCellsTowers as Subjets]; #tau_{2} / #tau_{1} (Sublead.) [ConeCellsTowers as Subjets]", 
+    TH2F *sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12 = bookTH2F("sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12", "Sum of Topo422 E_{T} in Each Bin; #tau_{2} / #tau_{1} (Lead.) [jFEX SRJs as Subjets]; #tau_{2} / #tau_{1} (Sublead.) [jFEX SRJs as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt = new TH2F("sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt", "Sum of Topo422 E_{T} in Each Bin;  Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Lead.) [jFEX SRJs as Subjets]", 
+    TH2F *sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12 = bookTH2F("sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12", "Sum of Topo422 E_{T} in Each Bin; #tau_{2} / #tau_{1} (Lead.) [ConeCellsTowers as Subjets]; #tau_{2} / #tau_{1} (Sublead.) [ConeCellsTowers as Subjets]", 
+                        20, 0, 1,// x axis
+                        20, 0, 1 ); //y axis
+
+    TH2F *sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt = bookTH2F("sig_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt", "Sum of Topo422 E_{T} in Each Bin;  Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Lead.) [jFEX SRJs as Subjets]", 
                         20, 0, 800,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt = new TH2F("sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Sublead.) [ConeCellsTowers as Subjets]", 
+    TH2F *sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt = bookTH2F("sig_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Sublead.) [ConeCellsTowers as Subjets]", 
                         20, 0, 800,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2 = new TH2F("back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
+    TH2F *back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2 = bookTH2F("back_LeadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2 = new TH2F("back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
+    TH2F *back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2 = bookTH2F("back_SubleadingJetTaggerLRJ_jFEX_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [jFEX SRJs as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2 = new TH2F("back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
+    TH2F *back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2 = bookTH2F("back_LeadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2 = new TH2F("back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
+    TH2F *back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2 = bookTH2F("back_SubleadingJetTaggerLRJ_ConeCellsTowers_Subjet_Tau_1_vs_Tau_2", "Sum of Topo422 E_{T} in Each Bin; #tau_{1, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]; #tau_{2, Lead. JetTag LRJ} [ConeCellsTowers as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12 = new TH2F("back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12", "Sum of Topo422 E_{T} in Each Bin; #tau_{2} / #tau_{1} (Lead.) [jFEX SRJs as Subjets]; #tau_{2} / #tau_{1} (Sublead.) [jFEX SRJs as Subjets]", 
+    TH2F *back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12 = bookTH2F("back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_SubleadingTau12", "Sum of Topo422 E_{T} in Each Bin; #tau_{2} / #tau_{1} (Lead.) [jFEX SRJs as Subjets]; #tau_{2} / #tau_{1} (Sublead.) [jFEX SRJs as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
-    TH2F *back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12 = new TH2F("back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12", "Sum of Topo422 E_{T} in Each Bin; #tau_{2} / #tau_{1} (Lead.) [ConeCellsTowers as Subjets]; #tau_{2} / #tau_{1} (Sublead.) [ConeCellsTowers as Subjets]", 
+    TH2F *back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12 = bookTH2F("back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_SubleadingTau12", "Sum of Topo422 E_{T} in Each Bin; #tau_{2} / #tau_{1} (Lead.) [ConeCellsTowers as Subjets]; #tau_{2} / #tau_{1} (Sublead.) [ConeCellsTowers as Subjets]", 
                         20, 0, 1,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt = new TH2F("back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt", "Sum of Topo422 E_{T} in Each Bin;  Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Lead.) [jFEX SRJs as Subjets]", 
+    TH2F *back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt = bookTH2F("back_JetTaggerLRJ_jFEX_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt", "Sum of Topo422 E_{T} in Each Bin;  Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Lead.) [jFEX SRJs as Subjets]", 
                         20, 0, 800,// x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt = new TH2F("back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Sublead.) [ConeCellsTowers as Subjets]", 
+    TH2F *back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt = bookTH2F("back_JetTaggerLRJ_ConeCellsTowers_Subjet_LeadingTau_12_vs_LeadingJetTaggerEt", "Sum of Topo422 E_{T} in Each Bin; Leading JetTagger LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} (Sublead.) [ConeCellsTowers as Subjets]", 
                         20, 0, 800,// x axis
                         20, 0, 1 ); //y axis
 
 
-    TH1F* sig_h_LeadingOfflineLRJ_SubjetEt = new TH1F("sig_h_LeadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Leading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
-    TH1F* back_h_LeadingOfflineLRJ_SubjetEt = new TH1F("back_h_LeadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Leading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
+    TH1F* sig_h_LeadingOfflineLRJ_SubjetEt = bookTH1F("sig_h_LeadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Leading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
+    TH1F* back_h_LeadingOfflineLRJ_SubjetEt = bookTH1F("back_h_LeadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Leading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
     
-    TH1F* sig_h_SubleadingOfflineLRJ_SubjetEt = new TH1F("sig_h_SubleadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Subleading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
-    TH1F* back_h_SubleadingOfflineLRJ_SubjetEt = new TH1F("back_h_SubleadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Subleading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
+    TH1F* sig_h_SubleadingOfflineLRJ_SubjetEt = bookTH1F("sig_h_SubleadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Subleading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
+    TH1F* back_h_SubleadingOfflineLRJ_SubjetEt = bookTH1F("back_h_SubleadingOfflineLRJ_SubjetEt", "LRJ Et Distribution;Subjet E_{T}; (# of Subleading Offline LRJs Subjets / Event) / 20 GeV", 20, 0, 400);
 
-    TH1F* sig_h_LRJ_Et = new TH1F("sig_h_LRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of LRJs / 20 GeV", 40, 0, 800);
-    TH1F* sig_h_leading_LRJ_Et = new TH1F("sig_h_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_subleading_LRJ_Et = new TH1F("sig_h_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_leading_LRJ_Eta = new TH1F("sig_h_leading_LRJ_Eta", "Leading LRJ #eta Distribution;#eta;% of Leading LRJs", 98, -4.9, 4.9);
+    TH1F* sig_h_LRJ_Et = bookTH1F("sig_h_LRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of LRJs / 20 GeV", 40, 0, 800);
+    TH1F* sig_h_leading_LRJ_Et = bookTH1F("sig_h_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* sig_h_subleading_LRJ_Et = bookTH1F("sig_h_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* sig_h_leading_LRJ_Eta = bookTH1F("sig_h_leading_LRJ_Eta", "Leading LRJ #eta Distribution;#eta;% of Leading LRJs", 98, -4.9, 4.9);
 
     // Subjet-to-nearest-jet deltaR distributions
-    TH1F* sig_h_leadSubjet_minDeltaR_truthJet    = new TH1F("sig_h_leadSubjet_minDeltaR_truthJet",    "Leading LRJ Subjet Min #DeltaR to Truth Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
-    TH1F* sig_h_leadSubjet_minDeltaR_pileupJet   = new TH1F("sig_h_leadSubjet_minDeltaR_pileupJet",   "Leading LRJ Subjet Min #DeltaR to Pileup Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
-    TH1F* sig_h_subSubjet_minDeltaR_truthJet     = new TH1F("sig_h_subSubjet_minDeltaR_truthJet",     "Subleading LRJ Subjet Min #DeltaR to Truth Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
-    TH1F* sig_h_subSubjet_minDeltaR_pileupJet    = new TH1F("sig_h_subSubjet_minDeltaR_pileupJet",    "Subleading LRJ Subjet Min #DeltaR to Pileup Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
+    TH1F* sig_h_leadSubjet_minDeltaR_truthJet    = bookTH1F("sig_h_leadSubjet_minDeltaR_truthJet",    "Leading LRJ Subjet Min #DeltaR to Truth Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
+    TH1F* sig_h_leadSubjet_minDeltaR_pileupJet   = bookTH1F("sig_h_leadSubjet_minDeltaR_pileupJet",   "Leading LRJ Subjet Min #DeltaR to Pileup Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
+    TH1F* sig_h_subSubjet_minDeltaR_truthJet     = bookTH1F("sig_h_subSubjet_minDeltaR_truthJet",     "Subleading LRJ Subjet Min #DeltaR to Truth Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
+    TH1F* sig_h_subSubjet_minDeltaR_pileupJet    = bookTH1F("sig_h_subSubjet_minDeltaR_pileupJet",    "Subleading LRJ Subjet Min #DeltaR to Pileup Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
 
     // Subjet matching fraction bar graphs (4 categories, leading and subleading)
-    TH1F* sig_h_leadSubjet_matchFrac  = new TH1F("sig_h_leadSubjet_matchFrac",  "Signal Leading LRJ Subjet Match Fraction;Category of Subjet Matching (#DeltaR < 0.2);Fraction of Subjets", 4, 0, 4);
-    TH1F* sig_h_subSubjet_matchFrac   = new TH1F("sig_h_subSubjet_matchFrac",   "Signal Subleading LRJ Subjet Match Fraction;Category of Subjet Matching (#DeltaR < 0.2);Fraction of Subjets", 4, 0, 4);
+    TH1F* sig_h_leadSubjet_matchFrac  = bookTH1F("sig_h_leadSubjet_matchFrac",  "Signal Leading LRJ Subjet Match Fraction;Category of Subjet Matching (#DeltaR < 0.2);Fraction of Subjets", 4, 0, 4);
+    TH1F* sig_h_subSubjet_matchFrac   = bookTH1F("sig_h_subSubjet_matchFrac",   "Signal Subleading LRJ Subjet Match Fraction;Category of Subjet Matching (#DeltaR < 0.2);Fraction of Subjets", 4, 0, 4);
     for(TH1F* h : {sig_h_leadSubjet_matchFrac, sig_h_subSubjet_matchFrac}){
         h->GetXaxis()->SetBinLabel(1, "Truth only");
         h->GetXaxis()->SetBinLabel(2, "Pileup only");
@@ -3205,622 +3461,622 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         h->GetXaxis()->SetBinLabel(4, "Neither");
     }
 
-    TH1F* sig_h_4th_leading_WtaCone_Et = new TH1F("sig_h_4th_leading_WtaCone_Et", "Leading LRJ Et Distribution;4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
-    TH1F* back_h_4th_leading_WtaCone_Et = new TH1F("back_h_4th_leading_WtaCone_Et", "Leading LRJ Et Distribution;4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
+    TH1F* sig_h_4th_leading_WtaCone_Et = bookTH1F("sig_h_4th_leading_WtaCone_Et", "Leading LRJ Et Distribution;4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
+    TH1F* back_h_4th_leading_WtaCone_Et = bookTH1F("back_h_4th_leading_WtaCone_Et", "Leading LRJ Et Distribution;4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
 
     // Leading WTA cone jet E_T (single-jet trigger baseline)
-    TH1F* sig_h_leading_WtaCone_Et = new TH1F("sig_h_leading_WtaCone_Et",
+    TH1F* sig_h_leading_WtaCone_Et = bookTH1F("sig_h_leading_WtaCone_Et",
         "Leading WTA Cone Jet E_{T};Leading WTA Cone Jet E_{T} [GeV];Fraction of Events",
         rateVsEffBins_ConeLeadSingle.size() - 1, rateVsEffBins_ConeLeadSingle.data());
-    TH1F* back_h_leading_WtaCone_Et = new TH1F("back_h_leading_WtaCone_Et",
+    TH1F* back_h_leading_WtaCone_Et = bookTH1F("back_h_leading_WtaCone_Et",
         "Leading WTA Cone Jet E_{T};Leading WTA Cone Jet E_{T} [GeV];Fraction of Events",
         rateVsEffBins_ConeLeadSingle.size() - 1, rateVsEffBins_ConeLeadSingle.data());
 
     // H_T (sum of WTA cone jet E_T for jets above ht_jet_min_et)
-    TH1F* sig_h_HT_WtaCone = new TH1F("sig_h_HT_WtaCone",
+    TH1F* sig_h_HT_WtaCone = bookTH1F("sig_h_HT_WtaCone",
         Form("H_{T} (cone jets E_{T} > %.0f GeV);H_{T} [GeV];Fraction of Events", ht_jet_min_et),
         rateVsEffBins_HT.size() - 1, rateVsEffBins_HT.data());
-    TH1F* back_h_HT_WtaCone = new TH1F("back_h_HT_WtaCone",
+    TH1F* back_h_HT_WtaCone = bookTH1F("back_h_HT_WtaCone",
         Form("H_{T} (cone jets E_{T} > %.0f GeV);H_{T} [GeV];Fraction of Events", ht_jet_min_et),
         rateVsEffBins_HT.size() - 1, rateVsEffBins_HT.data());
 
-    TH1F* sig_h_leading_LRJ_Et_normalbinning = new TH1F("sig_h_leading_LRJ_Et_normalbinning", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", 41, 0, 1025);
-    TH1F* sig_h_subleading_LRJ_Et_normalbinning = new TH1F("sig_h_subleading_LRJ_Et_normalbinning", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", 41, 0, 1025);
+    TH1F* sig_h_leading_LRJ_Et_normalbinning = bookTH1F("sig_h_leading_LRJ_Et_normalbinning", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", 41, 0, 1025);
+    TH1F* sig_h_subleading_LRJ_Et_normalbinning = bookTH1F("sig_h_subleading_LRJ_Et_normalbinning", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", 41, 0, 1025);
 
 
-    TH1F* sig_h_gFEX_leading_LRJ_Et = new TH1F("sig_h_gFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_gFEX_subleading_LRJ_Et = new TH1F("sig_h_gFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* sig_h_gFEX_leading_LRJ_Et = bookTH1F("sig_h_gFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* sig_h_gFEX_subleading_LRJ_Et = bookTH1F("sig_h_gFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
     // gFEX LRJ Sim (resimulated) — signal rate histograms
-    TH1F* sig_h_gFEX_Sim_leading_LRJ_Et = new TH1F("sig_h_gFEX_Sim_leading_LRJ_Et", "Leading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_gFEX_Sim_subleading_LRJ_Et = new TH1F("sig_h_gFEX_Sim_subleading_LRJ_Et", "Subleading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* sig_h_gFEX_Sim_leading_LRJ_Et = bookTH1F("sig_h_gFEX_Sim_leading_LRJ_Et", "Leading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* sig_h_gFEX_Sim_subleading_LRJ_Et = bookTH1F("sig_h_gFEX_Sim_subleading_LRJ_Et", "Subleading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
     // EtaSK WTA cone jets — signal distributions
-    TH1F* sig_h_leading_WTA_coneSK_cellstowers_pT = new TH1F("sig_h_leading_WTA_coneSK_cellstowers_pT", "Leading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
-    TH1F* sig_h_subleading_WTA_coneSK_cellstowers_pT = new TH1F("sig_h_subleading_WTA_coneSK_cellstowers_pT", "Subleading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
-    TH1F* sig_h_leading_WTA_coneEtaSK_cellstowers_pT = new TH1F("sig_h_leading_WTA_coneEtaSK_cellstowers_pT", "Leading EtaSK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
-    TH1F* sig_h_subleading_WTA_coneEtaSK_cellstowers_pT = new TH1F("sig_h_subleading_WTA_coneEtaSK_cellstowers_pT", "Subleading EtaSK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
-    TH1F* sig_h_leading_WTA_coneEtaSK_Ring0Et = new TH1F("sig_h_leading_WTA_coneEtaSK_Ring0Et", "Leading EtaSK WTA Cone Jet Ring 0 E_{T};Ring 0 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
-    TH1F* sig_h_leading_WTA_coneEtaSK_Ring1Et = new TH1F("sig_h_leading_WTA_coneEtaSK_Ring1Et", "Leading EtaSK WTA Cone Jet Ring 1 E_{T};Ring 1 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
-    TH1F* sig_h_leading_WTA_coneEtaSK_Ring2Et = new TH1F("sig_h_leading_WTA_coneEtaSK_Ring2Et", "Leading EtaSK WTA Cone Jet Ring 2 E_{T};Ring 2 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
-    TH1F* sig_h_leading_WTA_coneEtaSK_Ring3Et = new TH1F("sig_h_leading_WTA_coneEtaSK_Ring3Et", "Leading EtaSK WTA Cone Jet Ring 3 E_{T};Ring 3 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
-    TH1F* sig_h_leading_WTA_coneEtaSK_Ring4Et = new TH1F("sig_h_leading_WTA_coneEtaSK_Ring4Et", "Leading EtaSK WTA Cone Jet Ring 4 E_{T};Ring 4 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
-    TH1F* sig_h_leading_WTA_coneEtaSK_TotalTobN = new TH1F("sig_h_leading_WTA_coneEtaSK_TotalTobN", "Leading EtaSK WTA Cone Jet Total TOB N;Total TOB N;Fraction of Jets", 128, 0, 128);
+    TH1F* sig_h_leading_WTA_coneSK_cellstowers_pT = bookTH1F("sig_h_leading_WTA_coneSK_cellstowers_pT", "Leading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
+    TH1F* sig_h_subleading_WTA_coneSK_cellstowers_pT = bookTH1F("sig_h_subleading_WTA_coneSK_cellstowers_pT", "Subleading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
+    TH1F* sig_h_leading_WTA_coneEtaSK_cellstowers_pT = bookTH1F("sig_h_leading_WTA_coneEtaSK_cellstowers_pT", "Leading EtaSK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
+    TH1F* sig_h_subleading_WTA_coneEtaSK_cellstowers_pT = bookTH1F("sig_h_subleading_WTA_coneEtaSK_cellstowers_pT", "Subleading EtaSK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
+    TH1F* sig_h_leading_WTA_coneEtaSK_Ring0Et = bookTH1F("sig_h_leading_WTA_coneEtaSK_Ring0Et", "Leading EtaSK WTA Cone Jet Ring 0 E_{T};Ring 0 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
+    TH1F* sig_h_leading_WTA_coneEtaSK_Ring1Et = bookTH1F("sig_h_leading_WTA_coneEtaSK_Ring1Et", "Leading EtaSK WTA Cone Jet Ring 1 E_{T};Ring 1 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
+    TH1F* sig_h_leading_WTA_coneEtaSK_Ring2Et = bookTH1F("sig_h_leading_WTA_coneEtaSK_Ring2Et", "Leading EtaSK WTA Cone Jet Ring 2 E_{T};Ring 2 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
+    TH1F* sig_h_leading_WTA_coneEtaSK_Ring3Et = bookTH1F("sig_h_leading_WTA_coneEtaSK_Ring3Et", "Leading EtaSK WTA Cone Jet Ring 3 E_{T};Ring 3 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
+    TH1F* sig_h_leading_WTA_coneEtaSK_Ring4Et = bookTH1F("sig_h_leading_WTA_coneEtaSK_Ring4Et", "Leading EtaSK WTA Cone Jet Ring 4 E_{T};Ring 4 E_{T} [GeV];Fraction of Jets / 5 GeV", 50, 0, 250);
+    TH1F* sig_h_leading_WTA_coneEtaSK_TotalTobN = bookTH1F("sig_h_leading_WTA_coneEtaSK_TotalTobN", "Leading EtaSK WTA Cone Jet Total TOB N;Total TOB N;Fraction of Jets", 128, 0, 128);
 
-    TH1F* sig_h_jFEX_leading_LRJ_Et = new TH1F("sig_h_jFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_jFEX_subleading_LRJ_Et = new TH1F("sig_h_jFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* sig_h_jFEX_leading_LRJ_Et = bookTH1F("sig_h_jFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* sig_h_jFEX_subleading_LRJ_Et = bookTH1F("sig_h_jFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
     // jFEX SRJ Sim (resimulated) — signal rate histograms
-    TH1F* sig_h_jFEX_Sim_leading_SRJ_Et = new TH1F("sig_h_jFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
-    TH1F* sig_h_jFEX_Sim_subleading_SRJ_Et = new TH1F("sig_h_jFEX_Sim_subleading_SRJ_Et", "Subleading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading SRJs / 10 GeV", 52, 0, 520);
+    TH1F* sig_h_jFEX_Sim_leading_SRJ_Et = bookTH1F("sig_h_jFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 520, 0, 520);
+    TH1F* sig_h_jFEX_Sim_subleading_SRJ_Et = bookTH1F("sig_h_jFEX_Sim_subleading_SRJ_Et", "Subleading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading SRJs / 1 GeV", 520, 0, 520);
     
-    TH1F* sig_h_jFEX_4thleading_SRJ_Et = new TH1F("sig_h_jFEX_4thleading_SRJ_Et", "4th Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
-    TH1F* sig_h_jFEX_Sim_4thleading_SRJ_Et = new TH1F("sig_h_jFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
-    TH1F* sig_h_gFEX_Sim_leading_SRJ_Et = new TH1F("sig_h_gFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
-    TH1F* sig_h_gFEX_Sim_4thleading_SRJ_Et = new TH1F("sig_h_gFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+    TH1F* sig_h_jFEX_4thleading_SRJ_Et = bookTH1F("sig_h_jFEX_4thleading_SRJ_Et", "4th Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
+    TH1F* sig_h_jFEX_Sim_4thleading_SRJ_Et = bookTH1F("sig_h_jFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
+    TH1F* sig_h_gFEX_Sim_leading_SRJ_Et = bookTH1F("sig_h_gFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 820, 0, 820);
+    TH1F* sig_h_gFEX_Sim_4thleading_SRJ_Et = bookTH1F("sig_h_gFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
 
-    TH1F* sig_h_gFEX_leading_SRJ_Et = new TH1F("sig_h_gFEX_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
-    TH1F* sig_h_gFEX_4thleading_SRJ_Et = new TH1F("sig_h_gFEX_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+    TH1F* sig_h_gFEX_leading_SRJ_Et = bookTH1F("sig_h_gFEX_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 820, 0, 820);
+    TH1F* sig_h_gFEX_4thleading_SRJ_Et = bookTH1F("sig_h_gFEX_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
 
     // jFEX SRJ (existing hardware objects) — signal rate histogram
-    TH1F* sig_h_jFEX_leading_SRJ_Et = new TH1F("sig_h_jFEX_leading_SRJ_Et", "Leading jFEX SRJ E_{T} Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
+    TH1F* sig_h_jFEX_leading_SRJ_Et = bookTH1F("sig_h_jFEX_leading_SRJ_Et", "Leading jFEX SRJ E_{T} Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 520, 0, 520);
 
     // with deltaR metric
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Leading JetTagger LRJ #Psi_{R}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Leading JetTagger LRJ #Psi_{R}", 
                         52, 0, 1040, // x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sigOfflineLeadingLRJMassvsPsi_R = new TH2F("sigOfflineLeadingLRJMassvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass [GeV]; Leading JetTagger LRJ #Psi_{R}", 
+    TH2F *sigOfflineLeadingLRJMassvsPsi_R = bookTH2F("sigOfflineLeadingLRJMassvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass [GeV]; Leading JetTagger LRJ #Psi_{R}", 
                         25, 0, 250, // x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R = new TH2F("sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R", "Sum of Topo422 E_{T} in Each Bin; #Psi_{R} [Subleading Jet]; #Psi_{R} [Leading Jet]", 
+    TH2F *sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R = bookTH2F("sigJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R", "Sum of Topo422 E_{T} in Each Bin; #Psi_{R} [Subleading Jet]; #Psi_{R} [Leading Jet]", 
                         20, 0, 1, // x axis
                         20, 0, 1 ); //y axis
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R}", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R}", 
                         52, 0, 1040, // x axis
                         20, 0, 1 ); //y axis
-    TH2F *backOfflineLeadingLRJMassvsPsi_R = new TH2F("backOfflineLeadingLRJMassvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass [GeV]; Leading JetTagger LRJ #Psi_{R}", 
+    TH2F *backOfflineLeadingLRJMassvsPsi_R = bookTH2F("backOfflineLeadingLRJMassvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass [GeV]; Leading JetTagger LRJ #Psi_{R}", 
                         25, 0, 250, // x axis
                         20, 0, 1 ); //y axis
-    TH2F *backJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R = new TH2F("backJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R", "Sum of Topo422 E_{T} in Each Bin; #Psi_{R} [Subleading Jet]; #Psi_{R} [Leading Jet]", 
+    TH2F *backJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R = bookTH2F("backJetTaggerLeadingLRJPsi_RvsSubleadingPsi_R", "Sum of Topo422 E_{T} in Each Bin; #Psi_{R} [Subleading Jet]; #Psi_{R} [Leading Jet]", 
                         20, 0, 1, // x axis
                         20, 0, 1 ); //y axis
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R = new TH2F("sigJetTaggerSubleadingLRJEtvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R = bookTH2F("sigJetTaggerSubleadingLRJEtvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R}", 
                         52, 0, 1040, // x axis
                         20, 0, 1 ); //y axis
-    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R = new TH2F("backJetTaggerSubleadingLRJEtvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R = bookTH2F("backJetTaggerSubleadingLRJEtvsPsi_R", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R}", 
                         52, 0, 1040, // x axis
                         20, 0, 1 ); //y axis
     
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading}", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7); //y axis
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading}", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading}", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7); //y axis                    
-    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R_squared = new TH2F("sigJetTaggerSubleadingLRJEtvsPsi_R_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R_squared = bookTH2F("sigJetTaggerSubleadingLRJEtvsPsi_R_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading}", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7); //y axis
-    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R_squared = new TH2F("backJetTaggerSubleadingLRJEtvsPsi_R_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R_squared = bookTH2F("backJetTaggerSubleadingLRJEtvsPsi_R_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading}", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7); //y axis
 
     /// TH3F of Psi_R_squared + Leading LRJ E_T + Tau_2 / Tau_1 (Leading) * Tau_2 / Tau_1 (Subleading)
-    TH3F *sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct = new TH3F("sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]",
+    TH3F *sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct = bookTH3F("sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]",
                         52, 0, 1040, // x axis
                         35, 0, 0.7,
                         20, 0, 1); //y axis
 
-    TH3F *backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct = new TH3F("backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]",
-                        52, 0, 1040, // x axis
-                        35, 0, 0.7,
-                        20, 0, 1); //y axis
-    
-    TH2F *sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct = new TH2F("sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct", "Sum of Topo422 E_{T} in Each Bin;#Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]",
-                        35, 0, 0.7,
-                        20, 0, 1); //y axis
-
-    TH2F *backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct = new TH2F("backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct", "Sum of Topo422 E_{T} in Each Bin;#Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]",
-                        35, 0, 0.7,
-                        20, 0, 1); //y axis
-
-    TH3F *sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct = new TH3F("sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]",
-                        52, 0, 1040, // x axis
-                        35, 0, 0.7,
-                        20, 0, 1); //y axis
-
-    TH3F *backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct = new TH3F("backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]",
+    TH3F *backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct = bookTH3F("backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21jFEXProduct", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]",
                         52, 0, 1040, // x axis
                         35, 0, 0.7,
                         20, 0, 1); //y axis
     
-    TH2F *sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct = new TH2F("sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct", "Sum of Topo422 E_{T} in Each Bin;#Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]",
+    TH2F *sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct = bookTH2F("sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct", "Sum of Topo422 E_{T} in Each Bin;#Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]",
                         35, 0, 0.7,
                         20, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct = new TH2F("backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct", "Sum of Topo422 E_{T} in Each Bin;#Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]",
+    TH2F *backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct = bookTH2F("backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21jFEXProduct", "Sum of Topo422 E_{T} in Each Bin;#Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [jFEX Subjets]",
                         35, 0, 0.7,
                         20, 0, 1); //y axis
 
-    TH1F* sig_h_leading_LRJ_psi_R_squared_NoConeSubjets = new TH1F("sig_h_leading_LRJ_psi_R_squared_NoConeSubjets", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [No Cone Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
-    TH1F* back_h_leading_LRJ_psi_R_squared_NoConeSubjets = new TH1F("back_h_leading_LRJ_psi_R_squared_NoConeSubjets", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [No Cone Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH3F *sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct = bookTH3F("sigJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]",
+                        52, 0, 1040, // x axis
+                        35, 0, 0.7,
+                        20, 0, 1); //y axis
+
+    TH3F *backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct = bookTH3F("backJetTaggerLeadingLRJEtvsPsi_R_squaredvsTau21ConeProduct", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]",
+                        52, 0, 1040, // x axis
+                        35, 0, 0.7,
+                        20, 0, 1); //y axis
     
-    TH1F* sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets = new TH1F("sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [No jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
-    TH1F* back_h_leading_LRJ_psi_R_squared_NojFEXSubjets = new TH1F("back_h_leading_LRJ_psi_R_squared_NojFEXSubjets", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [No jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH2F *sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct = bookTH2F("sigJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct", "Sum of Topo422 E_{T} in Each Bin;#Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]",
+                        35, 0, 0.7,
+                        20, 0, 1); //y axis
 
-    TH1F* sig_h_leading_LRJ_Et_NoConeSubjets = new TH1F("sig_h_leading_LRJ_Et_NoConeSubjets", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_NoConeSubjets = new TH1F("back_h_leading_LRJ_Et_squared_NoConeSubjets", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    TH2F *backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct = bookTH2F("backJetTaggerLeadingLRJvsPsi_R_squaredvsTau21ConeProduct", "Sum of Topo422 E_{T} in Each Bin;#Psi_{R, Leading} #times #Psi_{R, Subleading};#tau_{2} / #tau_{1} (Leading) #times #tau_{2} / #tau_{1} (Subleading)  [Cone Subjets]",
+                        35, 0, 0.7,
+                        20, 0, 1); //y axis
+
+    TH1F* sig_h_leading_LRJ_psi_R_squared_NoConeSubjets = bookTH1F("sig_h_leading_LRJ_psi_R_squared_NoConeSubjets", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [No Cone Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* back_h_leading_LRJ_psi_R_squared_NoConeSubjets = bookTH1F("back_h_leading_LRJ_psi_R_squared_NoConeSubjets", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [No Cone Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
     
-    TH1F* sig_h_leading_LRJ_Et_NojFEXSubjets = new TH1F("sig_h_leading_LRJ_Et_NojFEXSubjets", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No jFEX Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_NojFEXSubjets = new TH1F("back_h_leading_LRJ_Et_NojFEXSubjets", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No jFEX Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    TH1F* sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets = bookTH1F("sig_h_leading_LRJ_psi_R_squared_NojFEXSubjets", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [No jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* back_h_leading_LRJ_psi_R_squared_NojFEXSubjets = bookTH1F("back_h_leading_LRJ_psi_R_squared_NojFEXSubjets", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [No jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [No Cone Subjets]", 
+    TH1F* sig_h_leading_LRJ_Et_NoConeSubjets = bookTH1F("sig_h_leading_LRJ_Et_NoConeSubjets", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_NoConeSubjets = bookTH1F("back_h_leading_LRJ_Et_squared_NoConeSubjets", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    
+    TH1F* sig_h_leading_LRJ_Et_NojFEXSubjets = bookTH1F("sig_h_leading_LRJ_Et_NojFEXSubjets", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No jFEX Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_NojFEXSubjets = bookTH1F("back_h_leading_LRJ_Et_NojFEXSubjets", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No jFEX Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [No Cone Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [No Cone Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_NoConeSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [No Cone Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [No jFEX Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [No jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [No jFEX Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_NojFEXSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [No jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [No Cone Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [No Cone Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [No Cone Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_NoConeSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [No Cone Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [No jFEX Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [No jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [No jFEX Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_NojFEXSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [No jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1); //y axis
 
-    TH1F* sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet = new TH1F("sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [1 Cone Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
-    TH1F* back_h_leading_LRJ_psi_R_squared_With1ConeSubjet = new TH1F("back_h_leading_LRJ_psi_R_squared_With1ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [1 Cone Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet = bookTH1F("sig_h_leading_LRJ_psi_R_squared_With1ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [1 Cone Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* back_h_leading_LRJ_psi_R_squared_With1ConeSubjet = bookTH1F("back_h_leading_LRJ_psi_R_squared_With1ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [1 Cone Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
     
-    TH1F* sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet = new TH1F("sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [1 jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
-    TH1F* back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet = new TH1F("back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [1 jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet = bookTH1F("sig_h_leading_LRJ_psi_R_squared_With1jFEXSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [1 jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet = bookTH1F("back_h_leading_LRJ_psi_R_squared_With1jFEXSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [1 jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
 
-    TH1F* sig_h_leading_LRJ_Et_With1ConeSubjet = new TH1F("sig_h_leading_LRJ_Et_With1ConeSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 Cone Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_With1ConeSubjet = new TH1F("back_h_leading_LRJ_Et_With1ConeSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 Cone Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_With1ConeSubjet = bookTH1F("sig_h_leading_LRJ_Et_With1ConeSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 Cone Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_With1ConeSubjet = bookTH1F("back_h_leading_LRJ_Et_With1ConeSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 Cone Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
     
-    TH1F* sig_h_leading_LRJ_Et_With1jFEXSubjet = new TH1F("sig_h_leading_LRJ_Et_With1jFEXSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 jFEX Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_With1jFEXSubjet = new TH1F("back_h_leading_LRJ_Et_With1jFEXSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 jFEX Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_With1jFEXSubjet = bookTH1F("sig_h_leading_LRJ_Et_With1jFEXSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 jFEX Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_With1jFEXSubjet = bookTH1F("back_h_leading_LRJ_Et_With1jFEXSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 jFEX Subjets];% of Leading LRJs / 10 GeV", 52, 0, 1040);
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [1 Cone Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [1 Cone Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [1 Cone Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [1 Cone Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [1 jFEX Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [1 jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [1 jFEX Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_With1jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [1 jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [1 Cone Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [1 Cone Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [1 Cone Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [1 Cone Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead Subjet E_{T} / Total E_{T}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsZ_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead Subjet E_{T} / Total E_{T}", 
                         52, 0, 1040, // x axis
                         25, 0, 1.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead Subjet E_{T} / Total E_{T}", 
+    TH2F *backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsZ_With1ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead Subjet E_{T} / Total E_{T}", 
                         52, 0, 1040, // x axis
                         25, 0, 1.0); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [1 jFEX Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [1 jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [1 jFEX Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_With1jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [1 jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
 
-    TH1F* sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet = new TH1F("sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 cone subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
-    TH1F* back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet = new TH1F("back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 cone subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet = bookTH1F("sig_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 cone subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet = bookTH1F("back_h_leading_LRJ_psi_R_squared_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 cone subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
 
-    TH1F* sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet = new TH1F("sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Psi_{R, subl. subjet} [>= 2 cone subjets];% of Leading LRJs / 0.02", 50, 0, 1.0);
-    TH1F* back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet = new TH1F("back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, subl. subjet} [>= 2 cone subjets];% of Leading LRJs / 0.02", 50, 0, 1.0);
+    TH1F* sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet = bookTH1F("sig_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Psi_{R, subl. subjet} [>= 2 cone subjets];% of Leading LRJs / 0.02", 50, 0, 1.0);
+    TH1F* back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet = bookTH1F("back_h_leading_LRJ_psi_R_SubleadingSubjet_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Psi_{R, subl. subjet} [>= 2 cone subjets];% of Leading LRJs / 0.02", 50, 0, 1.0);
     
-    TH1F* sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet = new TH1F("sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
-    TH1F* back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet = new TH1F("back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet = bookTH1F("sig_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
+    TH1F* back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet = bookTH1F("back_h_leading_LRJ_psi_R_squared_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution;#Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 jFEX Subjets];% of Leading LRJs / 0.02", 35, 0, 0.7);
 
-    TH1F* sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet = new TH1F("sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 cone subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_WithGrEq2ConeSubjet = new TH1F("back_h_leading_LRJ_Et_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 cone subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet = bookTH1F("sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 cone subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_WithGrEq2ConeSubjet = bookTH1F("back_h_leading_LRJ_Et_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 cone subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet = new TH1F("sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Delta R #times r_{E_{T}} [>= 2 cone subjets];% of Leading LRJs / 0.5 GeV", 38, 1, 20);
-    TH1F* back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet = new TH1F("back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Delta R #times r_{E_{T}} [>= 2 cone subjets];% of Leading LRJs / 0.5 GeV", 38, 1, 20);
+    TH1F* sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet = bookTH1F("sig_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Delta R #times r_{E_{T}} [>= 2 cone subjets];% of Leading LRJs / 0.5 GeV", 38, 1, 20);
+    TH1F* back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet = bookTH1F("back_h_leading_LRJ_DeltaRSubjetsTimesSubjetEtRatio_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution;#Delta R #times r_{E_{T}} [>= 2 cone subjets];% of Leading LRJs / 0.5 GeV", 38, 1, 20);
     
-    TH1F* sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet = new TH1F("sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet = new TH1F("back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet = bookTH1F("sig_h_leading_LRJ_Et_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet = bookTH1F("back_h_leading_LRJ_Et_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
     
-    TH2F *sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; Lead. LRJ E_{T}; #Psi_{R, subl. subjet} [>= 2 cone subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; Lead. LRJ E_{T}; #Psi_{R, subl. subjet} [>= 2 cone subjets]", 
                         70, 0, 700, // x axis
                         25, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin Lead. LRJ E_{T}; #Psi_{R, subl. subjet} [>= 2 cone subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvspsi_R_SubleadingSubjet_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin Lead. LRJ E_{T}; #Psi_{R, subl. subjet} [>= 2 cone subjets]", 
                         70, 0, 700, // x axis
                         25, 0, 1); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; #Delta R Lead., Subl. Subjets; Subjet E_{T} Ratio (Lead. / Subl.) [>= 2 cone subjets]", 
+    TH2F *sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; #Delta R Lead., Subl. Subjets; Subjet E_{T} Ratio (Lead. / Subl.) [>= 2 cone subjets]", 
                         50, 0, 2.5, // x axis
                         38, 1, 20); //y axis
 
-    TH2F *backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; #Delta R Lead., Subl. Subjets; Subjet E_{T} Ratio (Lead. / Subl.) [>= 2 cone subjets]", 
+    TH2F *backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJDeltaRSubjetsvsSubjetEtRatio_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; #Delta R Lead., Subl. Subjets; Subjet E_{T} Ratio (Lead. / Subl.) [>= 2 cone subjets]", 
                         50, 0, 2.5, // x axis
                         38, 1, 20); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta R #times r_{E_{T}} [>= 2 cone subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta R #times r_{E_{T}} [>= 2 cone subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 50); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta R #times r_{E_{T}} [>= 2 cone subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsSubjetEtRatioTimesDeltaRSubjets_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta R #times r_{E_{T}} [>= 2 cone subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 50); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 cone subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 cone subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 cone subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 cone subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 jFEX Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 jFEX Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} #times #Psi_{R, subl.} [>= 2 jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         35, 0, 0.7 ); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [>= 2 cone subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [>= 2 cone subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [>= 2 cone subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [>= 2 cone subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [>= 2 jFEX Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [>= 2 jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [>= 2 jFEX Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead.} [>= 2 jFEX Subjets]", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
 
     // Mass approx (deltaR(subjets) * E_T) 
-    TH1F* sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet = new TH1F("sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 16 GeV", 32, 0, 512);
-    TH1F* back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet = new TH1F("back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 16 GeV", 32, 0, 512);
-    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox = new TH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox", "Leading LRJ;Mass Approx [Emulation] [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox = new TH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox", "Leading LRJ;Mass Approx [Emulation] [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* sig_h_LeadingJetTaggerLRJ_ConstituentMass = new TH1F("sig_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
-    TH1F* back_h_LeadingJetTaggerLRJ_ConstituentMass = new TH1F("back_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
-    TH1F* sig_h_SubleadingJetTaggerLRJ_ConstituentMass = new TH1F("sig_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
-    TH1F* back_h_SubleadingJetTaggerLRJ_ConstituentMass = new TH1F("back_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
-    TH2F* sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = new TH2F("sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Signal;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 40, 0, 400, 40, 0, 400);
-    TH2F* back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = new TH2F("back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Background;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 40, 0, 400, 40, 0, 400);
-    TH2F* sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass = new TH2F("sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass", "Signal;Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
+    TH1F* sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet = bookTH1F("sig_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 16 GeV", 32, 0, 512);
+    TH1F* back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet = bookTH1F("back_h_leading_LRJ_MassApprox_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 16 GeV", 32, 0, 512);
+    TH1F* sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox = bookTH1F("sig_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox", "Leading LRJ;Mass Approx [Emulation] [GeV];% of Events / 16 GeV", 32, 0, 512);
+    TH1F* back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox = bookTH1F("back_h_LeadingJetTaggerLRJ_NtupleTree_MassApprox", "Leading LRJ;Mass Approx [Emulation] [GeV];% of Events / 16 GeV", 32, 0, 512);
+    TH1F* sig_h_LeadingJetTaggerLRJ_ConstituentMass = bookTH1F("sig_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
+    TH1F* back_h_LeadingJetTaggerLRJ_ConstituentMass = bookTH1F("back_h_LeadingJetTaggerLRJ_ConstituentMass", "Leading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
+    TH1F* sig_h_SubleadingJetTaggerLRJ_ConstituentMass = bookTH1F("sig_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
+    TH1F* back_h_SubleadingJetTaggerLRJ_ConstituentMass = bookTH1F("back_h_SubleadingJetTaggerLRJ_ConstituentMass", "Subleading LRJ;Constituent Mass [GeV];% of Events / 10 GeV", 40, 0, 400);
+    TH2F* sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = bookTH2F("sig_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Signal;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 40, 0, 400, 40, 0, 400);
+    TH2F* back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass = bookTH2F("back_h2_JetTaggerLRJ_Leading_vs_Subleading_ConstituentMass", "Background;Leading LRJ Constituent Mass [GeV];Subleading LRJ Constituent Mass [GeV]", 40, 0, 400, 40, 0, 400);
+    TH2F* sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass = bookTH2F("sig_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass", "Signal;Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
                         52, 0, 1040, // x axis
                         40, 0, 400); // y axis
-    TH2F* back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass = new TH2F("back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass", "Background;Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
+    TH2F* back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass = bookTH2F("back_h2_JetTaggerLeadingLRJEt_vs_ConstituentMass", "Background;Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
                         52, 0, 1040, // x axis
                         40, 0, 400); // y axis
-    TH1F* sig_h_JetTaggerLRJ_ConstituentMass_Product = new TH1F("sig_h_JetTaggerLRJ_ConstituentMass_Product", "Leading #times Subleading LRJ;m_{lead} #times m_{subl} [GeV^{2}];% of Events / 2000 GeV^{2}", 50, 0, 100000);
-    TH1F* back_h_JetTaggerLRJ_ConstituentMass_Product = new TH1F("back_h_JetTaggerLRJ_ConstituentMass_Product", "Leading #times Subleading LRJ;m_{lead} #times m_{subl} [GeV^{2}];% of Events / 2000 GeV^{2}", 50, 0, 100000);
-    TH1F* sig_h_JetTaggerLRJ_ConstituentMass_Average = new TH1F("sig_h_JetTaggerLRJ_ConstituentMass_Average", "Leading #times Subleading LRJ;(m_{lead} + m_{subl}) / 2 [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* back_h_JetTaggerLRJ_ConstituentMass_Average = new TH1F("back_h_JetTaggerLRJ_ConstituentMass_Average", "Leading #times Subleading LRJ;(m_{lead} + m_{subl}) / 2 [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* sig_h_JetTaggerLRJ_ConstituentMass_GeomMean = new TH1F("sig_h_JetTaggerLRJ_ConstituentMass_GeomMean", "Leading #times Subleading LRJ;#sqrt{m_{lead} #times m_{subl}} [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH1F* back_h_JetTaggerLRJ_ConstituentMass_GeomMean = new TH1F("back_h_JetTaggerLRJ_ConstituentMass_GeomMean", "Leading #times Subleading LRJ;#sqrt{m_{lead} #times m_{subl}} [GeV];% of Events / 16 GeV", 32, 0, 512);
-    TH2F* sig_h2_JetTaggerLeadingLRJEt_vs_Eta = new TH2F("sig_h2_JetTaggerLeadingLRJEt_vs_Eta", "Signal;Leading JetTagger LRJ #eta;Leading JetTagger LRJ E_{T} [GeV]",
+    TH1F* sig_h_JetTaggerLRJ_ConstituentMass_Product = bookTH1F("sig_h_JetTaggerLRJ_ConstituentMass_Product", "Leading #times Subleading LRJ;m_{lead} #times m_{subl} [GeV^{2}];% of Events / 2000 GeV^{2}", 50, 0, 100000);
+    TH1F* back_h_JetTaggerLRJ_ConstituentMass_Product = bookTH1F("back_h_JetTaggerLRJ_ConstituentMass_Product", "Leading #times Subleading LRJ;m_{lead} #times m_{subl} [GeV^{2}];% of Events / 2000 GeV^{2}", 50, 0, 100000);
+    TH1F* sig_h_JetTaggerLRJ_ConstituentMass_Average = bookTH1F("sig_h_JetTaggerLRJ_ConstituentMass_Average", "Leading #times Subleading LRJ;(m_{lead} + m_{subl}) / 2 [GeV];% of Events / 16 GeV", 32, 0, 512);
+    TH1F* back_h_JetTaggerLRJ_ConstituentMass_Average = bookTH1F("back_h_JetTaggerLRJ_ConstituentMass_Average", "Leading #times Subleading LRJ;(m_{lead} + m_{subl}) / 2 [GeV];% of Events / 16 GeV", 32, 0, 512);
+    TH1F* sig_h_JetTaggerLRJ_ConstituentMass_GeomMean = bookTH1F("sig_h_JetTaggerLRJ_ConstituentMass_GeomMean", "Leading #times Subleading LRJ;#sqrt{m_{lead} #times m_{subl}} [GeV];% of Events / 16 GeV", 32, 0, 512);
+    TH1F* back_h_JetTaggerLRJ_ConstituentMass_GeomMean = bookTH1F("back_h_JetTaggerLRJ_ConstituentMass_GeomMean", "Leading #times Subleading LRJ;#sqrt{m_{lead} #times m_{subl}} [GeV];% of Events / 16 GeV", 32, 0, 512);
+    TH2F* sig_h2_JetTaggerLeadingLRJEt_vs_Eta = bookTH2F("sig_h2_JetTaggerLeadingLRJEt_vs_Eta", "Signal;Leading JetTagger LRJ #eta;Leading JetTagger LRJ E_{T} [GeV]",
                         49, -4.9, 4.9, // x axis: eta, 0.2 bins
                         30, 0, 600);    // y axis: ET, 20 GeV bins
-    TH2F* back_h2_JetTaggerLeadingLRJEt_vs_Eta = new TH2F("back_h2_JetTaggerLeadingLRJEt_vs_Eta", "Background;Leading JetTagger LRJ #eta;Leading JetTagger LRJ E_{T} [GeV]",
+    TH2F* back_h2_JetTaggerLeadingLRJEt_vs_Eta = bookTH2F("back_h2_JetTaggerLeadingLRJEt_vs_Eta", "Background;Leading JetTagger LRJ #eta;Leading JetTagger LRJ E_{T} [GeV]",
                         49, -4.9, 4.9, // x axis: eta, 0.2 bins
                         30, 0, 600);    // y axis: ET, 20 GeV bins
 
-    TH1F* sig_h_leading_LRJ_Z = new TH1F("sig_h_leading_LRJ_Z", "Leading LRJ Et Distribution; Lead Subjet E_{T} / Jet E_{T};% of Leading JetTagger LRJs / 0.04", 25, 0, 1);
-    TH1F* back_h_leading_LRJ_Z = new TH1F("back_h_leading_LRJ_Z", "Leading LRJ Et Distribution; Lead Subjet E_{T} / Jet E_{T};% of Leading JetTagger LRJs / 0.04", 25, 0, 1);
+    TH1F* sig_h_leading_LRJ_Z = bookTH1F("sig_h_leading_LRJ_Z", "Leading LRJ Et Distribution; Lead Subjet E_{T} / Jet E_{T};% of Leading JetTagger LRJs / 0.04", 25, 0, 1);
+    TH1F* back_h_leading_LRJ_Z = bookTH1F("back_h_leading_LRJ_Z", "Leading LRJ Et Distribution; Lead Subjet E_{T} / Jet E_{T};% of Leading JetTagger LRJs / 0.04", 25, 0, 1);
 
-    TH1F* sig_h_subleading_LRJ_Z = new TH1F("sig_h_subleading_LRJ_Z", "Leading LRJ Et Distribution; Lead. Subjet E_{T} / Jet E_{T};% of Subleading JetTagger LRJs / 0.04", 25, 0, 1);
-    TH1F* back_h_subleading_LRJ_Z = new TH1F("back_h_subleading_LRJ_Z", "Leading LRJ Et Distribution; Lead. Subjet E_{T} / Jet E_{T};% of Subleading JetTagger LRJs / 0.04", 25, 0, 1);
+    TH1F* sig_h_subleading_LRJ_Z = bookTH1F("sig_h_subleading_LRJ_Z", "Leading LRJ Et Distribution; Lead. Subjet E_{T} / Jet E_{T};% of Subleading JetTagger LRJs / 0.04", 25, 0, 1);
+    TH1F* back_h_subleading_LRJ_Z = bookTH1F("back_h_subleading_LRJ_Z", "Leading LRJ Et Distribution; Lead. Subjet E_{T} / Jet E_{T};% of Subleading JetTagger LRJs / 0.04", 25, 0, 1);
 
-    TH2F *sigJetTaggerLeadingLRJEtvsZ = new TH2F("sigJetTaggerLeadingLRJEtvsZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsZ = bookTH2F("sigJetTaggerLeadingLRJEtvsZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsZ = new TH2F("backJetTaggerLeadingLRJEtvsZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
+    TH2F *backJetTaggerLeadingLRJEtvsZ = bookTH2F("backJetTaggerLeadingLRJEtvsZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsZ = new TH2F("sigJetTaggerSubleadingLRJEtvsZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsZ = bookTH2F("sigJetTaggerSubleadingLRJEtvsZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsZ = new TH2F("backJetTaggerSubleadingLRJEtvsZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsZ = bookTH2F("backJetTaggerSubleadingLRJEtvsZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvs1MinusZ = new TH2F("sigJetTaggerLeadingLRJEtvs1MinusZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
+    TH2F *sigJetTaggerLeadingLRJEtvs1MinusZ = bookTH2F("sigJetTaggerLeadingLRJEtvs1MinusZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvs1MinusZ = new TH2F("backJetTaggerLeadingLRJEtvs1MinusZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
+    TH2F *backJetTaggerLeadingLRJEtvs1MinusZ = bookTH2F("backJetTaggerLeadingLRJEtvs1MinusZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *sigJetTaggerSubleadingLRJEtvs1MinusZ = new TH2F("sigJetTaggerSubleadingLRJEtvs1MinusZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvs1MinusZ = bookTH2F("sigJetTaggerSubleadingLRJEtvs1MinusZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvs1MinusZ = new TH2F("backJetTaggerSubleadingLRJEtvs1MinusZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
+    TH2F *backJetTaggerSubleadingLRJEtvs1MinusZ = bookTH2F("backJetTaggerSubleadingLRJEtvs1MinusZ", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Lead. Subjet E_{T} / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsEtOutsideSubjets = new TH2F("sigJetTaggerLeadingLRJEtvsEtOutsideSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; 1 - (Lead. + Subl. Subjets E_{T}) / Jet E_{T}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsEtOutsideSubjets = bookTH2F("sigJetTaggerLeadingLRJEtvsEtOutsideSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; 1 - (Lead. + Subl. Subjets E_{T}) / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsEtOutsideSubjets = new TH2F("backJetTaggerLeadingLRJEtvsEtOutsideSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; 1 - (Lead. + Subl. Subjets E_{T}) / Jet E_{T}", 
+    TH2F *backJetTaggerLeadingLRJEtvsEtOutsideSubjets = bookTH2F("backJetTaggerLeadingLRJEtvsEtOutsideSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; 1 - (Lead. + Subl. Subjets E_{T}) / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsEtOutsideSubjets = new TH2F("sigJetTaggerSubleadingLRJEtvsEtOutsideSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; 1 - (Lead. + Subl. Subjets E_{T}) / Jet E_{T}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsEtOutsideSubjets = bookTH2F("sigJetTaggerSubleadingLRJEtvsEtOutsideSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; 1 - (Lead. + Subl. Subjets E_{T}) / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsEtOutsideSubjets = new TH2F("backJetTaggerSubleadingLRJEtvsEtOutsideSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; 1 - (Lead. + Subl. Subjets E_{T}) / Jet E_{T}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsEtOutsideSubjets = bookTH2F("backJetTaggerSubleadingLRJEtvsEtOutsideSubjets", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; 1 - (Lead. + Subl. Subjets E_{T}) / Jet E_{T}", 
                         35, 0, 700,
                         25, 0, 1); //y axis
     
-    TH1F* sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet = new TH1F("sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 10 GeV", 103, 0, 2060);
-    TH1F* back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet = new TH1F("back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 10 GeV", 103, 0, 2060);
+    TH1F* sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet = bookTH1F("sig_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 10 GeV", 103, 0, 2060);
+    TH1F* back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet = bookTH1F("back_h_leading_LRJ_MassApprox_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 10 GeV", 103, 0, 2060);
 
-    TH1F* sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet = new TH1F("sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets];% of Leading JetTagger LRJs / 0.02", 80, 0.4, 2.0);
-    TH1F* back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet = new TH1F("back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets];% of Leading JetTagger LRJs / 0.02", 80, 0.4, 2.0);
+    TH1F* sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet = bookTH1F("sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets];% of Leading JetTagger LRJs / 0.02", 80, 0.4, 2.0);
+    TH1F* back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet = bookTH1F("back_h_leading_LRJ_DeltaRSubjets_WithGrEq2ConeSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. Cone Subjets];% of Leading JetTagger LRJs / 0.02", 80, 0.4, 2.0);
 
-    TH1F* sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2jFEXSubjet = new TH1F("sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 0.02", 80, 0.4, 2.0);
-    TH1F* back_h_leading_LRJ_DeltaRSubjets_WithGrEq2jFEXSubjet = new TH1F("back_h_leading_LRJ_DeltaRSubjets_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 0.02", 80, 0.4, 2.0);
+    TH1F* sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2jFEXSubjet = bookTH1F("sig_h_leading_LRJ_DeltaRSubjets_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 0.02", 80, 0.4, 2.0);
+    TH1F* back_h_leading_LRJ_DeltaRSubjets_WithGrEq2jFEXSubjet = bookTH1F("back_h_leading_LRJ_DeltaRSubjets_WithGrEq2jFEXSubjet", "Leading LRJ Et Distribution; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.};% of Leading JetTagger LRJs / 0.02", 80, 0.4, 2.0);
 
-    TH2F *sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult = new TH2F("sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Subjet Multiplcity [Lead. JetTagger LRJ]; Subjet Multiplcity [Subl. JetTagger LRJ]", 
+    TH2F *sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult = bookTH2F("sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Subjet Multiplcity [Lead. JetTagger LRJ]; Subjet Multiplcity [Subl. JetTagger LRJ]", 
                         3, 0, 3, // x axis
                         3, 0, 3); //y axis
 
-    TH2F *backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult = new TH2F("backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Subjet Multiplcity [Lead. JetTagger LRJ]; Subjet Multiplcity [Subl. JetTagger LRJ]",
+    TH2F *backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult = bookTH2F("backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult", "Sum of Topo422 E_{T} in Each Bin; Subjet Multiplcity [Lead. JetTagger LRJ]; Subjet Multiplcity [Subl. JetTagger LRJ]",
                         3, 0, 3, // x axis
                         3, 0, 3); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult = new TH2F("sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult", "Emulation; Subjet Multiplicity [Lead. JetTagger LRJ]; Subjet Multiplicity [Subl. JetTagger LRJ]",
+    TH2F *sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult = bookTH2F("sigJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult", "Emulation; Subjet Multiplicity [Lead. JetTagger LRJ]; Subjet Multiplicity [Subl. JetTagger LRJ]",
                         3, 0, 3, // x axis
                         3, 0, 3); //y axis
-    TH2F *backJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult = new TH2F("backJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult", "Emulation; Subjet Multiplicity [Lead. JetTagger LRJ]; Subjet Multiplicity [Subl. JetTagger LRJ]",
+    TH2F *backJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult = bookTH2F("backJetTaggerLeadingLRJEmulSubjetMultvsSubleadingLRJEmulSubjetMult", "Emulation; Subjet Multiplicity [Lead. JetTagger LRJ]; Subjet Multiplicity [Subl. JetTagger LRJ]",
                         3, 0, 3, // x axis
                         3, 0, 3); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3 = new TH2F("sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3", "Sum of Topo422 E_{T} in Each Bin; Subjet Multiplcity [Lead. JetTagger LRJ]; Subjet Multiplcity [Subl. JetTagger LRJ]", 
+    TH2F *sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3 = bookTH2F("sigJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3", "Sum of Topo422 E_{T} in Each Bin; Subjet Multiplcity [Lead. JetTagger LRJ]; Subjet Multiplcity [Subl. JetTagger LRJ]", 
                         4, 0, 4, // x axis
                         4, 0, 4); //y axis
 
-    TH2F *backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3 = new TH2F("backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3", "Sum of Topo422 E_{T} in Each Bin; Subjet Multiplcity [Lead. JetTagger LRJ]; Subjet Multiplcity [Subl. JetTagger LRJ]", 
+    TH2F *backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3 = bookTH2F("backJetTaggerLeadingLRJConeSubjetMultvsSubleadingLRJConeSubjetMult_3", "Sum of Topo422 E_{T} in Each Bin; Subjet Multiplcity [Lead. JetTagger LRJ]; Subjet Multiplcity [Subl. JetTagger LRJ]", 
                         4, 0, 4, // x axis
                         4, 0, 4); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.}",
+    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.}",
                         52, 0, 1040,
                         103, 0, 2060); //y axis
-    TH2F *sigJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents = new TH2F("sigJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents", "Signal; Leading JetTagger LRJ E_{T} [GeV]; Leading LRJ Constituent Mass [GeV]",
+    TH2F *sigJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents = bookTH2F("sigJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents", "Signal; Leading JetTagger LRJ E_{T} [GeV]; Leading LRJ Constituent Mass [GeV]",
                         25, 0, 500, // x: ET, 20 GeV/bin, overflow -> last bin
                         60, 0, 300); // y: constituent mass, 10 GeV/bin, overflow -> last bin
-    TH2F *backJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents = new TH2F("backJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents", "Background; Leading JetTagger LRJ E_{T} [GeV]; Leading LRJ Constituent Mass [GeV]",
+    TH2F *backJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents = bookTH2F("backJetTaggerLeadingLRJEt_vs_ConstituentMass_AllEvents", "Background; Leading JetTagger LRJ E_{T} [GeV]; Leading LRJ Constituent Mass [GeV]",
                         25, 0, 500, // x: ET, 20 GeV/bin, overflow -> last bin
                         60, 0, 300); // y: constituent mass, 10 GeV/bin, overflow -> last bin
-    TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, subjets}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, subjets}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, subjets}", 
+    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsMassApprox_SubjetEt_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, subjets}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead Subjet E_{T} / Total E_{T}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead Subjet E_{T} / Total E_{T}", 
                         52, 0, 1040,
                         25, 0, 1.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead Subjet E_{T} / Total E_{T}", 
+    TH2F *backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsZ_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Lead Subjet E_{T} / Total E_{T}", 
                         52, 0, 1040,
                         25, 0, 1.0); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; sqrt(d_{12})", 
+    TH2F *sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; sqrt(d_{12})", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; sqrt(d_{12})", 
+    TH2F *backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; sqrt(d_{12})", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
     
-    /*TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.}", 
+    /*TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.}", 
                         52, 0, 1040, // x axis
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet = new TH2F("backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.}", 
+    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, lead.}", 
                         52, 0, 1040, // x axis
                         103, 0, 2060); //y axis*/
     
                         
-    TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet = new TH2F("backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.}", 
+    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. jFEX Subjets] #times E_{T, lead.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2jFEXSubjet = new TH2F("sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. jFEX Subjets]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2jFEXSubjet = bookTH2F("sigJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. jFEX Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2jFEXSubjet = new TH2F("backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. jFEX Subjets]", 
+    TH2F *backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2jFEXSubjet = bookTH2F("backJetTaggerLeadingLRJEtvsDeltaRSubjets_WithGrEq2jFEXSubjet", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. jFEX Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0); //y axis
 
     // with deltaR^2 Metric
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R2 = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R2", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R^{2}}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R2 = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R2", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R^{2}}", 
                         52, 0, 1040, // x axis
                         20, 0, 1 ); //y axis
-    TH2F *sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2 = new TH2F("sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2", "Sum of Topo422 E_{T} in Each Bin; #Psi_{R^{2}} [Subleading Jet]; #Psi_{R^{2}} [Leading Jet]", 
+    TH2F *sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2 = bookTH2F("sigJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2", "Sum of Topo422 E_{T} in Each Bin; #Psi_{R^{2}} [Subleading Jet]; #Psi_{R^{2}} [Leading Jet]", 
                         35, 0, 0.7, // x axis
                         35, 0, 0.7); //y axis
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R2 = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R2", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R^{2}}", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R2 = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R2", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R^{2}}", 
                         52, 0, 1040, // x axis
                         20, 0, 1 ); //y axis
-    TH2F *backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2 = new TH2F("backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2", "Sum of Topo422 E_{T} in Each Bin; #Psi_{R^{2}} [Subleading Jet]; #Psi_{R^{2}} [Leading Jet]", 
+    TH2F *backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2 = bookTH2F("backJetTaggerLeadingLRJPsi_R2vsSubleadingPsi_R2", "Sum of Topo422 E_{T} in Each Bin; #Psi_{R^{2}} [Subleading Jet]; #Psi_{R^{2}} [Leading Jet]", 
                         35, 0, 0.7, // x axis
                         35, 0, 0.7); //y axis
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R2 = new TH2F("sigJetTaggerSubleadingLRJEtvsPsi_R2", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R^{2}}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R2 = bookTH2F("sigJetTaggerSubleadingLRJEtvsPsi_R2", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R^{2}}", 
                         52, 0, 1040, // x axis
                         20, 0, 1 ); //y axis
-    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R2 = new TH2F("backJetTaggerSubleadingLRJEtvsPsi_R2", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R^{2}}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R2 = bookTH2F("backJetTaggerSubleadingLRJEtvsPsi_R2", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R^{2}}", 
                         52, 0, 1040, // x axis
                         20, 0, 1 ); //y axis
     
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R2_squared = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R2_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R2_squared = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R2_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading}", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R2_squared = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R2_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading}", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R2_squared = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R2_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading}", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis                    
-    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R2_squared = new TH2F("sigJetTaggerSubleadingLRJEtvsPsi_R2_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R2_squared = bookTH2F("sigJetTaggerSubleadingLRJEtvsPsi_R2_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading}", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
-    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R2_squared = new TH2F("backJetTaggerSubleadingLRJEtvsPsi_R2_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R2_squared = bookTH2F("backJetTaggerSubleadingLRJEtvsPsi_R2_squared", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading}", 
                         52, 0, 1040, // x axis
                         50, 0, 1.0); //y axis
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_12 = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_12 = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}}", 
                         52, 0, 1040, // x axis
                         40, 0, 4); //y axis
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_12 = new TH2F("backJetTaggerLeadingLRJEtvsPsi_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}}", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_12 = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}}", 
                         52, 0, 1040, // x axis
                         40, 0, 4); //y axis
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_12 = new TH2F("sigJetTaggerSubleadingLRJEtvsPsi_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_12 = bookTH2F("sigJetTaggerSubleadingLRJEtvsPsi_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}}", 
                         52, 0, 1040, // x axis
                         40, 0, 4); //y axis
-    TH2F *backJetTaggerSubleadingLRJEtvsPsi_12 = new TH2F("backJetTaggerSubleadingLRJEtvsPsi_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsPsi_12 = bookTH2F("backJetTaggerSubleadingLRJEtvsPsi_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}}", 
                         52, 0, 1040, // x axis
                         40, 0, 4); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R2_12 = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R2_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R2_12 = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R2_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}}", 
                         52, 0, 1040, // x axis
                         40, 0, 4); //y axis
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R2_12 = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R2_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}}", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R2_12 = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R2_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}}", 
                         52, 0, 1040, // x axis
                         40, 0, 4); //y axis
-    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R2_12 = new TH2F("sigJetTaggerSubleadingLRJEtvsPsi_R2_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R2_12 = bookTH2F("sigJetTaggerSubleadingLRJEtvsPsi_R2_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}}", 
                         52, 0, 1040, // x axis
                         40, 0, 4); //y axis
-    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R2_12 = new TH2F("backJetTaggerSubleadingLRJEtvsPsi_R2_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R2_12 = bookTH2F("backJetTaggerSubleadingLRJEtvsPsi_R2_12", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}}", 
                         52, 0, 1040, // x axis
                         40, 0, 4); //y axis
 
     // For new selec
-    TH1F* sig_h_leading_LRJ_Et_Category0 = new TH1F("sig_h_leading_LRJ_Et_Category0", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [0 Cone Subjets Lead or Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_Category0 = new TH1F("back_h_leading_LRJ_Et_Category0", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [0 Cone Subjets Lead or Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_Category0 = bookTH1F("sig_h_leading_LRJ_Et_Category0", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [0 Cone Subjets Lead or Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_Category0 = bookTH1F("back_h_leading_LRJ_Et_Category0", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [0 Cone Subjets Lead or Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_Et_Category1 = new TH1F("sig_h_leading_LRJ_Et_Category1", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 Subjet Lead & Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_Category1 = new TH1F("back_h_leading_LRJ_Et_Category1", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 Subjet Lead & Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_Category1 = bookTH1F("sig_h_leading_LRJ_Et_Category1", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 Subjet Lead & Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_Category1 = bookTH1F("back_h_leading_LRJ_Et_Category1", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [1 Subjet Lead & Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_Et_Category2 = new TH1F("sig_h_leading_LRJ_Et_Category2", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Subl, <= 1 Lead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_Category2 = new TH1F("back_h_leading_LRJ_Et_Category2", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Subl, <= 1 Lead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_Category2 = bookTH1F("sig_h_leading_LRJ_Et_Category2", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Subl, <= 1 Lead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_Category2 = bookTH1F("back_h_leading_LRJ_Et_Category2", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Subl, <= 1 Lead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_Et_Category3 = new TH1F("sig_h_leading_LRJ_Et_Category3", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Lead, <= 1 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_Category3 = new TH1F("back_h_leading_LRJ_Et_Category3", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Lead, <= 1 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_Category3 = bookTH1F("sig_h_leading_LRJ_Et_Category3", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Lead, <= 1 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_Category3 = bookTH1F("back_h_leading_LRJ_Et_Category3", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Lead, <= 1 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_Et_Category4 = new TH1F("sig_h_leading_LRJ_Et_Category4", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Lead, 2 Sublead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_Category4 = new TH1F("back_h_leading_LRJ_Et_Category4", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Lead, 2 Sublead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_Category4 = bookTH1F("sig_h_leading_LRJ_Et_Category4", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Lead, 2 Sublead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_Category4 = bookTH1F("back_h_leading_LRJ_Et_Category4", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [2 Lead, 2 Sublead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_Et_Category5 = new TH1F("sig_h_leading_LRJ_Et_Category5", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Subl, <= 2 Lead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_Category5 = new TH1F("back_h_leading_LRJ_Et_Category5", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Subl, <= 2 Lead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_Category5 = bookTH1F("sig_h_leading_LRJ_Et_Category5", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Subl, <= 2 Lead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_Category5 = bookTH1F("back_h_leading_LRJ_Et_Category5", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Subl, <= 2 Lead];% of Leading LRJs / 10 GeV", 104, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_Et_Category6 = new TH1F("sig_h_leading_LRJ_Et_Category6", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Lead, <= 2 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_Category6 = new TH1F("back_h_leading_LRJ_Et_Category6", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Lead, <= 2 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_Category6 = bookTH1F("sig_h_leading_LRJ_Et_Category6", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Lead, <= 2 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_Category6 = bookTH1F("back_h_leading_LRJ_Et_Category6", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Lead, <= 2 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_Et_Category7 = new TH1F("sig_h_leading_LRJ_Et_Category7", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Lead, 3 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_Category7 = new TH1F("back_h_leading_LRJ_Et_Category7", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Lead, 3 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* sig_h_leading_LRJ_Et_Category7 = bookTH1F("sig_h_leading_LRJ_Et_Category7", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Lead, 3 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_Category7 = bookTH1F("back_h_leading_LRJ_Et_Category7", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [3 Lead, 3 Subl];% of Leading LRJs / 10 GeV", 104, 0, 1040);
 
     // For new selection sbased on 3x3 matrix of # of subjet selections. 
-    TH1F* sig_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead = new TH1F("sig_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
-    TH1F* back_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead = new TH1F("back_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* sig_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead = bookTH1F("sig_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* back_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead = bookTH1F("back_h_leading_LRJ_Et_NoConeSubjets_Lead_or_1ConeJetLead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
 
-    TH1F* sig_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead = new TH1F("sig_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
-    TH1F* back_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead = new TH1F("back_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* sig_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead = bookTH1F("sig_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* back_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead = bookTH1F("back_h_subleading_LRJ_Et_1ConeSubjet_Lead_or_1ConeJetLead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [No Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
 
-    TH1F* sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead  = new TH1F("sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
-    TH1F* back_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead = new TH1F("back_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead  = bookTH1F("sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* back_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead = bookTH1F("back_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Lead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
 
-    TH1F* sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead = new TH1F("sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
-    TH1F* back_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead = new TH1F("back_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead = bookTH1F("sig_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* back_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead = bookTH1F("back_h_leading_LRJ_Et_WithGrEq2ConeSubjet_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
 
-    TH1F* sig_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead = new TH1F("sig_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
-    TH1F* back_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead = new TH1F("back_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* sig_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead = bookTH1F("sig_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
+    TH1F* back_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead = bookTH1F("back_h_subleading_LRJ_Et_WithGrEq2ConeSubjet_Lead_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 Cone Subjets];% of Leading LRJs / 10 GeV", 50, 0, 500);
 
     // 2D (ET, constituent mass) scan histograms for cats A, B, C
-    TH2F* sig_h2_cat0_Et_vs_ConstituentMass = new TH2F("sig_h2_cat0_Et_vs_ConstituentMass",
+    TH2F* sig_h2_cat0_Et_vs_ConstituentMass = bookTH2F("sig_h2_cat0_Et_vs_ConstituentMass",
         "Signal Cat 0 (1 lead & 1 subl subjet);Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300);
-    TH2F* back_h2_cat0_Et_vs_ConstituentMass = new TH2F("back_h2_cat0_Et_vs_ConstituentMass",
+    TH2F* back_h2_cat0_Et_vs_ConstituentMass = bookTH2F("back_h2_cat0_Et_vs_ConstituentMass",
         "Background Cat 0 (1 lead & 1 subl subjet);Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300);
-    TH2F* sig_h2_catA_Et_vs_ConstituentMass = new TH2F("sig_h2_catA_Et_vs_ConstituentMass",
+    TH2F* sig_h2_catA_Et_vs_ConstituentMass = bookTH2F("sig_h2_catA_Et_vs_ConstituentMass",
         "Signal Cat A (Lead #geq2, Subl <2);Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300); // 20 GeV/bin ET, 10 GeV/bin mass
-    TH2F* back_h2_catA_Et_vs_ConstituentMass = new TH2F("back_h2_catA_Et_vs_ConstituentMass",
+    TH2F* back_h2_catA_Et_vs_ConstituentMass = bookTH2F("back_h2_catA_Et_vs_ConstituentMass",
         "Background Cat A (Lead #geq2, Subl <2);Leading JetTagger LRJ E_{T} [GeV];Leading LRJ Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300);
-    TH2F* sig_h2_catB_Et_vs_ConstituentMass = new TH2F("sig_h2_catB_Et_vs_ConstituentMass",
+    TH2F* sig_h2_catB_Et_vs_ConstituentMass = bookTH2F("sig_h2_catB_Et_vs_ConstituentMass",
         "Signal Cat B (Subl #geq2, Lead <2);Subleading JetTagger LRJ E_{T} [GeV];Subleading LRJ Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300);
-    TH2F* back_h2_catB_Et_vs_ConstituentMass = new TH2F("back_h2_catB_Et_vs_ConstituentMass",
+    TH2F* back_h2_catB_Et_vs_ConstituentMass = bookTH2F("back_h2_catB_Et_vs_ConstituentMass",
         "Background Cat B (Subl #geq2, Lead <2);Subleading JetTagger LRJ E_{T} [GeV];Subleading LRJ Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300);
-    TH2F* sig_h2_catC_Et_vs_AvgConstituentMass = new TH2F("sig_h2_catC_Et_vs_AvgConstituentMass",
+    TH2F* sig_h2_catC_Et_vs_AvgConstituentMass = bookTH2F("sig_h2_catC_Et_vs_AvgConstituentMass",
         "Signal Cat C (Both #geq2);Subleading JetTagger LRJ E_{T} [GeV];Avg. Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300);
-    TH2F* back_h2_catC_Et_vs_AvgConstituentMass = new TH2F("back_h2_catC_Et_vs_AvgConstituentMass",
+    TH2F* back_h2_catC_Et_vs_AvgConstituentMass = bookTH2F("back_h2_catC_Et_vs_AvgConstituentMass",
         "Background Cat C (Both #geq2);Subleading JetTagger LRJ E_{T} [GeV];Avg. Constituent Mass [GeV]",
         25, 0, 500, 30, 0, 300);
 
@@ -3829,41 +4085,41 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // y-axis: 4th leading cone jet Et (160 bins, 0–800 GeV).
     // Filled with background event weights => integral directly in Hz.
     // Cat0: lead==1 subjet AND subl==1 subjet → uses leading LRJ Et.
-    TH2F* back_h2_overlap_cat0 = new TH2F("back_h2_overlap_cat0",
+    TH2F* back_h2_overlap_cat0 = bookTH2F("back_h2_overlap_cat0",
         "Overlap bg. rate: cat0 (1 lead subj, 1 subl subj) vs 4th cone jet;"
         "Leading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
     // Cat1 is disabled in the numerator — no overlap TH2F needed.
     // Cat2: lead>=2 AND subl<2 → uses leading LRJ Et.
-    TH2F* back_h2_overlap_cat2 = new TH2F("back_h2_overlap_cat2",
+    TH2F* back_h2_overlap_cat2 = bookTH2F("back_h2_overlap_cat2",
         "Overlap bg. rate: cat2 (lead #geq 2 subj) vs 4th cone jet;"
         "Leading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
     // Cat3: lead<2 AND subl>=2 → uses subleading LRJ Et.
-    TH2F* back_h2_overlap_cat3 = new TH2F("back_h2_overlap_cat3",
+    TH2F* back_h2_overlap_cat3 = bookTH2F("back_h2_overlap_cat3",
         "Overlap bg. rate: cat3 (subl #geq 2 subj) vs 4th cone jet;"
         "Subleading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
     // Cat4: lead>=2 AND subl>=2 → uses subleading LRJ Et.
-    TH2F* back_h2_overlap_cat4 = new TH2F("back_h2_overlap_cat4",
+    TH2F* back_h2_overlap_cat4 = bookTH2F("back_h2_overlap_cat4",
         "Overlap bg. rate: cat4 (both #geq 2 subj) vs 4th cone jet;"
         "Subleading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
     // Signal overlap TH2Fs (unweighted counts) — mirrors the back_h2_overlap_cat* set.
     // Used to subtract signal efficiency double-counting in the OR selection.
-    TH2F* sig_h2_overlap_cat0 = new TH2F("sig_h2_overlap_cat0",
+    TH2F* sig_h2_overlap_cat0 = bookTH2F("sig_h2_overlap_cat0",
         "Overlap sig. eff: cat0 vs 4th cone jet;"
         "Leading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
-    TH2F* sig_h2_overlap_cat2 = new TH2F("sig_h2_overlap_cat2",
+    TH2F* sig_h2_overlap_cat2 = bookTH2F("sig_h2_overlap_cat2",
         "Overlap sig. eff: cat2 vs 4th cone jet;"
         "Leading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
-    TH2F* sig_h2_overlap_cat3 = new TH2F("sig_h2_overlap_cat3",
+    TH2F* sig_h2_overlap_cat3 = bookTH2F("sig_h2_overlap_cat3",
         "Overlap sig. eff: cat3 vs 4th cone jet;"
         "Subleading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
-    TH2F* sig_h2_overlap_cat4 = new TH2F("sig_h2_overlap_cat4",
+    TH2F* sig_h2_overlap_cat4 = bookTH2F("sig_h2_overlap_cat4",
         "Overlap sig. eff: cat4 vs 4th cone jet;"
         "Subleading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
@@ -3872,764 +4128,764 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // x-axis: leading LRJ Et (matches sig/back_h_leading_LRJ_Et range 50 bins, 0-500 GeV)
     // y-axis: 4th cone jet Et (matches back/sig_h_4th_leading_WtaCone_Et range, 40 bins, 0-200 GeV)
     // backH2 is rate-weighted; sigH2 is unweighted counts.
-    TH2F* back_h2_overlap_leading_cone4th = new TH2F("back_h2_overlap_leading_cone4th",
+    TH2F* back_h2_overlap_leading_cone4th = bookTH2F("back_h2_overlap_leading_cone4th",
         "Overlap bg. rate: leading LRJ Et vs 4th cone jet;"
         "Leading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
-    TH2F* sig_h2_overlap_leading_cone4th = new TH2F("sig_h2_overlap_leading_cone4th",
+    TH2F* sig_h2_overlap_leading_cone4th = bookTH2F("sig_h2_overlap_leading_cone4th",
         "Overlap sig. eff: leading LRJ Et vs 4th cone jet;"
         "Leading LRJ E_{T} [GeV];4th Cone Jet E_{T} [GeV]",
         50, 0, 500, 40, 0, 200);
 
-    /*TH1F* sig_h_leading_LRJ_Et_With1ConeSubjet_Lead= new TH1F("sig_h_leading_LRJ_Et_With1ConeSubjet_Lead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_With1ConeSubjet_Lead= new TH1F("back_h_leading_LRJ_Et_With1ConeSubjet_Lead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
+    /*TH1F* sig_h_leading_LRJ_Et_With1ConeSubjet_Lead= bookTH1F("sig_h_leading_LRJ_Et_With1ConeSubjet_Lead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_With1ConeSubjet_Lead= bookTH1F("back_h_leading_LRJ_Et_With1ConeSubjet_Lead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
 
-    TH1F* sig_h_leading_LRJ_Et_With1ConeSubjet_Sublead= new TH1F("sig_h_leading_LRJ_Et_With1ConeSubjet_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
-    TH1F* back_h_leading_LRJ_Et_With1ConeSubjet_Sublead= new TH1F("back_h_leading_LRJ_Et_With1ConeSubjet_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);*/
+    TH1F* sig_h_leading_LRJ_Et_With1ConeSubjet_Sublead= bookTH1F("sig_h_leading_LRJ_Et_With1ConeSubjet_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);
+    TH1F* back_h_leading_LRJ_Et_With1ConeSubjet_Sublead= bookTH1F("back_h_leading_LRJ_Et_With1ConeSubjet_Sublead", "Leading LRJ Et Distribution;JetTagger Lead. LRJ E_{T} [>= 2 jFEX Subjets];% of Leading LRJs / 20 GeV", 52, 0, 1040);*/
 
-    /*TH2F *sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead = new TH2F("sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
+    /*TH2F *sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead = bookTH2F("sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead = new TH2F("backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead = bookTH2F("backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis*/
 
-    TH2F *sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead = new TH2F("sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T,}; Subjet E_{T} Ratio", 
+    TH2F *sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead = bookTH2F("sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T,}; Subjet E_{T} Ratio", 
                         30, 0, 300,
                         25, 0, 25); //y axis
 
-    TH2F *backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead = new TH2F("backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T}; Subjet E_{T} Ratio", 
+    TH2F *backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead = bookTH2F("backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T}; Subjet E_{T} Ratio", 
                         30, 0, 300,
                         25, 0, 25); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead = new TH2F("sigJetTaggerLeadingLRJEtApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Subjet E_{T} Ratio", 
+    TH2F *sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead = bookTH2F("sigJetTaggerLeadingLRJEtApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Subjet E_{T} Ratio", 
                         35, 0, 700,
                         25, 0, 25); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead = new TH2F("backJetTaggerLeadingLRJEtApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Subjet E_{T} Ratio", 
+    TH2F *backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead = bookTH2F("backJetTaggerLeadingLRJEtApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; Subjet E_{T} Ratio", 
                         35, 0, 700,
                         25, 0, 25); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead = new TH2F("sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead = bookTH2F("sigJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead = new TH2F("backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
+    TH2F *backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead = bookTH2F("backJetTaggerLeadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead = new TH2F("sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; sqrt(d_{12})", 
+    TH2F *sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead = bookTH2F("sigJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; sqrt(d_{12})", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead = new TH2F("backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; sqrt(d_{12})", 
+    TH2F *backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead = bookTH2F("backJetTaggerLeadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; sqrt(d_{12})", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead = new TH2F("sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead", "Sum of Topo422 E_{T} in Each Bin; Leading Subjet LRJ E_{T} [GeV]; Subleading Subjet LRJ E_{T} [GeV]", 
+    TH2F *sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead = bookTH2F("sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead", "Sum of Topo422 E_{T} in Each Bin; Leading Subjet LRJ E_{T} [GeV]; Subleading Subjet LRJ E_{T} [GeV]", 
                         40, 0, 400,
                         40, 0, 400); //y axis
 
-    TH2F *backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead = new TH2F("backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead", "Sum of Topo422 E_{T} in Each Bin; Leading Subjet LRJ E_{T} [GeV]; Subleading Subjet LRJ E_{T} [GeV]", 
+    TH2F *backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead = bookTH2F("backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Lead", "Sum of Topo422 E_{T} in Each Bin; Leading Subjet LRJ E_{T} [GeV]; Subleading Subjet LRJ E_{T} [GeV]", 
                         40, 0, 400,
                         40, 0, 400); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead = new TH2F("sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T}; Subjet E_{T} Ratio", 
+    TH2F *sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead = bookTH2F("sigJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T}; Subjet E_{T} Ratio", 
                         30, 0, 300,
                         25, 0, 25); //y axis
 
-    TH2F *backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead = new TH2F("backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T}; Subjet E_{T} Ratio", 
+    TH2F *backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead = bookTH2F("backJetTaggerLeadingLRJMassApproxvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T}; Subjet E_{T} Ratio", 
                         30, 0, 300,
                         25, 0, 25); //y axis
 
-    TH2F *sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead = new TH2F("sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Subjet E_{T} Ratio", 
+    TH2F *sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead = bookTH2F("sigJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Subjet E_{T} Ratio", 
                         35, 0, 700,
                         25, 0, 25); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead = new TH2F("backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Subjet E_{T} Ratio", 
+    TH2F *backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead = bookTH2F("backJetTaggerLeadingLRJEtvsSubjetEtRatio_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; Subjet E_{T} Ratio", 
                         35, 0, 700,
                         25, 0, 25); //y axis
 
-    TH2F *sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead = new TH2F("sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead", "Sum of Topo422 E_{T} in Each Bin; Leading Subjet LRJ E_{T} [GeV]; Subleading Subjet LRJ E_{T} [GeV]", 
+    TH2F *sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead = bookTH2F("sigJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead", "Sum of Topo422 E_{T} in Each Bin; Leading Subjet LRJ E_{T} [GeV]; Subleading Subjet LRJ E_{T} [GeV]", 
                         40, 0, 400,
                         40, 0, 400); //y axis
 
-    TH2F *backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead = new TH2F("backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead", "Sum of Topo422 E_{T} in Each Bin; Leading Subjet LRJ E_{T} [GeV]; Subleading Subjet LRJ E_{T} [GeV]", 
+    TH2F *backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead = bookTH2F("backJetTaggerLeadingSubjetEtvsSubleadingSubjetEt_Sublead", "Sum of Topo422 E_{T} in Each Bin; Leading Subjet LRJ E_{T} [GeV]; Subleading Subjet LRJ E_{T} [GeV]", 
                         40, 0, 400,
                         40, 0, 400); //y axis
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead = new TH2F("sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead = bookTH2F("sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead = new TH2F("backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead = bookTH2F("backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets] #times E_{T, Subl.}", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis // probably won't use MassApprox for now.... deltaR is better!  FIXME use variable binning for this. would reduce combinatorics greatly, don't need such fine bins for high mass
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead = new TH2F("sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; sqrt(d_{12})", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead = bookTH2F("sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; sqrt(d_{12})", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead = new TH2F("backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; sqrt(d_{12})", 
+    TH2F *backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead = bookTH2F("backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; sqrt(d_{12})", 
                         52, 0, 1040,
                         103, 0, 2060); //y axis // probably won't use MassApprox for now.... deltaR is better!  FIXME use variable binning for this. would reduce combinatorics greatly, don't need such fine bins for high mass
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead = new TH2F("sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} [Subleading JetTagger LRJ]", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead = bookTH2F("sigJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} [Subleading JetTagger LRJ]", 
                         52, 0, 1040,
                         50, 0, 1); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead = new TH2F("backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} [Subleading JetTagger LRJ]", 
+    TH2F *backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead = bookTH2F("backJetTaggerSubleadingLRJEtvsTau21_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} [Subleading JetTagger LRJ]", 
                         52, 0, 1040,
                         50, 0, 1); //y axis 
 
-    TH2F *sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead = new TH2F("sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} [Leading JetTagger LRJ]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead = bookTH2F("sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} [Leading JetTagger LRJ]", 
                         52, 0, 1040,
                         50, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead = new TH2F("backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} [Leading JetTagger LRJ]", 
+    TH2F *backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead = bookTH2F("backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} [Leading JetTagger LRJ]", 
                         52, 0, 1040,
                         50, 0, 1); //y axis 
 
-    TH2F *sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead = new TH2F("sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} Product [JetTagger LRJs]", 
+    TH2F *sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead = bookTH2F("sigJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} Product [JetTagger LRJs]", 
                         52, 0, 1040,
                         50, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead = new TH2F("backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} Product [JetTagger LRJs]", 
+    TH2F *backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead = bookTH2F("backJetTaggerLeadingLRJEtvsTau21_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #tau_{2} / #tau_{1} Product [JetTagger LRJs]", 
                         52, 0, 1040,
                         50, 0, 1); //y axis 
 
-    TH2F *sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead = new TH2F("sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} [Subleading JetTagger LRJ]", 
+    TH2F *sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead = bookTH2F("sigJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} [Subleading JetTagger LRJ]", 
                         103, 0, 2060,
                         50, 0, 1); //y axis
 
-    TH2F *backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead = new TH2F("backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} [Subleading JetTagger LRJ]", 
+    TH2F *backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead = bookTH2F("backJetTaggerSubleadingMassApproxvsTau21_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} [Subleading JetTagger LRJ]", 
                         103, 0, 2060,
                         50, 0, 1); //y axis 
 
-    TH2F *sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead = new TH2F("sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} [Leading JetTagger LRJ]", 
+    TH2F *sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead = bookTH2F("sigJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} [Leading JetTagger LRJ]", 
                         103, 0, 2060,
                         50, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead = new TH2F("backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} [Leading JetTagger LRJ]", 
+    TH2F *backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead = bookTH2F("backJetTaggerLeadingMassApproxvsTau21_WithGrEq2ConeSubjet_Lead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} [Leading JetTagger LRJ]", 
                         103, 0, 2060,
                         50, 0, 1); //y axis 
 
-    TH2F *sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead = new TH2F("sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} Product [JetTagger LRJs]", 
+    TH2F *sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead = bookTH2F("sigJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} Product [JetTagger LRJs]", 
                         103, 0, 2060,
                         50, 0, 1); //y axis
 
-    TH2F *backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead = new TH2F("backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} Product [JetTagger LRJs]", 
+    TH2F *backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead = bookTH2F("backJetTaggerLeadingMassApproxvsTau21Product_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ Mass Approx [GeV]; #tau_{2} / #tau_{1} Product [JetTagger LRJs]", 
                         103, 0, 2060,
                         50, 0, 1); //y axis 
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead = new TH2F("sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R, lead} #times #Psi_{R, subl}", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead = bookTH2F("sigJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R, lead} #times #Psi_{R, subl}", 
                         52, 0, 1040,
                         25, 0, 1.0); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead = new TH2F("backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R, lead} #times #Psi_{R, subl}", 
+    TH2F *backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead = bookTH2F("backJetTaggerSubleadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Psi_{R, lead} #times #Psi_{R, subl}", 
                         52, 0, 1040,
                         25, 0, 1.0); //y axis // probably won't use MassApprox for now.... deltaR is better! 
 
-    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead = new TH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead} #times #Psi_{R, subl}", 
+    TH2F *sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead = bookTH2F("sigJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead} #times #Psi_{R, subl}", 
                         52, 0, 1040,
                         25, 0, 1.0); //y axis
 
-    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead = new TH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead} #times #Psi_{R, subl}", 
+    TH2F *backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead = bookTH2F("backJetTaggerLeadingLRJEtvsPsi_R_squared_WithGrEq2ConeSubjet_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Leading LRJ E_{T} [GeV]; #Psi_{R, lead} #times #Psi_{R, subl}", 
                         52, 0, 1040,
                         25, 0, 1.0); //y axis // probably won't use MassApprox for now.... deltaR is better! 
 
-    TH3F *sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead = new TH3F("sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    TH3F *sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead = bookTH3F("sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0,
                         80, 0.4, 2.0); //z axis // FIXME this should be a TH3F with mass, mass, E_T
 
-    TH3F *backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead = new TH3F("backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    TH3F *backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead = bookTH3F("backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0,
                         80, 0.4, 2.0); //z axis
 
-    TH3F *sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead = new TH3F("sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) #times E_{T, subl.}  [Lead., Subl. Cone Subjets]", 
+    TH3F *sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead = bookTH3F("sigJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) #times E_{T, subl.}  [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         103, 0, 2060,
                         103, 0, 2060); //z axis // FIXME this should be a TH3F with mass, mass, E_T
 
-    TH3F *backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead = new TH3F("backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) #times E_{T, subl.} [Lead., Subl. Cone Subjets]", 
+    TH3F *backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead = bookTH3F("backJetTaggerSubleadingLRJEtvsMassApprox_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) #times E_{T, subl.} [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         103, 0, 2060,
                         103, 0, 2060); //z axis
 
-    TH3F *sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead_Sublead = new TH3F("sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; sqrt(d_{12}); sqrt(d_{12})", 
+    TH3F *sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead_Sublead = bookTH3F("sigJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; sqrt(d_{12}); sqrt(d_{12})", 
                         52, 0, 1040,
                         103, 0, 2060,
                         103, 0, 2060); //z axis // FIXME this should be a TH3F with mass, mass, E_T
 
-    TH3F *backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead_Sublead = new TH3F("backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; sqrt(d_{12}); sqrt(d_{12})", 
+    TH3F *backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead_Sublead = bookTH3F("backJetTaggerSubleadingLRJEtvsd12_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; sqrt(d_{12}); sqrt(d_{12})", 
                         52, 0, 1040,
                         103, 0, 2060,
                         103, 0, 2060); //z axis
 
-    /*TH3F *sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead = new TH3F("sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    /*TH3F *sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead = bookTH3F("sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0,
                         80, 0.4, 2.0); //z axis // FIXME this should be a TH3F with mass, mass, E_T
 
-    TH3F *backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead = new TH3F("backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    TH3F *backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead = bookTH3F("backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_Sublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0,
                         80, 0.4, 2.0); //z axis*/
 
-    /*TH2F *sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_1ConeJetSublead = new TH2F("sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_1ConeJetSublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    /*TH2F *sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_1ConeJetSublead = bookTH2F("sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_1ConeJetSublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_1ConeJetSublead = new TH2F("backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_1ConeJetSublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    TH2F *backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_1ConeJetSublead = bookTH2F("backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Lead_1ConeJetSublead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0); //y axis
 
-    TH2F *sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Sublead_1ConeJetLead = new TH2F("sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Sublead_1ConeJetLead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    TH2F *sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Sublead_1ConeJetLead = bookTH2F("sigJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Sublead_1ConeJetLead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0); //y axis
 
-    TH2F *backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Sublead_1ConeJetLead = new TH2F("backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Sublead_1ConeJetLead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
+    TH2F *backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Sublead_1ConeJetLead = bookTH2F("backJetTaggerSubleadingLRJEtvsDeltaRSubjets_WithGrEq2ConeSubjet_Sublead_1ConeJetLead", "Sum of Topo422 E_{T} in Each Bin; JetTagger Subleading LRJ E_{T} [GeV]; #Delta(R) [Lead., Subl. Cone Subjets]", 
                         52, 0, 1040,
                         80, 0.4, 2.0); //y axis*/ // PROBBALY WONT USE DELTAR SUBEJTS FOR NOW!
 
-    TH1F* sig_h_leading_LRJ_psi_R = new TH1F("sig_h_leading_LRJ_psi_R", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
-    TH1F* sig_h_leading_LRJ_psi_R_MassWindow = new TH1F("sig_h_leading_LRJ_psi_R_MassWindow", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
-    TH1F* sig_h_leading_LRJ_psi_R_OutsideMassWindow = new TH1F("sig_h_leading_LRJ_psi_R_OutsideMassWindow", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
-    TH1F* sig_h_LRJ_psi_R_squared = new TH1F("sig_h_LRJ_psi_R_squared", "Leading LRJ Et Distribution;#Psi_{R, Leading} #times #Psi_{R, Subleading};% of Events / 0.02", 35, 0, 0.7);
-    TH1F* sig_h_LRJ_psi_R_12 = new TH1F("sig_h_LRJ_psi_R_12", "Leading LRJ Et Distribution; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}};% of Events / 0.2", 25, 0, 5);
-    TH1F* sig_h_subleading_LRJ_psi_R = new TH1F("sig_h_subleading_LRJ_psi_R", "Subleading LRJ Et Distribution;#Psi_{R};% of Subleading LRJs / 0.05 ", 20, 0, 1);
-    TH1F* back_h_leading_LRJ_psi_R = new TH1F("back_h_leading_LRJ_psi_R", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
-    TH1F* back_h_leading_LRJ_psi_R_MassWindow = new TH1F("back_h_leading_LRJ_psi_R_MassWindow", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
-    TH1F* back_h_leading_LRJ_psi_R_OutsideMassWindow = new TH1F("back_h_leading_LRJ_psi_R_OutsideMassWindow", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
-    TH1F* back_h_LRJ_psi_R_squared = new TH1F("back_h_LRJ_psi_R_squared", "Leading LRJ Et Distribution;#Psi_{R, Leading} #times #Psi_{R, Subleading};% of Events / 0.02", 35, 0, 0.7);
-    TH1F* back_h_LRJ_psi_R_12 = new TH1F("back_h_LRJ_psi_R_12", "Leading LRJ Et Distribution; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}};% of Events / 0.2", 25, 0, 5);
-    TH1F* back_h_subleading_LRJ_psi_R = new TH1F("back_h_subleading_LRJ_psi_R", "Subleading LRJ Et Distribution;#Psi_{R};% of Subleading LRJs / 0.05", 20, 0, 1);
+    TH1F* sig_h_leading_LRJ_psi_R = bookTH1F("sig_h_leading_LRJ_psi_R", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
+    TH1F* sig_h_leading_LRJ_psi_R_MassWindow = bookTH1F("sig_h_leading_LRJ_psi_R_MassWindow", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
+    TH1F* sig_h_leading_LRJ_psi_R_OutsideMassWindow = bookTH1F("sig_h_leading_LRJ_psi_R_OutsideMassWindow", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
+    TH1F* sig_h_LRJ_psi_R_squared = bookTH1F("sig_h_LRJ_psi_R_squared", "Leading LRJ Et Distribution;#Psi_{R, Leading} #times #Psi_{R, Subleading};% of Events / 0.02", 35, 0, 0.7);
+    TH1F* sig_h_LRJ_psi_R_12 = bookTH1F("sig_h_LRJ_psi_R_12", "Leading LRJ Et Distribution; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}};% of Events / 0.2", 25, 0, 5);
+    TH1F* sig_h_subleading_LRJ_psi_R = bookTH1F("sig_h_subleading_LRJ_psi_R", "Subleading LRJ Et Distribution;#Psi_{R};% of Subleading LRJs / 0.05 ", 20, 0, 1);
+    TH1F* back_h_leading_LRJ_psi_R = bookTH1F("back_h_leading_LRJ_psi_R", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
+    TH1F* back_h_leading_LRJ_psi_R_MassWindow = bookTH1F("back_h_leading_LRJ_psi_R_MassWindow", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
+    TH1F* back_h_leading_LRJ_psi_R_OutsideMassWindow = bookTH1F("back_h_leading_LRJ_psi_R_OutsideMassWindow", "Leading LRJ Et Distribution;#Psi_{R};% of Leading LRJs / 0.05", 20, 0, 1);
+    TH1F* back_h_LRJ_psi_R_squared = bookTH1F("back_h_LRJ_psi_R_squared", "Leading LRJ Et Distribution;#Psi_{R, Leading} #times #Psi_{R, Subleading};% of Events / 0.02", 35, 0, 0.7);
+    TH1F* back_h_LRJ_psi_R_12 = bookTH1F("back_h_LRJ_psi_R_12", "Leading LRJ Et Distribution; #frac{#Psi_{R, Leading}}{#Psi_{R, Subleading}};% of Events / 0.2", 25, 0, 5);
+    TH1F* back_h_subleading_LRJ_psi_R = bookTH1F("back_h_subleading_LRJ_psi_R", "Subleading LRJ Et Distribution;#Psi_{R};% of Subleading LRJs / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_leading_LRJ_psi_R2 = new TH1F("sig_h_leading_LRJ_psi_R2", "Leading LRJ Et Distribution;#Psi_{R^{2}};% of Leading LRJs / 0.05", 20, 0, 1);
-    TH1F* sig_h_LRJ_psi_R2_squared = new TH1F("sig_h_LRJ_psi_R2_squared", "Leading LRJ Et Distribution;#Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading};% of Events / 0.01", 20, 0, 0.2);
-    TH1F* sig_h_LRJ_psi_R2_12 = new TH1F("sig_h_LRJ_psi_R2_12", "Leading LRJ Et Distribution; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}};% of Events / 0.2", 25, 0, 5);
-    TH1F* sig_h_subleading_LRJ_psi_R2 = new TH1F("sig_h_subleading_LRJ_psi_R2", "Subleading LRJ Et Distribution;#Psi_{R^{2}};% of Subleading LRJs / 0.05 ", 20, 0, 1);
-    TH1F* back_h_leading_LRJ_psi_R2 = new TH1F("back_h_leading_LRJ_psi_R2", "Leading LRJ Et Distribution;#Psi_{R^{2}};% of Leading LRJs / 0.05", 20, 0, 1);
-    TH1F* back_h_LRJ_psi_R2_squared = new TH1F("back_h_LRJ_psi_R2_squared", "Leading LRJ Et Distribution;#Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading};% of Events / 0.01", 20, 0, 0.2);
-    TH1F* back_h_LRJ_psi_R2_12 = new TH1F("back_h_LRJ_psi_R2_12", "Leading LRJ Et Distribution; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}};% of Events / 0.2", 25, 0, 5);
-    TH1F* back_h_subleading_LRJ_psi_R2 = new TH1F("back_h_subleading_LRJ_psi_R2", "Subleading LRJ Et Distribution;#Psi_{R^{2}};% of Subleading LRJs / 0.05", 20, 0, 1);
+    TH1F* sig_h_leading_LRJ_psi_R2 = bookTH1F("sig_h_leading_LRJ_psi_R2", "Leading LRJ Et Distribution;#Psi_{R^{2}};% of Leading LRJs / 0.05", 20, 0, 1);
+    TH1F* sig_h_LRJ_psi_R2_squared = bookTH1F("sig_h_LRJ_psi_R2_squared", "Leading LRJ Et Distribution;#Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading};% of Events / 0.01", 20, 0, 0.2);
+    TH1F* sig_h_LRJ_psi_R2_12 = bookTH1F("sig_h_LRJ_psi_R2_12", "Leading LRJ Et Distribution; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}};% of Events / 0.2", 25, 0, 5);
+    TH1F* sig_h_subleading_LRJ_psi_R2 = bookTH1F("sig_h_subleading_LRJ_psi_R2", "Subleading LRJ Et Distribution;#Psi_{R^{2}};% of Subleading LRJs / 0.05 ", 20, 0, 1);
+    TH1F* back_h_leading_LRJ_psi_R2 = bookTH1F("back_h_leading_LRJ_psi_R2", "Leading LRJ Et Distribution;#Psi_{R^{2}};% of Leading LRJs / 0.05", 20, 0, 1);
+    TH1F* back_h_LRJ_psi_R2_squared = bookTH1F("back_h_LRJ_psi_R2_squared", "Leading LRJ Et Distribution;#Psi_{R^{2}, Leading} #times #Psi_{R^{2}, Subleading};% of Events / 0.01", 20, 0, 0.2);
+    TH1F* back_h_LRJ_psi_R2_12 = bookTH1F("back_h_LRJ_psi_R2_12", "Leading LRJ Et Distribution; #frac{#Psi_{R^{2}, Leading}}{#Psi_{R^{2}, Subleading}};% of Events / 0.2", 25, 0, 5);
+    TH1F* back_h_subleading_LRJ_psi_R2 = bookTH1F("back_h_subleading_LRJ_psi_R2", "Subleading LRJ Et Distribution;#Psi_{R^{2}};% of Subleading LRJs / 0.05", 20, 0, 1);
 
-    TH1F* sig_h_LRJ1_deltaEt_digitized_double = new TH1F("sig_h_LRJ1_deltaEt_digitized_double", "LRJ Et Distribution;#Delta E_{T} (Digitized - Full-precision) [GeV];% of LRJs / 1 GeV", 40, -20, 20);
-    TH1F* sig_h_LRJ2_deltaEt_digitized_double = new TH1F("sig_h_LRJ2_deltaEt_digitized_double", "LRJ Et Distribution;#Delta E_{T} (Digitized - Full-precision) [GeV];% of LRJs / 1 GeV", 40, -20, 20);
+    TH1F* sig_h_LRJ1_deltaEt_digitized_double = bookTH1F("sig_h_LRJ1_deltaEt_digitized_double", "LRJ Et Distribution;#Delta E_{T} (Digitized - Full-precision) [GeV];% of LRJs / 1 GeV", 40, -20, 20);
+    TH1F* sig_h_LRJ2_deltaEt_digitized_double = bookTH1F("sig_h_LRJ2_deltaEt_digitized_double", "LRJ Et Distribution;#Delta E_{T} (Digitized - Full-precision) [GeV];% of LRJs / 1 GeV", 40, -20, 20);
 
-    TH1F* back_h_LRJ1_deltaEt_digitized_double = new TH1F("back_h_LRJ1_deltaEt_digitized_double", "LRJ Et Distribution;#Delta E_{T} (Digitized - Full-precision) [GeV];% of LRJs / 1 GeV", 40, -20, 20);
-    TH1F* back_h_LRJ2_deltaEt_digitized_double = new TH1F("back_h_LRJ2_deltaEt_digitized_double", "LRJ Et Distribution;#Delta E_{T} (Digitized - Full-precision) [GeV];% of LRJs / 1 GeV", 40, -20, 20);
+    TH1F* back_h_LRJ1_deltaEt_digitized_double = bookTH1F("back_h_LRJ1_deltaEt_digitized_double", "LRJ Et Distribution;#Delta E_{T} (Digitized - Full-precision) [GeV];% of LRJs / 1 GeV", 40, -20, 20);
+    TH1F* back_h_LRJ2_deltaEt_digitized_double = bookTH1F("back_h_LRJ2_deltaEt_digitized_double", "LRJ Et Distribution;#Delta E_{T} (Digitized - Full-precision) [GeV];% of LRJs / 1 GeV", 40, -20, 20);
 
-    TH1F* sig_h_leading_WTA_conecellstowers_pT = new TH1F("sig_h_leading_WTA_conecellstowers_pT", "Leading LRJ pT Distribution;Lead. WTA Cone CellsTowers Jet p_{T} [GeV];% of Leading WTA Cone CellsTowers Jets / 25 GeV", 32, 0, 800);
-    TH1F* sig_h_subleading_WTA_conecellstowers_pT = new TH1F("sig_h_subleading_WTA_conecellstowers_pT", "Subleading LRJ pT Distribution;Sublead. Cone CellsTowers Jet p_{T} [GeV];% of Subleading WTACone CellsTowers Jets / 25 GeV", 32, 0, 800);
+    TH1F* sig_h_leading_WTA_conecellstowers_pT = bookTH1F("sig_h_leading_WTA_conecellstowers_pT", "Leading LRJ pT Distribution;Lead. WTA Cone CellsTowers Jet p_{T} [GeV];% of Leading WTA Cone CellsTowers Jets / 25 GeV", 32, 0, 800);
+    TH1F* sig_h_subleading_WTA_conecellstowers_pT = bookTH1F("sig_h_subleading_WTA_conecellstowers_pT", "Subleading LRJ pT Distribution;Sublead. Cone CellsTowers Jet p_{T} [GeV];% of Subleading WTACone CellsTowers Jets / 25 GeV", 32, 0, 800);
 
-    TH1F* sig_h_leading_WTA_conebasicclusters_pT = new TH1F("sig_h_leading_WTA_conebasicclusters_pT", "Leading LRJ pT Distribution;Lead. WTA Cone BasicClusters Jet p_{T} [GeV];% of Leading WTA Cone BasicClusters Jets / 25 GeV", 32, 0, 800);
-    TH1F* sig_h_subleading_WTA_conebasicclusters_pT = new TH1F("sig_h_subleading_WTA_conebasicclusters_pT", "Subleading LRJ pT Distribution;Sublead. WTA Cone BasicClusters Jet p_{T} [GeV];% of Subleading WTA Cone BasicClusters Jets / 25 GeV", 32, 0, 800);
+    TH1F* sig_h_leading_WTA_conebasicclusters_pT = bookTH1F("sig_h_leading_WTA_conebasicclusters_pT", "Leading LRJ pT Distribution;Lead. WTA Cone BasicClusters Jet p_{T} [GeV];% of Leading WTA Cone BasicClusters Jets / 25 GeV", 32, 0, 800);
+    TH1F* sig_h_subleading_WTA_conebasicclusters_pT = bookTH1F("sig_h_subleading_WTA_conebasicclusters_pT", "Subleading LRJ pT Distribution;Sublead. WTA Cone BasicClusters Jet p_{T} [GeV];% of Subleading WTA Cone BasicClusters Jets / 25 GeV", 32, 0, 800);
 
-    TH1F* sig_h_WTA_conecellstowers_multiplicity = new TH1F("sig_h_WTA_conecellstowers_multiplicity", "Leading LRJ pT Distribution;Num. Cone WTA CellsTowers Jets / Event; Fraction of Events ", 50, 0, 50);
-    TH1F* sig_h_WTA_conebasicclusters_multiplicity = new TH1F("sig_h_WTA_conebasicclusters_multiplicity", "Leading LRJ pT Distribution;Num. WTA Cone BasicCluster Jets / Event; Fraction of Events ", 50, 0, 50);
+    TH1F* sig_h_WTA_conecellstowers_multiplicity = bookTH1F("sig_h_WTA_conecellstowers_multiplicity", "Leading LRJ pT Distribution;Num. Cone WTA CellsTowers Jets / Event; Fraction of Events ", 50, 0, 50);
+    TH1F* sig_h_WTA_conebasicclusters_multiplicity = bookTH1F("sig_h_WTA_conebasicclusters_multiplicity", "Leading LRJ pT Distribution;Num. WTA Cone BasicCluster Jets / Event; Fraction of Events ", 50, 0, 50);
 
-    TH1F* sig_h_LRJ_E = new TH1F("sig_h_LRJ_E", "LRJ Et Distribution;Energy [GeV];% of LRJs / 10 GeV", 100, 0, 1000);
-    TH1F* sig_h_LRJ_eta = new TH1F("sig_h_LRJ_eta", "LRJ Eta Distribution;#eta;Counts", 50, -5, 5);
-    TH1F* sig_h_LRJ_phi = new TH1F("sig_h_LRJ_phi", "LRJ Phi Distribution;#phi;Counts", 32, -3.2, 3.2);
+    TH1F* sig_h_LRJ_E = bookTH1F("sig_h_LRJ_E", "LRJ Et Distribution;Energy [GeV];% of LRJs / 10 GeV", 100, 0, 1000);
+    TH1F* sig_h_LRJ_eta = bookTH1F("sig_h_LRJ_eta", "LRJ Eta Distribution;#eta;Counts", 50, -5, 5);
+    TH1F* sig_h_LRJ_phi = bookTH1F("sig_h_LRJ_phi", "LRJ Phi Distribution;#phi;Counts", 32, -3.2, 3.2);
 
 
-    TH1F* sig_h_leading_LRJ_gFexLRJ_deltaEt = new TH1F("sig_h_leading_LRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 150);
-    TH1F* sig_h_leading_LRJ_offlineLRJ_deltaEt = new TH1F("sig_h_leading_LRJ_offlineLRJ_deltaEt", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    TH1F* sig_h_leading_LRJ_gFexLRJ_deltaEt = bookTH1F("sig_h_leading_LRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 150);
+    TH1F* sig_h_leading_LRJ_offlineLRJ_deltaEt = bookTH1F("sig_h_leading_LRJ_offlineLRJ_deltaEt", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
 
-    TH1F* sig_h_leading_offlineLRJ_gFexLRJ_deltaEt = new TH1F("sig_h_leading_offlineLRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    TH1F* sig_h_leading_offlineLRJ_gFexLRJ_deltaEt = bookTH1F("sig_h_leading_offlineLRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
     // Resim-object twin used by the STANDALONE leading_offlineLRJ_gFexLRJ_deltaEt plot
     // (the AOD histogram above is retained for the vs-JetTagger comparison overlay).
-    TH1F* sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim = new TH1F("sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim", "#Delta E_{T} Leading gFex LRJ (Resim), Offline LRJ;#Delta E_{T} (Offline - gFEX Resim) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
-    TH1F* sig_h_leading_offlineLRJ_jFexLRJ_deltaEt = new TH1F("sig_h_leading_offlineLRJ_jFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    TH1F* sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim = bookTH1F("sig_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim", "#Delta E_{T} Leading gFex LRJ (Resim), Offline LRJ;#Delta E_{T} (Offline - gFEX Resim) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    TH1F* sig_h_leading_offlineLRJ_jFexLRJ_deltaEt = bookTH1F("sig_h_leading_offlineLRJ_jFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
 
-    TH1F* sig_h_leading_LRJ_gFexLRJ_Et_resolution = new TH1F("sig_h_leading_LRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 40, -2, 2);
-    TH1F* sig_h_leading_LRJ_offlineLRJ_Et_resolution = new TH1F("sig_h_leading_LRJ_offlineLRJ_Et_resolution", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 20, -1, 1);
+    TH1F* sig_h_leading_LRJ_gFexLRJ_Et_resolution = bookTH1F("sig_h_leading_LRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 40, -2, 2);
+    TH1F* sig_h_leading_LRJ_offlineLRJ_Et_resolution = bookTH1F("sig_h_leading_LRJ_offlineLRJ_Et_resolution", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 20, -1, 1);
 
-    TH1F* sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution = new TH1F("sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFEX LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 50, -3.5, 1.5);
-    TH1F* sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution = new TH1F("sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution", "#Delta E_{T} Leading jFEX LRJ, Output LRJ, ;#Delta E_{T} (Offline - jFEX) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 40, -3, 1);
+    TH1F* sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution = bookTH1F("sig_h_leading_offlineLRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFEX LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 50, -3.5, 1.5);
+    TH1F* sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution = bookTH1F("sig_h_leading_offlineLRJ_jFexLRJ_Et_resolution", "#Delta E_{T} Leading jFEX LRJ, Output LRJ, ;#Delta E_{T} (Offline - jFEX) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 40, -3, 1);
 
-    TH1F* sig_h_leading_LRJ_gFexLRJ_deltaR = new TH1F("sig_h_leading_LRJ_gFexLRJ_deltaR", "#Delta R Leading gFex LRJ, Output LRJ, ;#Delta R (gFex, JetTagger);% of Leading LRJs / 0.1", 50, 0, 5);
-    TH1F* sig_h_leading_LRJ_offlineLRJ_deltaR = new TH1F("sig_h_leading_LRJ_offlineLRJ_deltaR", "#Delta R Leading Offline LRJ, Output LRJ, ;#Delta R (Offline, JetTagger);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* sig_h_leading_LRJ_gFexLRJ_deltaR = bookTH1F("sig_h_leading_LRJ_gFexLRJ_deltaR", "#Delta R Leading gFex LRJ, Output LRJ, ;#Delta R (gFex, JetTagger);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* sig_h_leading_LRJ_offlineLRJ_deltaR = bookTH1F("sig_h_leading_LRJ_offlineLRJ_deltaR", "#Delta R Leading Offline LRJ, Output LRJ, ;#Delta R (Offline, JetTagger);% of Leading LRJs / 0.1", 50, 0, 5);
 
-    TH1F* sig_h_first_LRJ_jFexSRJ_deltaR = new TH1F("sig_h_first_LRJ_jFexSRJ_deltaR", "#Delta R Leading jFex SRJ, Output LRJ, ;#Delta R (Lead. jFex SRJ, 1st JetTagger LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
-    TH1F* sig_h_second_LRJ_jFexSRJ_deltaR = new TH1F("sig_h_second_LRJ_jFexSRJ_deltaR", "#Delta R Subleading jFex SRJ, Output LRJ, ;#Delta R (Sublead. jFex SRJ, 2nd JetTagger LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* sig_h_first_LRJ_jFexSRJ_deltaR = bookTH1F("sig_h_first_LRJ_jFexSRJ_deltaR", "#Delta R Leading jFex SRJ, Output LRJ, ;#Delta R (Lead. jFex SRJ, 1st JetTagger LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* sig_h_second_LRJ_jFexSRJ_deltaR = bookTH1F("sig_h_second_LRJ_jFexSRJ_deltaR", "#Delta R Subleading jFex SRJ, Output LRJ, ;#Delta R (Sublead. jFex SRJ, 2nd JetTagger LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
 
-    TH1F* sig_h_lead_sublead_LRJ_deltaR = new TH1F("sig_h_lead_sublead_LRJ_deltaR", "#Delta R Leading, Subleading LRJ, ;#Delta R (Lead., Sublead. Output LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* sig_h_lead_sublead_LRJ_deltaR = bookTH1F("sig_h_lead_sublead_LRJ_deltaR", "#Delta R Leading, Subleading LRJ, ;#Delta R (Lead., Sublead. Output LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
 
     // Signal trigger efficiencies (gFex, JetTagger)
     // First equal rate thresholds
-    TH1F* sig_h_offlineLRJ_Et_num10kHz = new TH1F("sig_h_offlineLRJ_Et_num10kHz", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz = new TH1F("sig_h_offlineLRJ_Et_denom10kHz", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz = bookTH1F("sig_h_offlineLRJ_Et_num10kHz", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_HiggsMassWindow = new TH1F("sig_h_offlineLRJ_Et_num10kHz_HiggsMassWindow", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_HiggsMassWindow = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_HiggsMassWindow", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num10kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num10kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
     // 40 kHz subjet-split turn-ons (mirror of the 10 kHz subjet split; gFEX uses resimulated objects)
-    TH1F* sig_h_offlineLRJ_Et_num40kHz_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num40kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom40kHz_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom40kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num40kHz_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num40kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom40kHz_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom40kHz_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num40kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom40kHz_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num40kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom40kHz_gFexLRJ_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_Subleading = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_Subleading = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_HiggsMassWindow_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_HiggsMassWindow_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_HiggsMassWindow_Subleading = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_HiggsMassWindow_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow_Subleading = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_HiggsMassWindow_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_1Subjet_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_1Subjet_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_1Subjet_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_1Subjet_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_1Subjet_Subleading = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_1Subjet_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_1Subjet_Subleading = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_1Subjet_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_GrEq2Subjets_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_GrEq2Subjets_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_GrEq2Subjets_Subleading = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_GrEq2Subjets_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets_Subleading = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_GrEq2Subjets_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_Subleading = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_Subleading = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow_Subleading = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow_Subleading = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_HiggsMassWindow_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet_Subleading = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_1Subjet_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet_Subleading = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_1Subjet_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets_Subleading = new TH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets_Subleading = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets_Subleading = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_GrEq2Subjets_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets_Subleading = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_gFexLRJ_GrEq2Subjets_Subleading", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num10kHz_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num10kHz_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom10kHz_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num10kHz_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom10kHz_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 95, 50, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num50 = new TH1F("sig_h_offlineLRJ_Et_num50", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom50 = new TH1F("sig_h_offlineLRJ_Et_denom50", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num50 = bookTH1F("sig_h_offlineLRJ_Et_num50", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom50 = bookTH1F("sig_h_offlineLRJ_Et_denom50", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num50_Dijet = new TH1F("sig_h_offlineLRJ_Et_num50_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom50_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom50_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num50_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num50_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom50_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom50_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num50_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num50_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom50_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom50_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num50_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num50_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom50_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom50_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num50_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num50_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom50_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom50_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num50_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num50_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom50_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom50_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num50_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num50_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom50_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom50_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num50_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num50_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom50_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom50_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num50_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num50_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom50_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom50_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num50_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num50_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom50_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom50_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num50_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num50_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom50_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom50_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num50_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num50_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom50_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom50_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num50_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num50_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom50_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom50_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num50_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num50_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom50_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom50_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num50_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num50_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom50_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom50_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num50_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num50_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom50_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom50_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num50 = new TH1F("sig_h_Avg_b_Et_num50", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom50 = new TH1F("sig_h_Avg_b_Et_denom50", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num50 = bookTH1F("sig_h_Avg_b_Et_num50", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom50 = bookTH1F("sig_h_Avg_b_Et_denom50", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num100 = new TH1F("sig_h_offlineLRJ_Et_num100", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom100 = new TH1F("sig_h_offlineLRJ_Et_denom100", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num100 = bookTH1F("sig_h_offlineLRJ_Et_num100", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom100 = bookTH1F("sig_h_offlineLRJ_Et_denom100", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num100_Dijet = new TH1F("sig_h_offlineLRJ_Et_num100_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom100_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom100_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num100_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num100_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom100_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom100_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num100_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num100_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom100_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom100_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num100_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num100_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom100_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom100_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num100_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num100_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom100_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom100_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num100_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num100_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom100_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom100_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num100_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num100_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom100_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom100_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num100_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num100_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom100_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom100_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num100_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num100_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom100_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom100_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num100_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num100_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom100_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom100_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num100_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num100_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom100_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom100_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num100_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num100_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom100_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom100_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num100_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num100_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom100_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom100_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num100_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num100_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom100_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom100_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num100_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num100_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom100_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom100_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num100_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num100_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom100_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom100_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num100 = new TH1F("sig_h_Avg_b_Et_num100", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom100 = new TH1F("sig_h_Avg_b_Et_denom100", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num100 = bookTH1F("sig_h_Avg_b_Et_num100", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom100 = bookTH1F("sig_h_Avg_b_Et_denom100", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num150 = new TH1F("sig_h_offlineLRJ_Et_num150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom150 = new TH1F("sig_h_offlineLRJ_Et_denom150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num150 = bookTH1F("sig_h_offlineLRJ_Et_num150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom150 = bookTH1F("sig_h_offlineLRJ_Et_denom150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num150_Dijet = new TH1F("sig_h_offlineLRJ_Et_num150_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom150_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom150_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num150_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num150_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom150_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom150_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num150_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num150_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom150_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom150_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num150_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num150_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom150_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom150_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num150_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num150_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom150_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom150_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num150_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num150_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom150_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom150_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num150_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num150_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom150_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom150_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num150_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num150_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom150_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom150_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num150_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num150_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom150_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom150_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num150_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num150_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom150_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom150_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num150_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num150_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom150_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom150_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num150_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num150_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom150_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom150_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num150_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num150_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom150_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom150_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num150_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num150_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom150_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom150_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num150_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num150_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom150_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom150_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num150_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num150_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom150_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom150_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num150 = new TH1F("sig_h_Avg_b_Et_num150", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom150 = new TH1F("sig_h_Avg_b_Et_denom150", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num150 = bookTH1F("sig_h_Avg_b_Et_num150", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom150 = bookTH1F("sig_h_Avg_b_Et_denom150", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num200 = new TH1F("sig_h_offlineLRJ_Et_num200", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom200 = new TH1F("sig_h_offlineLRJ_Et_denom200", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num200 = bookTH1F("sig_h_offlineLRJ_Et_num200", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom200 = bookTH1F("sig_h_offlineLRJ_Et_denom200", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num200_Dijet = new TH1F("sig_h_offlineLRJ_Et_num200_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom200_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom200_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num200_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num200_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom200_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom200_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num200_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num200_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom200_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom200_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num200_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num200_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom200_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom200_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num200_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num200_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom200_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom200_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num200_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num200_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom200_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom200_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num200_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num200_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom200_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom200_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num200_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num200_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom200_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom200_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num200_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num200_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom200_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom200_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num200_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num200_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom200_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom200_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num200_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num200_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom200_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom200_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num200_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num200_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom200_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom200_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num200_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num200_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom200_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom200_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num200_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num200_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom200_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom200_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num200_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num200_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom200_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom200_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num200_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num200_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom200_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom200_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num200 = new TH1F("sig_h_Avg_b_Et_num200", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom200 = new TH1F("sig_h_Avg_b_Et_denom200", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num200 = bookTH1F("sig_h_Avg_b_Et_num200", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom200 = bookTH1F("sig_h_Avg_b_Et_denom200", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num250 = new TH1F("sig_h_offlineLRJ_Et_num250", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom250 = new TH1F("sig_h_offlineLRJ_Et_denom250", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num250 = bookTH1F("sig_h_offlineLRJ_Et_num250", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom250 = bookTH1F("sig_h_offlineLRJ_Et_denom250", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num250_Dijet = new TH1F("sig_h_offlineLRJ_Et_num250_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom250_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom250_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num250_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num250_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom250_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom250_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num250_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num250_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom250_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom250_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num250_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num250_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom250_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom250_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num250_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num250_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom250_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom250_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num250_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num250_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom250_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom250_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num250_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num250_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom250_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom250_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num250_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num250_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom250_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom250_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num250_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num250_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom250_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom250_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num250_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num250_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom250_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom250_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num250_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num250_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom250_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom250_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num250_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num250_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom250_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom250_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num250_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num250_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom250_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom250_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num250_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num250_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom250_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom250_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num250_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num250_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom250_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom250_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num250_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num250_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom250_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom250_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num250 = new TH1F("sig_h_Avg_b_Et_num250", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom250 = new TH1F("sig_h_Avg_b_Et_denom250", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num250 = bookTH1F("sig_h_Avg_b_Et_num250", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom250 = bookTH1F("sig_h_Avg_b_Et_denom250", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num300 = new TH1F("sig_h_offlineLRJ_Et_num300", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom300 = new TH1F("sig_h_offlineLRJ_Et_denom300", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num300 = bookTH1F("sig_h_offlineLRJ_Et_num300", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom300 = bookTH1F("sig_h_offlineLRJ_Et_denom300", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num300_Dijet = new TH1F("sig_h_offlineLRJ_Et_num300_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom300_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom300_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num300_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num300_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom300_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom300_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num300_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num300_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom300_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom300_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num300_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num300_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom300_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom300_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num300_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num300_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom300_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom300_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num300_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num300_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom300_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom300_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
     
-    TH1F* sig_h_offlineLRJ_Et_num300_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num300_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom300_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom300_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num300_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num300_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom300_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom300_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num300_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num300_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom300_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom300_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num300_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num300_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom300_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom300_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num300_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num300_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom300_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom300_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num300_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num300_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom300_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom300_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num300_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num300_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom300_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom300_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num300_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num300_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom300_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom300_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num300_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num300_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom300_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom300_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num300_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num300_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom300_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom300_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num300 = new TH1F("sig_h_Avg_b_Et_num300", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom300 = new TH1F("sig_h_Avg_b_Et_denom300", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num300 = bookTH1F("sig_h_Avg_b_Et_num300", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom300 = bookTH1F("sig_h_Avg_b_Et_denom300", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num350 = new TH1F("sig_h_offlineLRJ_Et_num350", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom350 = new TH1F("sig_h_offlineLRJ_Et_denom350", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num350 = bookTH1F("sig_h_offlineLRJ_Et_num350", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom350 = bookTH1F("sig_h_offlineLRJ_Et_denom350", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num350_Dijet = new TH1F("sig_h_offlineLRJ_Et_num350_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom350_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom350_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num350_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num350_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom350_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom350_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num350_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num350_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom350_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom350_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num350_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num350_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom350_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom350_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num350_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num350_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom350_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom350_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num350_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num350_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom350_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom350_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num350_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num350_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom350_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom350_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num350_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num350_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom350_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom350_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num350_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num350_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom350_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom350_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num350_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num350_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom350_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom350_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num350_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num350_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom350_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom350_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num350_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num350_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom350_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom350_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num350_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num350_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom350_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom350_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num350_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num350_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom350_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom350_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num350_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num350_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom350_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom350_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num350_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num350_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom350_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom350_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num350 = new TH1F("sig_h_Avg_b_Et_num350", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom350 = new TH1F("sig_h_Avg_b_Et_denom350", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num350 = bookTH1F("sig_h_Avg_b_Et_num350", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom350 = bookTH1F("sig_h_Avg_b_Et_denom350", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num400 = new TH1F("sig_h_offlineLRJ_Et_num400", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom400 = new TH1F("sig_h_offlineLRJ_Et_denom400", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num400 = bookTH1F("sig_h_offlineLRJ_Et_num400", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom400 = bookTH1F("sig_h_offlineLRJ_Et_denom400", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num400_Dijet = new TH1F("sig_h_offlineLRJ_Et_num400_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom400_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom400_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num400_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num400_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom400_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom400_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num400_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num400_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom400_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom400_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num400_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num400_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom400_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom400_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num400_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num400_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom400_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom400_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num400_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num400_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom400_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom400_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num400_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num400_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom400_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom400_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num400_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num400_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom400_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom400_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num400_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num400_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom400_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom400_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num400_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num400_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom400_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom400_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num400_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num400_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom400_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom400_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num400_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num400_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom400_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom400_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num400_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num400_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom400_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom400_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num400_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num400_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom400_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom400_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num400_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num400_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom400_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom400_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num400_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num400_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom400_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom400_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num400 = new TH1F("sig_h_Avg_b_Et_num400", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom400 = new TH1F("sig_h_Avg_b_Et_denom400", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num400 = bookTH1F("sig_h_Avg_b_Et_num400", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom400 = bookTH1F("sig_h_Avg_b_Et_denom400", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num450 = new TH1F("sig_h_offlineLRJ_Et_num450", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom450 = new TH1F("sig_h_offlineLRJ_Et_denom450", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num450 = bookTH1F("sig_h_offlineLRJ_Et_num450", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom450 = bookTH1F("sig_h_offlineLRJ_Et_denom450", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num450_Dijet = new TH1F("sig_h_offlineLRJ_Et_num45_Dijet0", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom450_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom450_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num450_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num45_Dijet0", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom450_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom450_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num450_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num450_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom450_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom450_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num450_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num450_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom450_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom450_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num450_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num450_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom450_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom450_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num450_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num450_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom450_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom450_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num450_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num450_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom450_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom450_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num450_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num450_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom450_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom450_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num450_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num450_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom450_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom450_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num450_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num450_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom450_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom450_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num450_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num450_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom450_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom450_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num450_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num450_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom450_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom450_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num450_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num450_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom450_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom450_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num450_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num450_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom450_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom450_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num450_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num450_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom450_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom450_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num450_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num450_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom450_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom450_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num450 = new TH1F("sig_h_Avg_b_Et_num450", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom450 = new TH1F("sig_h_Avg_b_Et_denom450", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num450 = bookTH1F("sig_h_Avg_b_Et_num450", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom450 = bookTH1F("sig_h_Avg_b_Et_denom450", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num500 = new TH1F("sig_h_offlineLRJ_Et_num500", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom500 = new TH1F("sig_h_offlineLRJ_Et_denom500", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num500 = bookTH1F("sig_h_offlineLRJ_Et_num500", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom500 = bookTH1F("sig_h_offlineLRJ_Et_denom500", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num500_Dijet = new TH1F("sig_h_offlineLRJ_Et_num500_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom500_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom500_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num500_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num500_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom500_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom500_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num500_1Subjet = new TH1F("sig_h_offlineLRJ_Et_num500_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom500_1Subjet = new TH1F("sig_h_offlineLRJ_Et_denom500_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num500_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_num500_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom500_1Subjet = bookTH1F("sig_h_offlineLRJ_Et_denom500_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num500_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_num500_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom500_GrEq2Subjets = new TH1F("sig_h_offlineLRJ_Et_denom500_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num500_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_num500_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom500_GrEq2Subjets = bookTH1F("sig_h_offlineLRJ_Et_denom500_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num500_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_num500_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom500_mass100to150 = new TH1F("sig_h_offlineLRJ_Et_denom500_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num500_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_num500_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom500_mass100to150 = bookTH1F("sig_h_offlineLRJ_Et_denom500_mass100to150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_subleading_Et_num500_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_num500_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_subleading_Et_denom500_mass100to150 = new TH1F("sig_h_offlineLRJ_subleading_Et_denom500_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_num500_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_num500_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_subleading_Et_denom500_mass100to150 = bookTH1F("sig_h_offlineLRJ_subleading_Et_denom500_mass100to150", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num500_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num500_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom500_gFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom500_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num500_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num500_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom500_gFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom500_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num500_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_num500_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom500_jFexLRJ = new TH1F("sig_h_offlineLRJ_Et_denom500_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num500_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_num500_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom500_jFexLRJ = bookTH1F("sig_h_offlineLRJ_Et_denom500_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_offlineLRJ_Et_num500_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_num500_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_offlineLRJ_Et_denom500_gFexLRJ_Dijet = new TH1F("sig_h_offlineLRJ_Et_denom500_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_num500_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_num500_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_offlineLRJ_Et_denom500_gFexLRJ_Dijet = bookTH1F("sig_h_offlineLRJ_Et_denom500_gFexLRJ_Dijet", "LRJ Et Distribution;Offline Subleading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
-    TH1F* sig_h_Avg_b_Et_num500 = new TH1F("sig_h_Avg_b_Et_num500", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
-    TH1F* sig_h_Avg_b_Et_denom500 = new TH1F("sig_h_Avg_b_Et_denom500", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_num500 = bookTH1F("sig_h_Avg_b_Et_num500", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
+    TH1F* sig_h_Avg_b_Et_denom500 = bookTH1F("sig_h_Avg_b_Et_denom500", "LRJ Et Distribution;Avg. b E_{T};Emulated Trigger Efficiency (Signal)", 100, 0, 1000);
 
     // Background trigger efficiencies (gFex, JetTagger)
 
-    TH1F* back_h_offlineLRJ_Et_num50 = new TH1F("back_h_offlineLRJ_Et_num50", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom50 = new TH1F("back_h_offlineLRJ_Et_denom50", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num50 = bookTH1F("back_h_offlineLRJ_Et_num50", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom50 = bookTH1F("back_h_offlineLRJ_Et_denom50", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num50_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num50_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom50_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom50_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num50_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num50_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom50_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom50_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num50_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num50_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom50_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom50_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num50_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num50_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom50_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom50_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num100 = new TH1F("back_h_offlineLRJ_Et_num100", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom100 = new TH1F("back_h_offlineLRJ_Et_denom100", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num100 = bookTH1F("back_h_offlineLRJ_Et_num100", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom100 = bookTH1F("back_h_offlineLRJ_Et_denom100", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num100_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num100_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom100_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom100_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num100_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num100_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom100_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom100_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num100_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num100_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom100_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom100_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num100_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num100_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom100_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom100_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num100_1Subjet = new TH1F("back_h_offlineLRJ_Et_num100_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom100_1Subjet = new TH1F("back_h_offlineLRJ_Et_denom100_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num100_1Subjet = bookTH1F("back_h_offlineLRJ_Et_num100_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom100_1Subjet = bookTH1F("back_h_offlineLRJ_Et_denom100_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num100_GrEq2Subjets = new TH1F("back_h_offlineLRJ_Et_num100_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom100_GrEq2Subjets = new TH1F("back_h_offlineLRJ_Et_denom100_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num100_GrEq2Subjets = bookTH1F("back_h_offlineLRJ_Et_num100_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom100_GrEq2Subjets = bookTH1F("back_h_offlineLRJ_Et_denom100_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num150 = new TH1F("back_h_offlineLRJ_Et_num150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom150 = new TH1F("back_h_offlineLRJ_Et_denom150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num150 = bookTH1F("back_h_offlineLRJ_Et_num150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom150 = bookTH1F("back_h_offlineLRJ_Et_denom150", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num150_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num150_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom150_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom150_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num150_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num150_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom150_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom150_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num150_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num150_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom150_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom150_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num150_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num150_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom150_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom150_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num200 = new TH1F("back_h_offlineLRJ_Et_num200", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom200 = new TH1F("back_h_offlineLRJ_Et_denom200", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num200 = bookTH1F("back_h_offlineLRJ_Et_num200", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom200 = bookTH1F("back_h_offlineLRJ_Et_denom200", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num200_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num200_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom200_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom200_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num200_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num200_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom200_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom200_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num200_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num200_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom200_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom200_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num200_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num200_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom200_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom200_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num200_1Subjet = new TH1F("back_h_offlineLRJ_Et_num200_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom200_1Subjet = new TH1F("back_h_offlineLRJ_Et_denom200_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num200_1Subjet = bookTH1F("back_h_offlineLRJ_Et_num200_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom200_1Subjet = bookTH1F("back_h_offlineLRJ_Et_denom200_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num200_GrEq2Subjets = new TH1F("back_h_offlineLRJ_Et_num200_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom200_GrEq2Subjets = new TH1F("back_h_offlineLRJ_Et_denom200_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num200_GrEq2Subjets = bookTH1F("back_h_offlineLRJ_Et_num200_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom200_GrEq2Subjets = bookTH1F("back_h_offlineLRJ_Et_denom200_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num250 = new TH1F("back_h_offlineLRJ_Et_num250", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom250 = new TH1F("back_h_offlineLRJ_Et_denom250", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num250 = bookTH1F("back_h_offlineLRJ_Et_num250", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom250 = bookTH1F("back_h_offlineLRJ_Et_denom250", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num250_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num250_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom250_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom250_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num250_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num250_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom250_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom250_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num250_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num250_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom250_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom250_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num250_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num250_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom250_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom250_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num300 = new TH1F("back_h_offlineLRJ_Et_num300", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom300 = new TH1F("back_h_offlineLRJ_Et_denom300", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num300 = bookTH1F("back_h_offlineLRJ_Et_num300", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom300 = bookTH1F("back_h_offlineLRJ_Et_denom300", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num300_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num300_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom300_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom300_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num300_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num300_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom300_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom300_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num300_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num300_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom300_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom300_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num300_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num300_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom300_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom300_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num300_1Subjet = new TH1F("back_h_offlineLRJ_Et_num300_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom300_1Subjet = new TH1F("back_h_offlineLRJ_Et_denom300_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num300_1Subjet = bookTH1F("back_h_offlineLRJ_Et_num300_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom300_1Subjet = bookTH1F("back_h_offlineLRJ_Et_denom300_1Subjet", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num300_GrEq2Subjets = new TH1F("back_h_offlineLRJ_Et_num300_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom300_GrEq2Subjets = new TH1F("back_h_offlineLRJ_Et_denom300_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num300_GrEq2Subjets = bookTH1F("back_h_offlineLRJ_Et_num300_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom300_GrEq2Subjets = bookTH1F("back_h_offlineLRJ_Et_denom300_GrEq2Subjets", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num350 = new TH1F("back_h_offlineLRJ_Et_num350", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom350 = new TH1F("back_h_offlineLRJ_Et_denom350", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num350 = bookTH1F("back_h_offlineLRJ_Et_num350", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom350 = bookTH1F("back_h_offlineLRJ_Et_denom350", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num350_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num350_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom350_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom350_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num350_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num350_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom350_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom350_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num350_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num350_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom350_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom350_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num350_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num350_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom350_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom350_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num400 = new TH1F("back_h_offlineLRJ_Et_num400", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom400 = new TH1F("back_h_offlineLRJ_Et_denom400", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num400 = bookTH1F("back_h_offlineLRJ_Et_num400", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom400 = bookTH1F("back_h_offlineLRJ_Et_denom400", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num400_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num400_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom400_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom400_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num400_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num400_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom400_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom400_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num400_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num400_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom400_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom400_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num400_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num400_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom400_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom400_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num450 = new TH1F("back_h_offlineLRJ_Et_num450", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom450 = new TH1F("back_h_offlineLRJ_Et_denom450", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num450 = bookTH1F("back_h_offlineLRJ_Et_num450", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom450 = bookTH1F("back_h_offlineLRJ_Et_denom450", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num450_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_num450_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom450_gFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom450_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num450_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num450_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom450_gFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom450_gFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* back_h_offlineLRJ_Et_num450_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_num450_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
-    TH1F* back_h_offlineLRJ_Et_denom450_jFexLRJ = new TH1F("back_h_offlineLRJ_Et_denom450_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_num450_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_num450_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
+    TH1F* back_h_offlineLRJ_Et_denom450_jFexLRJ = bookTH1F("back_h_offlineLRJ_Et_denom450_jFexLRJ", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Background)", 45, 50, 500);
 
-    TH1F* sig_h_Mjj = new TH1F("sig_h_Mjj", "Invariant Mass of 2 LRJs;Invariant Mass of 2 LRJs [GeV]; % Events / 20 GeV", 75, 0, 1500);
+    TH1F* sig_h_Mjj = bookTH1F("sig_h_Mjj", "Invariant Mass of 2 LRJs;Invariant Mass of 2 LRJs [GeV]; % Events / 20 GeV", 75, 0, 1500);
 
-    TH2F *sigTopo422Highest128SeedPositionsEv0 = new TH2F("sigTopo422Highest128SeedPositionsEv0", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *sigTopo422Highest128SeedPositionsEv0 = bookTH2F("sigTopo422Highest128SeedPositionsEv0", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
 
@@ -4643,7 +4899,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > siggFexLRJEtEv0;
     std::vector<double > sigOfflineLRJEtEv0;
 
-    TH2F *sigTopo422Highest128SeedPositionsEv1 = new TH2F("sigTopo422Highest128SeedPositionsEv1", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *sigTopo422Highest128SeedPositionsEv1 = bookTH2F("sigTopo422Highest128SeedPositionsEv1", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
 
@@ -4657,7 +4913,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > siggFexLRJEtEv1;
     std::vector<double > sigOfflineLRJEtEv1;
 
-    TH2F *sigTopo422Highest128SeedPositionsEv2 = new TH2F("sigTopo422Highest128SeedPositionsEv2", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *sigTopo422Highest128SeedPositionsEv2 = bookTH2F("sigTopo422Highest128SeedPositionsEv2", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
     
@@ -4671,7 +4927,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > siggFexLRJEtEv2;
     std::vector<double > sigOfflineLRJEtEv2;
 
-    TH2F *sigTopo422Highest128SeedPositionsEv3 = new TH2F("sigTopo422Highest128SeedPositionsEv3", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *sigTopo422Highest128SeedPositionsEv3 = bookTH2F("sigTopo422Highest128SeedPositionsEv3", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
 
@@ -4685,7 +4941,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > siggFexLRJEtEv3;
     std::vector<double > sigOfflineLRJEtEv3;
 
-    TH2F *sigTopo422Highest128SeedPositionsEv4 = new TH2F("sigTopo422Highest128SeedPositionsEv4", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *sigTopo422Highest128SeedPositionsEv4 = bookTH2F("sigTopo422Highest128SeedPositionsEv4", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
 
@@ -4699,24 +4955,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > siggFexLRJEtEv4;
     std::vector<double > sigOfflineLRJEtEv4;
 
-    TH1F* back_h_LRJ_substruct = new TH1F("back_h_LRJ_substruct", "LRJ 'Diameter';LRJ 'Diameter';% of LRJs / ~0.03", 32, 0, 1);
-    TH2F *backDiamvsEt = new TH2F("backDiamvsEt", "Sum of Topo422 E_{T} in Each Bin; LRJ E_{T} [GeV];LRJ 'Diameter'", 
+    TH1F* back_h_LRJ_substruct = bookTH1F("back_h_LRJ_substruct", "LRJ 'Diameter';LRJ 'Diameter';% of LRJs / ~0.03", 32, 0, 1);
+    TH2F *backDiamvsEt = bookTH2F("backDiamvsEt", "Sum of Topo422 E_{T} in Each Bin; LRJ E_{T} [GeV];LRJ 'Diameter'", 
                         20, 0, 800,   
                         32, 0, 1.0);  
-    TH1F* back_h_LRJ_Et = new TH1F("back_h_LRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of LRJs / 20 GeV", 40, 0, 800);
-    TH1F* back_h_leading_LRJ_Et = new TH1F("back_h_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_subleading_LRJ_Et = new TH1F("back_h_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_leading_LRJ_Eta = new TH1F("back_h_leading_LRJ_Eta", "Leading LRJ #eta Distribution;#eta;% of Leading LRJs", 98, -4.9, 4.9);
+    TH1F* back_h_LRJ_Et = bookTH1F("back_h_LRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of LRJs / 20 GeV", 40, 0, 800);
+    TH1F* back_h_leading_LRJ_Et = bookTH1F("back_h_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* back_h_subleading_LRJ_Et = bookTH1F("back_h_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* back_h_leading_LRJ_Eta = bookTH1F("back_h_leading_LRJ_Eta", "Leading LRJ #eta Distribution;#eta;% of Leading LRJs", 98, -4.9, 4.9);
 
     // Subjet-to-nearest-jet deltaR distributions
-    TH1F* back_h_leadSubjet_minDeltaR_truthJet   = new TH1F("back_h_leadSubjet_minDeltaR_truthJet",   "Leading LRJ Subjet Min #DeltaR to Truth Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
-    TH1F* back_h_leadSubjet_minDeltaR_pileupJet  = new TH1F("back_h_leadSubjet_minDeltaR_pileupJet",  "Leading LRJ Subjet Min #DeltaR to Pileup Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
-    TH1F* back_h_subSubjet_minDeltaR_truthJet    = new TH1F("back_h_subSubjet_minDeltaR_truthJet",    "Subleading LRJ Subjet Min #DeltaR to Truth Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
-    TH1F* back_h_subSubjet_minDeltaR_pileupJet   = new TH1F("back_h_subSubjet_minDeltaR_pileupJet",   "Subleading LRJ Subjet Min #DeltaR to Pileup Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
+    TH1F* back_h_leadSubjet_minDeltaR_truthJet   = bookTH1F("back_h_leadSubjet_minDeltaR_truthJet",   "Leading LRJ Subjet Min #DeltaR to Truth Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
+    TH1F* back_h_leadSubjet_minDeltaR_pileupJet  = bookTH1F("back_h_leadSubjet_minDeltaR_pileupJet",  "Leading LRJ Subjet Min #DeltaR to Pileup Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
+    TH1F* back_h_subSubjet_minDeltaR_truthJet    = bookTH1F("back_h_subSubjet_minDeltaR_truthJet",    "Subleading LRJ Subjet Min #DeltaR to Truth Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
+    TH1F* back_h_subSubjet_minDeltaR_pileupJet   = bookTH1F("back_h_subSubjet_minDeltaR_pileupJet",   "Subleading LRJ Subjet Min #DeltaR to Pileup Jet (E_{T}>15 GeV);#DeltaR;Subjets / 0.1", 30, 0, 3.0);
 
     // Subjet matching fraction bar graphs (4 categories, leading and subleading)
-    TH1F* back_h_leadSubjet_matchFrac = new TH1F("back_h_leadSubjet_matchFrac", "Background Leading LRJ Subjet Match Fraction;Category of Subjet Matching;Fraction of Subjets", 4, 0, 4);
-    TH1F* back_h_subSubjet_matchFrac  = new TH1F("back_h_subSubjet_matchFrac",  "Background Subleading LRJ Subjet Match Fraction;Category of Subjet Matching;Fraction of Subjets", 4, 0, 4);
+    TH1F* back_h_leadSubjet_matchFrac = bookTH1F("back_h_leadSubjet_matchFrac", "Background Leading LRJ Subjet Match Fraction;Category of Subjet Matching;Fraction of Subjets", 4, 0, 4);
+    TH1F* back_h_subSubjet_matchFrac  = bookTH1F("back_h_subSubjet_matchFrac",  "Background Subleading LRJ Subjet Match Fraction;Category of Subjet Matching;Fraction of Subjets", 4, 0, 4);
     for(TH1F* h : {back_h_leadSubjet_matchFrac, back_h_subSubjet_matchFrac}){
         h->GetXaxis()->SetBinLabel(1, "Truth only");
         h->GetXaxis()->SetBinLabel(2, "Pileup only");
@@ -4724,130 +4980,130 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         h->GetXaxis()->SetBinLabel(4, "Neither");
     }
 
-    TH1F* back_h_leading_LRJ_Et_normalbinning = new TH1F("back_h_leading_LRJ_Et_normalbinning", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", 41, 0, 1025);
-    TH1F* back_h_subleading_LRJ_Et_normalbinning = new TH1F("back_h_subleading_LRJ_Et_normalbinning", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", 41, 0, 1025);
+    TH1F* back_h_leading_LRJ_Et_normalbinning = bookTH1F("back_h_leading_LRJ_Et_normalbinning", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", 41, 0, 1025);
+    TH1F* back_h_subleading_LRJ_Et_normalbinning = bookTH1F("back_h_subleading_LRJ_Et_normalbinning", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", 41, 0, 1025);
 
-    TH1F* back_h_gFEX_leading_LRJ_Et = new TH1F("back_h_gFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;Leading gFEX LRJ E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_gFEX_subleading_LRJ_Et = new TH1F("back_h_gFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_gFEX_leading_LRJ_Et = bookTH1F("back_h_gFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;Leading gFEX LRJ E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* back_h_gFEX_subleading_LRJ_Et = bookTH1F("back_h_gFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
     // gFEX LRJ Sim (resimulated) — background rate histograms
-    TH1F* back_h_gFEX_Sim_leading_LRJ_Et = new TH1F("back_h_gFEX_Sim_leading_LRJ_Et", "Leading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_gFEX_Sim_subleading_LRJ_Et = new TH1F("back_h_gFEX_Sim_subleading_LRJ_Et", "Subleading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_gFEX_Sim_leading_LRJ_Et = bookTH1F("back_h_gFEX_Sim_leading_LRJ_Et", "Leading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* back_h_gFEX_Sim_subleading_LRJ_Et = bookTH1F("back_h_gFEX_Sim_subleading_LRJ_Et", "Subleading LRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
     // JZ0 no-HSTP versions for basic rate comparison
-    TH1F* back_h_leading_LRJ_Et_JZ0 = new TH1F("back_h_leading_LRJ_Et_JZ0", "Leading Jet Tagger LRJ E_{T} (JZ0);E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_LRJ_Et_JZ0 = bookTH1F("back_h_leading_LRJ_Et_JZ0", "Leading Jet Tagger LRJ E_{T} (JZ0);E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
     // Binned like its all-JZ counterpart back_h_leading_WtaCone_Et, which uses
     // rateVsEffBins_ConeLeadSingle (10 GeV steps to 400), NOT rateVsEffBins (5 GeV steps). With
     // rateVsEffBins here the two cumulative curves had different thresholds at the same bin index.
-    TH1F* back_h_leading_WtaCone_Et_JZ0 = new TH1F("back_h_leading_WtaCone_Et_JZ0", "Leading WTA Cone Jet E_{T} (JZ0);E_{T} [GeV];% of Leading Cone Jets / 25 GeV", rateVsEffBins_ConeLeadSingle.size() - 1, rateVsEffBins_ConeLeadSingle.data());
-    TH1F* back_h_gFEX_leading_LRJ_Et_JZ0 = new TH1F("back_h_gFEX_leading_LRJ_Et_JZ0", "Leading gFEX LRJ E_{T} (JZ0);Leading gFEX LRJ E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_gFEX_Sim_leading_LRJ_Et_JZ0 = new TH1F("back_h_gFEX_Sim_leading_LRJ_Et_JZ0", "Leading gFEX LRJ E_{T} Sim (JZ0);E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_WtaCone_Et_JZ0 = bookTH1F("back_h_leading_WtaCone_Et_JZ0", "Leading WTA Cone Jet E_{T} (JZ0);E_{T} [GeV];% of Leading Cone Jets / 25 GeV", rateVsEffBins_ConeLeadSingle.size() - 1, rateVsEffBins_ConeLeadSingle.data());
+    TH1F* back_h_gFEX_leading_LRJ_Et_JZ0 = bookTH1F("back_h_gFEX_leading_LRJ_Et_JZ0", "Leading gFEX LRJ E_{T} (JZ0);Leading gFEX LRJ E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* back_h_gFEX_Sim_leading_LRJ_Et_JZ0 = bookTH1F("back_h_gFEX_Sim_leading_LRJ_Et_JZ0", "Leading gFEX LRJ E_{T} Sim (JZ0);E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
     // JZ0 distributions: truth SRJ and jet tagger LRJ Et
-    TH1F* back_h_leading_truthSRJ_Et_JZ0 = new TH1F("back_h_leading_truthSRJ_Et_JZ0", "Leading Truth SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", 32, 0, 800);
-    TH1F* back_h_subleading_truthSRJ_Et_JZ0 = new TH1F("back_h_subleading_truthSRJ_Et_JZ0", "Subleading Truth SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", 32, 0, 800);
-    TH1F* back_h_leading_jetTagger_Et_JZ0 = new TH1F("back_h_leading_jetTagger_Et_JZ0", "Leading Jet Tagger LRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_subleading_jetTagger_Et_JZ0 = new TH1F("back_h_subleading_jetTagger_Et_JZ0", "Subleading Jet Tagger LRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthSRJ_Et_JZ0 = bookTH1F("back_h_leading_truthSRJ_Et_JZ0", "Leading Truth SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", 32, 0, 800);
+    TH1F* back_h_subleading_truthSRJ_Et_JZ0 = bookTH1F("back_h_subleading_truthSRJ_Et_JZ0", "Subleading Truth SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", 32, 0, 800);
+    TH1F* back_h_leading_jetTagger_Et_JZ0 = bookTH1F("back_h_leading_jetTagger_Et_JZ0", "Leading Jet Tagger LRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_subleading_jetTagger_Et_JZ0 = bookTH1F("back_h_subleading_jetTagger_Et_JZ0", "Subleading Jet Tagger LRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];Events / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
     // JZ0 no-HSTP twins for the remaining single-jet and multi-jet triggers, each binned like
     // its all-JZ counterpart so the rate curves built from the two are directly comparable in
     // the normalization overlays. gFEX has no 4th-leading entry: it is not designed for
     // multi-jet triggers, so the 4-jet leg is jFEX (and WTA cone) only.
     // (The leading WTA cone JZ0 twin is back_h_leading_WtaCone_Et_JZ0, declared above.)
-    TH1F* back_h_4th_leading_WtaCone_Et_JZ0 = new TH1F("back_h_4th_leading_WtaCone_Et_JZ0", "4th Leading WTA Cone Jet E_{T} (JZ0, no HSTP);4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
-    TH1F* back_h_gFEX_leading_SRJ_Et_JZ0 = new TH1F("back_h_gFEX_leading_SRJ_Et_JZ0", "Leading gFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
-    TH1F* back_h_jFEX_leading_SRJ_Et_JZ0 = new TH1F("back_h_jFEX_leading_SRJ_Et_JZ0", "Leading jFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
-    TH1F* back_h_jFEX_4thleading_SRJ_Et_JZ0 = new TH1F("back_h_jFEX_4thleading_SRJ_Et_JZ0", "4th Leading jFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 100, 0, 200);
+    TH1F* back_h_4th_leading_WtaCone_Et_JZ0 = bookTH1F("back_h_4th_leading_WtaCone_Et_JZ0", "4th Leading WTA Cone Jet E_{T} (JZ0, no HSTP);4th Leading WTA Cone Jet E_{T} [GeV];Fraction of Events", rateVsEffBins_Cone4thLead.size() - 1, rateVsEffBins_Cone4thLead.data());
+    TH1F* back_h_gFEX_leading_SRJ_Et_JZ0 = bookTH1F("back_h_gFEX_leading_SRJ_Et_JZ0", "Leading gFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 1 GeV", 820, 0, 820);
+    TH1F* back_h_jFEX_leading_SRJ_Et_JZ0 = bookTH1F("back_h_jFEX_leading_SRJ_Et_JZ0", "Leading jFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 1 GeV", 520, 0, 520);
+    TH1F* back_h_jFEX_4thleading_SRJ_Et_JZ0 = bookTH1F("back_h_jFEX_4thleading_SRJ_Et_JZ0", "4th Leading jFEX SRJ E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
     // Resimulated (Sim) JZ0 no-HSTP twins for the same three legs, binned like their all-JZ Sim
     // counterparts (back_h_gFEX_Sim_leading_SRJ_Et, back_h_jFEX_Sim_leading_SRJ_Et,
     // back_h_jFEX_Sim_4thleading_SRJ_Et) so the normalization overlays compare like with like.
     // The gFEX LRJ leg already has its Sim twin above (back_h_gFEX_Sim_leading_LRJ_Et_JZ0).
-    TH1F* back_h_gFEX_Sim_leading_SRJ_Et_JZ0 = new TH1F("back_h_gFEX_Sim_leading_SRJ_Et_JZ0", "Leading gFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
-    TH1F* back_h_jFEX_Sim_leading_SRJ_Et_JZ0 = new TH1F("back_h_jFEX_Sim_leading_SRJ_Et_JZ0", "Leading jFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
-    TH1F* back_h_jFEX_Sim_4thleading_SRJ_Et_JZ0 = new TH1F("back_h_jFEX_Sim_4thleading_SRJ_Et_JZ0", "4th Leading jFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 10 GeV", 100, 0, 200);
+    TH1F* back_h_gFEX_Sim_leading_SRJ_Et_JZ0 = bookTH1F("back_h_gFEX_Sim_leading_SRJ_Et_JZ0", "Leading gFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 1 GeV", 820, 0, 820);
+    TH1F* back_h_jFEX_Sim_leading_SRJ_Et_JZ0 = bookTH1F("back_h_jFEX_Sim_leading_SRJ_Et_JZ0", "Leading jFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 1 GeV", 520, 0, 520);
+    TH1F* back_h_jFEX_Sim_4thleading_SRJ_Et_JZ0 = bookTH1F("back_h_jFEX_Sim_4thleading_SRJ_Et_JZ0", "4th Leading jFEX SRJ (Resim) E_{T} (JZ0, no HSTP);E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
     // Truth-jet rate reference for the JZ0 vs JZ0-9 comparison: leading hard-scatter jet
     // (AntiKt4TruthDressedWZ) and leading in-time pileup jet (InTimeAntiKt4Truth), taken
     // straight from the ntuple so no trigger object enters the comparison. All four are filled
     // before the HSTP filter, so neither the JZ0 nor the JZ0-9 curve carries a selection.
-    TH1F* back_h_leading_truthWZ_SRJ_Et = new TH1F("back_h_leading_truthWZ_SRJ_Et", "Leading Truth HS Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_leading_truthWZ_SRJ_Et_JZ0 = new TH1F("back_h_leading_truthWZ_SRJ_Et_JZ0", "Leading Truth HS Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_leading_truthInTimePU_SRJ_Et = new TH1F("back_h_leading_truthInTimePU_SRJ_Et", "Leading In-Time Pileup Truth Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_leading_truthInTimePU_SRJ_Et_JZ0 = new TH1F("back_h_leading_truthInTimePU_SRJ_Et_JZ0", "Leading In-Time Pileup Truth Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthWZ_SRJ_Et = bookTH1F("back_h_leading_truthWZ_SRJ_Et", "Leading Truth HS Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthWZ_SRJ_Et_JZ0 = bookTH1F("back_h_leading_truthWZ_SRJ_Et_JZ0", "Leading Truth HS Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthInTimePU_SRJ_Et = bookTH1F("back_h_leading_truthInTimePU_SRJ_Et", "Leading In-Time Pileup Truth Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthInTimePU_SRJ_Et_JZ0 = bookTH1F("back_h_leading_truthInTimePU_SRJ_Et_JZ0", "Leading In-Time Pileup Truth Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
     // Leading truth jet in the event whatever its origin — the larger of the two leading jets
     // above. This is the spectrum the JZ0 vs JZ0-9 comparison is about: splitting it by origin
     // asks which collection the leading jet came from, not how the two slice sets compare.
-    TH1F* back_h_leading_truthAny_SRJ_Et = new TH1F("back_h_leading_truthAny_SRJ_Et", "Leading Truth Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_leading_truthAny_SRJ_Et_JZ0 = new TH1F("back_h_leading_truthAny_SRJ_Et_JZ0", "Leading Truth Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthAny_SRJ_Et = bookTH1F("back_h_leading_truthAny_SRJ_Et", "Leading Truth Jet E_{T} (JZ0-9, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_leading_truthAny_SRJ_Et_JZ0 = bookTH1F("back_h_leading_truthAny_SRJ_Et_JZ0", "Leading Truth Jet E_{T} (JZ0 only, no HSTP);E_{T} [GeV];Rate [Hz]", rateVsEffBins.size() - 1, rateVsEffBins.data());
     // As-filled spectrum twins of the pair above: same observable, max(leading
     // AntiKt4TruthDressedWZ jet, leading InTimeAntiKt4Truth jet), but binned like the per-JZ-slice
     // overlay plots (25 GeV bins out to 4 TeV) and drawn with no cumulative sum and no rescaling
     // of either curve. The all-JZ histogram is filled after the HSTP filter — the slice
     // combination as the rest of the analysis uses it — while the JZ0 histogram keeps the
     // no-HSTP convention shared by every other JZ0 twin in this macro.
-    TH1F* back_h_leading_truthAny_SRJ_Et_spectrum = new TH1F("back_h_leading_truthAny_SRJ_Et_spectrum", "Leading Truth Jet E_{T} (JZ0-9, HSTP);Leading Truth Jet E_{T} [GeV];Events / 25 GeV", 160, 0, 4000);
-    TH1F* back_h_leading_truthAny_SRJ_Et_spectrum_JZ0 = new TH1F("back_h_leading_truthAny_SRJ_Et_spectrum_JZ0", "Leading Truth Jet E_{T} (JZ0 only, no HSTP);Leading Truth Jet E_{T} [GeV];Events / 25 GeV", 160, 0, 4000);
+    TH1F* back_h_leading_truthAny_SRJ_Et_spectrum = bookTH1F("back_h_leading_truthAny_SRJ_Et_spectrum", "Leading Truth Jet E_{T} (JZ0-9, HSTP);Leading Truth Jet E_{T} [GeV];Events / 25 GeV", 160, 0, 4000);
+    TH1F* back_h_leading_truthAny_SRJ_Et_spectrum_JZ0 = bookTH1F("back_h_leading_truthAny_SRJ_Et_spectrum_JZ0", "Leading Truth Jet E_{T} (JZ0 only, no HSTP);Leading Truth Jet E_{T} [GeV];Events / 25 GeV", 160, 0, 4000);
     // SK and EtaSK WTA cone jets — background distributions
-    TH1F* back_h_leading_WTA_coneSK_cellstowers_pT = new TH1F("back_h_leading_WTA_coneSK_cellstowers_pT", "Leading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
-    TH1F* back_h_subleading_WTA_coneSK_cellstowers_pT = new TH1F("back_h_subleading_WTA_coneSK_cellstowers_pT", "Subleading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
-    TH1F* back_h_leading_WTA_coneEtaSK_cellstowers_pT = new TH1F("back_h_leading_WTA_coneEtaSK_cellstowers_pT", "Leading EtaSK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
-    TH1F* back_h_subleading_WTA_coneEtaSK_cellstowers_pT = new TH1F("back_h_subleading_WTA_coneEtaSK_cellstowers_pT", "Subleading EtaSK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
+    TH1F* back_h_leading_WTA_coneSK_cellstowers_pT = bookTH1F("back_h_leading_WTA_coneSK_cellstowers_pT", "Leading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
+    TH1F* back_h_subleading_WTA_coneSK_cellstowers_pT = bookTH1F("back_h_subleading_WTA_coneSK_cellstowers_pT", "Subleading SK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
+    TH1F* back_h_leading_WTA_coneEtaSK_cellstowers_pT = bookTH1F("back_h_leading_WTA_coneEtaSK_cellstowers_pT", "Leading EtaSK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
+    TH1F* back_h_subleading_WTA_coneEtaSK_cellstowers_pT = bookTH1F("back_h_subleading_WTA_coneEtaSK_cellstowers_pT", "Subleading EtaSK WTA Cone Jet p_{T};p_{T} [GeV];Fraction of Events / 25 GeV", 32, 0, 800);
 
-    TH1F* back_h_jFEX_leading_LRJ_Et = new TH1F("back_h_jFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* back_h_jFEX_subleading_LRJ_Et = new TH1F("back_h_jFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    TH1F* back_h_jFEX_leading_LRJ_Et = bookTH1F("back_h_jFEX_leading_LRJ_Et", "Leading LRJ Et Distribution;E_{T} [GeV];% of Leading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
+    TH1F* back_h_jFEX_subleading_LRJ_Et = bookTH1F("back_h_jFEX_subleading_LRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading LRJs / 25 GeV", rateVsEffBins_EtOnly.size() - 1, rateVsEffBins_EtOnly.data());
     // jFEX SRJ Sim (resimulated) — background rate histograms
-    TH1F* back_h_jFEX_Sim_leading_SRJ_Et = new TH1F("back_h_jFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
-    TH1F* back_h_jFEX_Sim_subleading_SRJ_Et = new TH1F("back_h_jFEX_Sim_subleading_SRJ_Et", "Subleading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading SRJs / 10 GeV", 52, 0, 520);
+    TH1F* back_h_jFEX_Sim_leading_SRJ_Et = bookTH1F("back_h_jFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 520, 0, 520);
+    TH1F* back_h_jFEX_Sim_subleading_SRJ_Et = bookTH1F("back_h_jFEX_Sim_subleading_SRJ_Et", "Subleading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Subleading SRJs / 1 GeV", 520, 0, 520);
 
-    TH1F* back_h_jFEX_Sim_4thleading_SRJ_Et = new TH1F("back_h_jFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 100, 0, 200);
-    TH1F* back_h_jFEX_4thleading_SRJ_Et = new TH1F("back_h_jFEX_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 100, 0, 200);
+    TH1F* back_h_jFEX_Sim_4thleading_SRJ_Et = bookTH1F("back_h_jFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
+    TH1F* back_h_jFEX_4thleading_SRJ_Et = bookTH1F("back_h_jFEX_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
 
-    TH1F* back_h_gFEX_Sim_leading_SRJ_Et = new TH1F("back_h_gFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
-    TH1F* back_h_gFEX_Sim_4thleading_SRJ_Et = new TH1F("back_h_gFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+    TH1F* back_h_gFEX_Sim_leading_SRJ_Et = bookTH1F("back_h_gFEX_Sim_leading_SRJ_Et", "Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 820, 0, 820);
+    TH1F* back_h_gFEX_Sim_4thleading_SRJ_Et = bookTH1F("back_h_gFEX_Sim_4thleading_SRJ_Et", "4th Leading SRJ Et (Sim) Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
 
-    TH1F* back_h_gFEX_leading_SRJ_Et = new TH1F("back_h_gFEX_leading_SRJ_Et", "Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 82, 0, 820);
-    TH1F* back_h_gFEX_4thleading_SRJ_Et = new TH1F("back_h_gFEX_4thleading_SRJ_Et", "4th Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 2 GeV", 100, 0, 200);
+    TH1F* back_h_gFEX_leading_SRJ_Et = bookTH1F("back_h_gFEX_leading_SRJ_Et", "Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 820, 0, 820);
+    TH1F* back_h_gFEX_4thleading_SRJ_Et = bookTH1F("back_h_gFEX_4thleading_SRJ_Et", "4th Leading SRJ Et Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 200, 0, 200);
     // jFEX SRJ (existing hardware objects) — background rate histogram
-    TH1F* back_h_jFEX_leading_SRJ_Et = new TH1F("back_h_jFEX_leading_SRJ_Et", "Leading jFEX SRJ E_{T} Distribution;E_{T} [GeV];% of Leading SRJs / 10 GeV", 52, 0, 520);
+    TH1F* back_h_jFEX_leading_SRJ_Et = bookTH1F("back_h_jFEX_leading_SRJ_Et", "Leading jFEX SRJ E_{T} Distribution;E_{T} [GeV];% of Leading SRJs / 1 GeV", 520, 0, 520);
 
-    TH1F* back_h_offlineLRJ_Et = new TH1F("back_h_offlineLRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of Offline LRJs / 20 GeV", 40, 0, 800);
-    TH1F* back_h_leading_offlineLRJ_Et = new TH1F("back_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];% of Leading Offline LRJs / 20 GeV", 40, 0, 800);
-    TH1F* back_h_subleading_offlineLRJ_Et = new TH1F("back_h_subleading_offlineLRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading Offline LRJs / 20 GeV", 40, 0, 800);
+    TH1F* back_h_offlineLRJ_Et = bookTH1F("back_h_offlineLRJ_Et", "LRJ Et Distribution;E_{T} [GeV];% of Offline LRJs / 20 GeV", 40, 0, 800);
+    TH1F* back_h_leading_offlineLRJ_Et = bookTH1F("back_h_leading_offlineLRJ_Et", "Leading LRJ Et Distribution;Leading Offline LRJ E_{T} [GeV];% of Leading Offline LRJs / 20 GeV", 40, 0, 800);
+    TH1F* back_h_subleading_offlineLRJ_Et = bookTH1F("back_h_subleading_offlineLRJ_Et", "Subleading LRJ Et Distribution;E_{T} [GeV];% of Subleading Offline LRJs / 20 GeV", 40, 0, 800);
 
-    TH1F* back_h_leading_WTA_conecellstowers_pT = new TH1F("back_h_leading_WTA_conecellstowers_pT", "Leading LRJ pT Distribution;Lead. WTA Cone CellsTowers Jet p_{T} [GeV];% of Leading WTA Cone CellsTowers Jets / 25 GeV", 32, 0, 800);
-    TH1F* back_h_subleading_WTA_conecellstowers_pT = new TH1F("back_h_subleading_WTA_conecellstowers_pT", "Subleading LRJ pT Distribution;Sublead. Cone CellsTowers Jet p_{T} [GeV];% of Subleading WTACone CellsTowers Jets / 25 GeV", 32, 0, 800);
+    TH1F* back_h_leading_WTA_conecellstowers_pT = bookTH1F("back_h_leading_WTA_conecellstowers_pT", "Leading LRJ pT Distribution;Lead. WTA Cone CellsTowers Jet p_{T} [GeV];% of Leading WTA Cone CellsTowers Jets / 25 GeV", 32, 0, 800);
+    TH1F* back_h_subleading_WTA_conecellstowers_pT = bookTH1F("back_h_subleading_WTA_conecellstowers_pT", "Subleading LRJ pT Distribution;Sublead. Cone CellsTowers Jet p_{T} [GeV];% of Subleading WTACone CellsTowers Jets / 25 GeV", 32, 0, 800);
 
-    TH1F* back_h_leading_WTA_conebasicclusters_pT = new TH1F("back_h_leading_WTA_conebasicclusters_pT", "Leading LRJ pT Distribution;Lead. WTA Cone BasicClusters Jet p_{T} [GeV];% of Leading WTA Cone BasicClusters Jets / 25 GeV", 32, 0, 800);
-    TH1F* back_h_subleading_WTA_conebasicclusters_pT = new TH1F("back_h_subleading_WTA_conebasicclusters_pT", "Subleading LRJ pT Distribution;Sublead. WTA Cone BasicClusters Jet p_{T} [GeV];% of Subleading WTA Cone BasicClusters Jets / 25 GeV", 32, 0, 800);
+    TH1F* back_h_leading_WTA_conebasicclusters_pT = bookTH1F("back_h_leading_WTA_conebasicclusters_pT", "Leading LRJ pT Distribution;Lead. WTA Cone BasicClusters Jet p_{T} [GeV];% of Leading WTA Cone BasicClusters Jets / 25 GeV", 32, 0, 800);
+    TH1F* back_h_subleading_WTA_conebasicclusters_pT = bookTH1F("back_h_subleading_WTA_conebasicclusters_pT", "Subleading LRJ pT Distribution;Sublead. WTA Cone BasicClusters Jet p_{T} [GeV];% of Subleading WTA Cone BasicClusters Jets / 25 GeV", 32, 0, 800);
 
-    TH1F* back_h_WTA_conecellstowers_multiplicity = new TH1F("back_h_WTA_conecellstowers_multiplicity", "Leading LRJ pT Distribution;Num. Cone WTA CellsTowers Jets / Event; Fraction of Events ", 25, 0, 25);
-    TH1F* back_h_WTA_conebasicclusters_multiplicity = new TH1F("back_h_WTA_conebasicclusters_multiplicity", "Leading LRJ pT Distribution;Num. WTA Cone BasicCluster Jets / Event; Fraction of Events ", 25, 0, 25);
+    TH1F* back_h_WTA_conecellstowers_multiplicity = bookTH1F("back_h_WTA_conecellstowers_multiplicity", "Leading LRJ pT Distribution;Num. Cone WTA CellsTowers Jets / Event; Fraction of Events ", 25, 0, 25);
+    TH1F* back_h_WTA_conebasicclusters_multiplicity = bookTH1F("back_h_WTA_conebasicclusters_multiplicity", "Leading LRJ pT Distribution;Num. WTA Cone BasicCluster Jets / Event; Fraction of Events ", 25, 0, 25);
 
-    TH1F* back_h_LRJ_E = new TH1F("back_h_LRJ_E", "LRJ Et Distribution;Energy [GeV];% of LRJs / 10 GeV", 100, 0, 1000);
-    TH1F* back_h_LRJ_eta = new TH1F("back_h_LRJ_eta", "LRJ Eta Distribution;#eta;Counts", 50, -5, 5);
-    TH1F* back_h_LRJ_phi = new TH1F("back_h_LRJ_phi", "LRJ Phi Distribution;#phi;Counts", 32, -3.2, 3.2);
+    TH1F* back_h_LRJ_E = bookTH1F("back_h_LRJ_E", "LRJ Et Distribution;Energy [GeV];% of LRJs / 10 GeV", 100, 0, 1000);
+    TH1F* back_h_LRJ_eta = bookTH1F("back_h_LRJ_eta", "LRJ Eta Distribution;#eta;Counts", 50, -5, 5);
+    TH1F* back_h_LRJ_phi = bookTH1F("back_h_LRJ_phi", "LRJ Phi Distribution;#phi;Counts", 32, -3.2, 3.2);
 
-    TH1F* back_h_leading_LRJ_gFexLRJ_deltaEt = new TH1F("back_h_leading_LRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -350, 150);
-    TH1F* back_h_leading_LRJ_offlineLRJ_deltaEt = new TH1F("back_h_leading_LRJ_offlineLRJ_deltaEt", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) [GeV];% of Leading LRJs / 10 GeV",  50, -150, 350);
+    TH1F* back_h_leading_LRJ_gFexLRJ_deltaEt = bookTH1F("back_h_leading_LRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFex - JetTagger) [GeV];% of Leading LRJs / 10 GeV", 50, -350, 150);
+    TH1F* back_h_leading_LRJ_offlineLRJ_deltaEt = bookTH1F("back_h_leading_LRJ_offlineLRJ_deltaEt", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) [GeV];% of Leading LRJs / 10 GeV",  50, -150, 350);
 
-    TH1F* back_h_leading_offlineLRJ_gFexLRJ_deltaEt = new TH1F("back_h_leading_offlineLRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    TH1F* back_h_leading_offlineLRJ_gFexLRJ_deltaEt = bookTH1F("back_h_leading_offlineLRJ_gFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
     // Resim-object twin used by the STANDALONE leading_offlineLRJ_gFexLRJ_deltaEt plot
     // (the AOD histogram above is retained for the vs-JetTagger comparison overlay).
-    TH1F* back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim = new TH1F("back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim", "#Delta E_{T} Leading gFex LRJ (Resim), Offline LRJ;#Delta E_{T} (Offline - gFEX Resim) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
-    TH1F* back_h_leading_offlineLRJ_jFexLRJ_deltaEt = new TH1F("back_h_leading_offlineLRJ_jFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    TH1F* back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim = bookTH1F("back_h_leading_offlineLRJ_gFexLRJ_deltaEt_resim", "#Delta E_{T} Leading gFex LRJ (Resim), Offline LRJ;#Delta E_{T} (Offline - gFEX Resim) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
+    TH1F* back_h_leading_offlineLRJ_jFexLRJ_deltaEt = bookTH1F("back_h_leading_offlineLRJ_jFexLRJ_deltaEt", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) [GeV];% of Leading LRJs / 10 GeV", 50, -150, 350);
 
-    TH1F* back_h_leading_LRJ_gFexLRJ_Et_resolution = new TH1F("back_h_leading_LRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFEX - JetTagger) / E_{T, gFEX} [GeV];% of Leading LRJs / 0.1", 40, -2, 2);
-    TH1F* back_h_leading_LRJ_offlineLRJ_Et_resolution = new TH1F("back_h_leading_LRJ_offlineLRJ_Et_resolution", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 20, -1, 1);
+    TH1F* back_h_leading_LRJ_gFexLRJ_Et_resolution = bookTH1F("back_h_leading_LRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (gFEX - JetTagger) / E_{T, gFEX} [GeV];% of Leading LRJs / 0.1", 40, -2, 2);
+    TH1F* back_h_leading_LRJ_offlineLRJ_Et_resolution = bookTH1F("back_h_leading_LRJ_offlineLRJ_Et_resolution", "#Delta E_{T} Leading Offline LRJ, Output LRJ, ;#Delta E_{T} (Offline - JetTagger) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 20, -1, 1);
 
-    TH1F* back_h_leading_offlineLRJ_gFexLRJ_Et_resolution = new TH1F("back_h_leading_offlineLRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 50, -3.5, 1.5);
-    TH1F* back_h_leading_offlineLRJ_jFexLRJ_Et_resolution = new TH1F("back_h_leading_offlineLRJ_jFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - jFEX) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 40, -3, 1);
+    TH1F* back_h_leading_offlineLRJ_gFexLRJ_Et_resolution = bookTH1F("back_h_leading_offlineLRJ_gFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - gFEX) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 50, -3.5, 1.5);
+    TH1F* back_h_leading_offlineLRJ_jFexLRJ_Et_resolution = bookTH1F("back_h_leading_offlineLRJ_jFexLRJ_Et_resolution", "#Delta E_{T} Leading gFex LRJ, Output LRJ, ;#Delta E_{T} (Offline - jFEX) / E_{T, Offline} [GeV];% of Leading LRJs / 0.1", 40, -3, 1);
 
-    TH1F* back_h_leading_LRJ_gFexLRJ_deltaR = new TH1F("back_h_leading_LRJ_gFexLRJ_deltaR", "#Delta R Leading gFex LRJ, Output LRJ, ;#Delta R (gFex, JetTagger);% of Leading LRJs / 0.1", 50, 0, 5);
-    TH1F* back_h_leading_LRJ_offlineLRJ_deltaR = new TH1F("back_h_leading_LRJ_offlineLRJ_deltaR", "#Delta R Leading Offline LRJ, Output LRJ, ;#Delta R (Offline, JetTagger);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* back_h_leading_LRJ_gFexLRJ_deltaR = bookTH1F("back_h_leading_LRJ_gFexLRJ_deltaR", "#Delta R Leading gFex LRJ, Output LRJ, ;#Delta R (gFex, JetTagger);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* back_h_leading_LRJ_offlineLRJ_deltaR = bookTH1F("back_h_leading_LRJ_offlineLRJ_deltaR", "#Delta R Leading Offline LRJ, Output LRJ, ;#Delta R (Offline, JetTagger);% of Leading LRJs / 0.1", 50, 0, 5);
 
-    TH1F* back_h_first_LRJ_jFexSRJ_deltaR = new TH1F("back_h_first_LRJ_jFexSRJ_deltaR", "#Delta R Leading jFex SRJ, Output LRJ, ;#Delta R (Lead. jFex SRJ, JetTagger LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
-    TH1F* back_h_second_LRJ_jFexSRJ_deltaR = new TH1F("back_h_second_LRJ_jFexSRJ_deltaR", "#Delta R Subleading jFex SRJ, Output LRJ, ;#Delta R (Sublead. jFex SRJ, JetTagger LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* back_h_first_LRJ_jFexSRJ_deltaR = bookTH1F("back_h_first_LRJ_jFexSRJ_deltaR", "#Delta R Leading jFex SRJ, Output LRJ, ;#Delta R (Lead. jFex SRJ, JetTagger LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* back_h_second_LRJ_jFexSRJ_deltaR = bookTH1F("back_h_second_LRJ_jFexSRJ_deltaR", "#Delta R Subleading jFex SRJ, Output LRJ, ;#Delta R (Sublead. jFex SRJ, JetTagger LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
 
-    TH1F* back_h_lead_sublead_LRJ_deltaR = new TH1F("back_h_lead_sublead_LRJ_deltaR", "#Delta R Leading, Subleading LRJ, ;#Delta R (Lead., Sublead. Output LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
+    TH1F* back_h_lead_sublead_LRJ_deltaR = bookTH1F("back_h_lead_sublead_LRJ_deltaR", "#Delta R Leading, Subleading LRJ, ;#Delta R (Lead., Sublead. Output LRJ);% of Leading LRJs / 0.1", 50, 0, 5);
 
-    TH1F* back_h_Mjj = new TH1F("back_h_Mjj", "Invariant Mass of 2 LRJs;Invariant Mass of 2 LRJs [GeV]; % Events / 20 GeV", 75, 0, 1500);
+    TH1F* back_h_Mjj = bookTH1F("back_h_Mjj", "Invariant Mass of 2 LRJs;Invariant Mass of 2 LRJs [GeV]; % Events / 20 GeV", 75, 0, 1500);
 
-    TH2F *backTopo422Highest128SeedPositionsEv0 = new TH2F("backTopo422Highest128SeedPositionsEv0", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *backTopo422Highest128SeedPositionsEv0 = bookTH2F("backTopo422Highest128SeedPositionsEv0", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
 
@@ -4857,7 +5113,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > backLRJEtEv0;
     std::vector<double > backLRJPsi_REv0;
 
-    TH2F *backTopo422Highest128SeedPositionsEv1 = new TH2F("backTopo422Highest128SeedPositionsEv1", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *backTopo422Highest128SeedPositionsEv1 = bookTH2F("backTopo422Highest128SeedPositionsEv1", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
 
@@ -4867,7 +5123,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > backLRJEtEv1;
     std::vector<double > backLRJPsi_REv1;
 
-    TH2F *backTopo422Highest128SeedPositionsEv2 = new TH2F("backTopo422Highest128SeedPositionsEv2", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *backTopo422Highest128SeedPositionsEv2 = bookTH2F("backTopo422Highest128SeedPositionsEv2", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
     
@@ -4877,7 +5133,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > backLRJEtEv2;
     std::vector<double > backLRJPsi_REv2;
 
-    TH2F *backTopo422Highest128SeedPositionsEv3 = new TH2F("backTopo422Highest128SeedPositionsEv3", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *backTopo422Highest128SeedPositionsEv3 = bookTH2F("backTopo422Highest128SeedPositionsEv3", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
 
@@ -4887,7 +5143,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double > backLRJEtEv3;
     std::vector<double > backLRJPsi_REv3;
 
-    TH2F *backTopo422Highest128SeedPositionsEv4 = new TH2F("backTopo422Highest128SeedPositionsEv4", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
+    TH2F *backTopo422Highest128SeedPositionsEv4 = bookTH2F("backTopo422Highest128SeedPositionsEv4", "Sum of Topo422 E_{T} in Each Bin; #eta;#phi", 
                         100, -5, 5,   
                         64, -3.2, 3.2);  
 
@@ -4927,6 +5183,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     std::vector<double> back_4thConeEt_perEvt(num_processed_events_background, 0.0);
     std::vector<double> back_HT_perEvt(num_processed_events_background, 0.0);
     std::vector<double> back_weight_perEvt(num_processed_events_background, 0.0);
+    // Offline leading LRJ E_T / mass per background event, recorded by background loop 2.
+    // Only the "unique" histograms below need them, and those are filled in the PLOT stage
+    // (their cut uses full-sample cone thresholds a chunk cannot know) — so these ride
+    // across the stage boundary on the per-event cache tree. -1 = no offline LRJ.
+    std::vector<double> back_offlineLeadEt_perEvt(num_processed_events_background, -1.0);
+    std::vector<double> back_offlineLeadMass_perEvt(num_processed_events_background, -1.0);
     //std::cout << "fileIt : " << fileIt << "\n";
     // Extract algorithm config from the jet tagger file name, starting after "14TeV_"
     // This gives a directory name based on algorithm parameters rather than signal sample name.
@@ -4952,8 +5214,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // handle the wildcard paths used to chain the JZ slices, since ifstream opens one literal
     // filename. signalInputFile / backgroundInputFile above already cover this via
     // ChainSource, which expands the wildcard.)
+    gLRJState.strict = false;   // end of the raw-declarations region (see strict = true above)
     _lap(Form("[file %u] histogram declarations", fileIt));
 
+    // Signal loop 1 runs in EVERY stage, including compute. It was guarded off at first,
+    // on the assumption that compute needs background only — but the rate-vs-eff
+    // derivations sit between the two background loops and cannot be skipped (they are
+    // one straight-line region whose declarations the plot code below still needs), and
+    // on empty signal histograms they produce eff = 0 everywhere and then die in the scan
+    // helpers with bad_alloc / out_of_range. Its whole-sample fills are removed from the
+    // state file by the baseline subtraction taken immediately below, so running it here
+    // costs ~17 s per chunk and changes nothing that gets saved.
     for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt ++ ){
         // Total signal-event cap (kMaxEventsPerSlice). Disabled when < 0.
         if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
@@ -5100,6 +5371,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
     }
     _lap(Form("[file %u] signal loop 1 (rate)", fileIt));
+    // Baseline for the save-time subtraction: taken after the signal loop and before either
+    // background loop, so the saved state holds background fills only (see SnapshotBaseline).
+    gLRJState.SnapshotBaseline();
 
 
     // --- HSTP debug counters (loop 1: rate loop) ---
@@ -5110,7 +5384,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // Same skip pattern must hold across every background loop so that per-event
     // vectors (sized to num_processed_events_background) stay index-consistent.
     std::array<unsigned int, nJZSlices_> back_jz_count_rate = {};
-    for(unsigned int iEvt = 0; iEvt < num_processed_events_background; iEvt ++ ){
+    // Background loop 1 (rate): compute-stage (raw fills only — verified free of
+    // scan-derived thresholds). Chunk jobs run their slice of the global entry index;
+    // mono keeps the full range through the lrjChunkBounds defaults, and the plot stage
+    // skips the loop entirely (histograms arrive from the state file instead).
+    Long64_t lrjB1First = 0, lrjB1End = 0;
+    lrjChunkBounds((Long64_t)num_processed_events_background, lrjB1First, lrjB1End);
+    for(unsigned int iEvt = (unsigned int)lrjB1First; LRJRunEventLoops() && iEvt < (unsigned int)lrjB1End; iEvt ++ ){
         if (kDebugEventHeartbeat && iEvt % kDebugEventHeartbeat == 0)
             std::cout << "[heartbeat] background rate loop, event " << iEvt << " / "
                       << num_processed_events_background << std::endl;
@@ -5402,6 +5682,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     }
 
     _lap(Form("[file %u] background loop 1 (rate) — event loop only", fileIt));
+    // sumOfBackgroundEventWeight is accumulated by the loop above (compute) but consumed by
+    // the per-file plotting sections (plot) — the one background scalar that has to cross
+    // the stage boundary. Chunk sums add under hadd, exactly like histogram bins.
+    if (gLRJState.stage == LRJStage::kCompute)
+        lrjSaveScalar("lrjScalar_sumOfBackgroundEventWeight", sumOfBackgroundEventWeight);
+    else if (gLRJState.stage == LRJStage::kPlot)
+        sumOfBackgroundEventWeight = lrjLoadScalar("lrjScalar_sumOfBackgroundEventWeight");
     // --- HSTP debug summary (loop 1: rate loop) ---
     std::cout << "\n=== [HSTP debug] Loop 1 (rate loop) — events per JZ slice ===\n";
     std::cout << "  JZ | Total events | Pass HSTP | Pass fraction\n";
@@ -5433,18 +5720,49 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     else if(subjetEtThreshold == 30.0) subjetEtString = "_30GeVSubjets/";
     else if(subjetEtThreshold == 35.0) subjetEtString = "_35GeVSubjets/";
     TString rateVsEffFileDir = "rateVsEff/" + algorithmConfigurations[fileIt] + subjetEtString;
+    // The rate-vs-eff derivations below sit BETWEEN the two compute-stage background loops,
+    // so a compute job traverses them (cost ~1 s, histogram math on this chunk's background
+    // plus EMPTY signal). Their numbers are garbage in that stage and their ~45 SaveAs calls
+    // would overwrite the real PDFs — every one writes under this directory, so pointing it
+    // at scratch is the entire fix. The real curves are produced by the plot stage.
+    if (gLRJState.stage == LRJStage::kCompute)
+        rateVsEffFileDir = TString(gLRJState.stateDir.c_str()) + "computeScratch/" + rateVsEffFileDir;
 
-    gSystem->mkdir(rateVsEffFileDir);
+    gSystem->mkdir(rateVsEffFileDir, /*recursive=*/true);   // scratch path is nested
 
     // Companion to each "threshold_views_<tag>.pdf": the background rate vs. threshold on
     // its own, drawn "AP" (markers + error bars) like the rate-vs-eff plots instead of as a
     // histogram. Also registers the curve for the multi-file overlay drawn at the very end.
-    auto SaveRateVsThrViews = [&](TH1* hRate_vsThr, const char* tag) {
-        if (!hRate_vsThr) return;
+    auto SaveRateVsThrViews = [&](TH1* hRate_vsThrIn, const char* tag) {
+        if (!hRate_vsThrIn) return;
         // Named up front rather than with nested Form() calls, which share one static buffer
         const TString graphName  = TString::Format("gRate_vsThr_%s_%u", tag, fileIt);
         const TString canvasName = TString::Format("cRateVsThr_%s_%u", tag, fileIt);
         const TString outputPath = rateVsEffFileDir + TString::Format("rate_vs_threshold_%s.pdf", tag);
+
+        // --- Binomial per-crossing conversion (kApplyBinomialRateVsThr) -----------------
+        // OFF by default; see the flag's definition for why. When on, the input is treated
+        // as a COLLISION-level cumulative rate — HERNTupler runs in luminosity mode
+        // (useRateNormalization = false), so the weights already carry sigma x L_inst and
+        // no extra scale applies, hence collisionRateScale = 1.0, matching the standalone
+        // rate-normalisation overlay further down. mu comes from gPileup, set per file by
+        // SetPileupFromPath from the r-tag, so each curve converts with its own value.
+        // Legends and titles are untouched either way.
+        TH1* hRate_vsThr = hRate_vsThrIn;
+        const bool applyBinomHere = (gPileup == 140) ? kApplyBinomialRateVsThr140
+                                                     : kApplyBinomialRateVsThr200;
+        if (applyBinomHere) {
+            // Per-pileup collision-rate correction (see kBinomialCollisionRateScale*):
+            // repairs the L_inst-vs-mu inconsistency in the stored weights at plot time.
+            const double binomScale = (gPileup == 140) ? kBinomialCollisionRateScale140
+                                                       : kBinomialCollisionRateScale200;
+            TH1* hConv = MakeBinomialCrossingRateHist(
+                hRate_vsThrIn,
+                TString::Format("%s_binomialXing", graphName.Data()).Data(),
+                binomScale,
+                static_cast<double>(gPileup));
+            if (hConv) hRate_vsThr = hConv;   // null => fall back to the as-filled curve
+        }
 
         auto* g = MakeRateVsThrGraph(hRate_vsThr, graphName.Data());
 
@@ -6734,52 +7052,57 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     // ---- Turn-on histograms (efficiency vs offline leading LRJ Et) ---------------
     // Declared here; filled in the second signal event loop below.
-    TH1F* sig_h_offlineLRJ_Et_denom_turnon = new TH1F("sig_h_offlineLRJ_Et_denom_turnon",
-        "Turn-on denominator;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_jetTagger = new TH1F("sig_h_offlineLRJ_Et_num_jetTagger",
-        "Turn-on JetTagger;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_gFEX = new TH1F("sig_h_offlineLRJ_Et_num_gFEX",
-        "Turn-on gFEX LRJ;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_gFEX_Sim = new TH1F("sig_h_offlineLRJ_Et_num_gFEX_Sim",
-        "Turn-on gFEX LRJ Resim;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_jFEX_Sim = new TH1F("sig_h_offlineLRJ_Et_num_jFEX_Sim",
-        "Turn-on jFEX SRJ Resim;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_jetTagger_40kHz = new TH1F("sig_h_offlineLRJ_Et_num_jetTagger_40kHz",
-        "Turn-on JetTagger @ 40 kHz;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_gFEX_40kHz = new TH1F("sig_h_offlineLRJ_Et_num_gFEX_40kHz",
-        "Turn-on gFEX LRJ @ 40 kHz;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_gFEX_Sim_40kHz = new TH1F("sig_h_offlineLRJ_Et_num_gFEX_Sim_40kHz",
-        "Turn-on gFEX LRJ Resim @ 40 kHz;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_jFEX_SRJ = new TH1F("sig_h_offlineLRJ_Et_num_jFEX_SRJ",
-        "Turn-on jFEX SRJ;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
-    TH1F* sig_h_offlineLRJ_Et_num_WTA_cone_jFEXcmp = new TH1F("sig_h_offlineLRJ_Et_num_WTA_cone_jFEXcmp",
-        "Turn-on WTA Cone;Offline Leading LRJ E_{T} [GeV];Events", rateVsEffBins.size() - 1, rateVsEffBins.data());
+    // Binned 75 x 10 GeV over 50-800 to match the 40 kHz turn-ons built in the plot stage
+    // (h_num_Et_35 / h_den_35). They used to be on rateVsEffBins — 5 GeV below 400 — so the
+    // gFEX reference came out at twice the point density of the GEP curves it is overlaid
+    // with, and offset half a bin from them. Outside the strict declarations region, so this
+    // is a plot-stage-only change: no state files are affected.
+    TH1F* sig_h_offlineLRJ_Et_denom_turnon = bookTH1F("sig_h_offlineLRJ_Et_denom_turnon",
+        "Turn-on denominator;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_jetTagger = bookTH1F("sig_h_offlineLRJ_Et_num_jetTagger",
+        "Turn-on JetTagger;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_gFEX = bookTH1F("sig_h_offlineLRJ_Et_num_gFEX",
+        "Turn-on gFEX LRJ;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_gFEX_Sim = bookTH1F("sig_h_offlineLRJ_Et_num_gFEX_Sim",
+        "Turn-on gFEX LRJ Resim;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_jFEX_Sim = bookTH1F("sig_h_offlineLRJ_Et_num_jFEX_Sim",
+        "Turn-on jFEX SRJ Resim;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_jetTagger_40kHz = bookTH1F("sig_h_offlineLRJ_Et_num_jetTagger_40kHz",
+        "Turn-on JetTagger @ 40 kHz;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_gFEX_40kHz = bookTH1F("sig_h_offlineLRJ_Et_num_gFEX_40kHz",
+        "Turn-on gFEX LRJ @ 40 kHz;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_gFEX_Sim_40kHz = bookTH1F("sig_h_offlineLRJ_Et_num_gFEX_Sim_40kHz",
+        "Turn-on gFEX LRJ Resim @ 40 kHz;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_jFEX_SRJ = bookTH1F("sig_h_offlineLRJ_Et_num_jFEX_SRJ",
+        "Turn-on jFEX SRJ;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
+    TH1F* sig_h_offlineLRJ_Et_num_WTA_cone_jFEXcmp = bookTH1F("sig_h_offlineLRJ_Et_num_WTA_cone_jFEXcmp",
+        "Turn-on WTA Cone;Offline Leading LRJ E_{T} [GeV];Events", 75, 50, 800);
     // jFEX SRJ turn-on vs truth small-R jets (AntiKt4 dressedWZ)
-    TH1F* sig_h_truthSRJ_Et_denom_jFEX_turnon = new TH1F("sig_h_truthSRJ_Et_denom_jFEX_turnon",
+    TH1F* sig_h_truthSRJ_Et_denom_jFEX_turnon = bookTH1F("sig_h_truthSRJ_Et_denom_jFEX_turnon",
         "Turn-on denominator (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
-    TH1F* sig_h_truthSRJ_Et_num_jFEX_Sim = new TH1F("sig_h_truthSRJ_Et_num_jFEX_Sim",
+    TH1F* sig_h_truthSRJ_Et_num_jFEX_Sim = bookTH1F("sig_h_truthSRJ_Et_num_jFEX_Sim",
         "Turn-on jFEX SRJ Resim (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
-    TH1F* sig_h_truthSRJ_Et_num_jFEX_SRJ = new TH1F("sig_h_truthSRJ_Et_num_jFEX_SRJ",
+    TH1F* sig_h_truthSRJ_Et_num_jFEX_SRJ = bookTH1F("sig_h_truthSRJ_Et_num_jFEX_SRJ",
         "Turn-on jFEX SRJ (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
-    TH1F* sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp = new TH1F("sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp",
+    TH1F* sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp = bookTH1F("sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp",
         "Turn-on WTA Cone (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
-    TH1F* sig_h_truthSRJ_Et_num_gFEX_SRJ = new TH1F("sig_h_truthSRJ_Et_num_gFEX_SRJ",
+    TH1F* sig_h_truthSRJ_Et_num_gFEX_SRJ = bookTH1F("sig_h_truthSRJ_Et_num_gFEX_SRJ",
         "Turn-on gFEX SRJ (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
-    TH1F* sig_h_truthSRJ_Et_num_gFEX_Sim = new TH1F("sig_h_truthSRJ_Et_num_gFEX_Sim",
+    TH1F* sig_h_truthSRJ_Et_num_gFEX_Sim = bookTH1F("sig_h_truthSRJ_Et_num_gFEX_Sim",
         "Turn-on gFEX SRJ Resim (truth SRJ);Truth Leading SRJ E_{T} [GeV];Events", 40, 0, 400);
 
     // 4th-leading SRJ turn-on @ 100 kHz vs truth 4th-leading AntiKt4 dressedWZ jet E_T
-    TH1F* sig_h_truth4thSRJ_Et_denom_turnon = new TH1F("sig_h_truth4thSRJ_Et_denom_turnon",
+    TH1F* sig_h_truth4thSRJ_Et_denom_turnon = bookTH1F("sig_h_truth4thSRJ_Et_denom_turnon",
         "Turn-on denominator (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
-    TH1F* sig_h_truth4thSRJ_Et_num_jFEX_SRJ = new TH1F("sig_h_truth4thSRJ_Et_num_jFEX_SRJ",
+    TH1F* sig_h_truth4thSRJ_Et_num_jFEX_SRJ = bookTH1F("sig_h_truth4thSRJ_Et_num_jFEX_SRJ",
         "Turn-on jFEX SRJ (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
-    TH1F* sig_h_truth4thSRJ_Et_num_jFEX_Sim = new TH1F("sig_h_truth4thSRJ_Et_num_jFEX_Sim",
+    TH1F* sig_h_truth4thSRJ_Et_num_jFEX_Sim = bookTH1F("sig_h_truth4thSRJ_Et_num_jFEX_Sim",
         "Turn-on jFEX SRJ Resim (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
-    TH1F* sig_h_truth4thSRJ_Et_num_gFEX_SRJ = new TH1F("sig_h_truth4thSRJ_Et_num_gFEX_SRJ",
+    TH1F* sig_h_truth4thSRJ_Et_num_gFEX_SRJ = bookTH1F("sig_h_truth4thSRJ_Et_num_gFEX_SRJ",
         "Turn-on gFEX SRJ (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
-    TH1F* sig_h_truth4thSRJ_Et_num_gFEX_Sim = new TH1F("sig_h_truth4thSRJ_Et_num_gFEX_Sim",
+    TH1F* sig_h_truth4thSRJ_Et_num_gFEX_Sim = bookTH1F("sig_h_truth4thSRJ_Et_num_gFEX_Sim",
         "Turn-on gFEX SRJ Resim (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
-    TH1F* sig_h_truth4thSRJ_Et_num_WTA_cone = new TH1F("sig_h_truth4thSRJ_Et_num_WTA_cone",
+    TH1F* sig_h_truth4thSRJ_Et_num_WTA_cone = bookTH1F("sig_h_truth4thSRJ_Et_num_WTA_cone",
         "Turn-on WTA Cone (truth 4th SRJ);Truth 4th Leading SRJ E_{T} [GeV];Events", 40, 0, 200);
 
     // ******************** OVERLAYS (LEADING only): JetTagger vs gFEX vs gFEX Resim ********************
@@ -7096,7 +7419,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     std::vector<double> sig_lead_constituent_mass_vec(num_processed_events_signal, 0.0);
     std::vector<double> sig_subl_constituent_mass_vec(num_processed_events_signal, 0.0);
-    for (unsigned int i = 0; i < num_processed_events_signal; i++) {
+    // Signal loop 2 (detailed): plot-stage — its fills cut on the 10/25/40 kHz thresholds
+    // derived just above from the full merged background rate curves.
+    for (unsigned int i = 0; LRJDrawPlots() && i < num_processed_events_signal; i++) {
         // Total signal-event cap (kMaxEventsPerSlice). Disabled when < 0.
         if (kMaxEventsPerSlice >= 0 && i >= (unsigned int)kMaxEventsPerSlice) break;
         //std::cout << "signal event: " << i << "\n";
@@ -7124,7 +7449,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         jFexLeadingSRJTreeSignal->GetEntry(i);
         jFexSubleadingSRJTreeSignal->GetEntry(i);
         gFexSubleadingLRJTreeSignal->GetEntry(i);
-        topo422TreeSignal->GetEntry(i);
+        //topo422TreeSignal->GetEntry(i);  // disabled: no longer written by HERNTupler
         gepBasicClustersTreeSignal->GetEntry(i);
         gepCellsTowersTreeSignal->GetEntry(i);
         gepCellsTowersSKTreeSignal->GetEntry(i);
@@ -9366,7 +9691,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
     // Per-JZ-slice counter for the background event-cap (kMaxEventsPerSlice) — see rate loop.
     std::array<unsigned int, nJZSlices_> back_jz_count_detailed = {};
-    for (unsigned int i = 0; i < num_processed_events_background; i++) {
+    // Background loop 2 (detailed): compute-stage, chunked like loop 1 — and over the SAME
+    // range, so the per-event arrays it writes (nSubjetsLeadingLRJBack etc.) line up with
+    // the entries loop 1 processed in this job.
+    Long64_t lrjB2First = 0, lrjB2End = 0;
+    lrjChunkBounds((Long64_t)num_processed_events_background, lrjB2First, lrjB2End);
+    for (unsigned int i = (unsigned int)lrjB2First; LRJRunEventLoops() && i < (unsigned int)lrjB2End; i++) {
+        // --- PU140 debug: report the failing event instead of an opaque terminate ---
+        // (lrj_debug_report_bkg2_throw_; costs nothing when the loop does not throw)
+        try {
         //if(i % 1000 == 0) std::cout << "i:  "<< i << "\n";
         if (kDebugEventHeartbeat && i % kDebugEventHeartbeat == 0)
             std::cout << "[heartbeat] background detailed loop, event " << i << " / "
@@ -9401,7 +9734,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         gFexLeadingSRJTreeBack->GetEntry(i);
         gFexSubleadingSRJTreeBack->GetEntry(i);
         jFexSRJTreeBack->GetEntry(i);
-        topo422TreeBack->GetEntry(i);
+        //topo422TreeBack->GetEntry(i);  // disabled: no longer written by HERNTupler
         gepBasicClustersTreeBack->GetEntry(i);
         gepCellsTowersTreeBack->GetEntry(i);
         gepCellsTowersSKTreeBack->GetEntry(i);
@@ -10443,12 +10776,14 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         back_h_leading_offlineLRJ_Mass_byfile->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
         back_h_leading_offlineLRJ_Et_before->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
         back_h_leading_offlineLRJ_Mass_before->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
-        if (back_leadConeEt_perEvt[i] < cone_singleJet_25kHz_threshold &&
-            back_4thConeEt_perEvt[i]  < cone_multiJet_100kHz_threshold  &&
-            back_HT_perEvt[i]         < cone_HT_50kHz_threshold) {
-            back_h_leading_offlineLRJ_Et_unique->Fill(recoAntiKt10LRJLeadingEtValuesBack->at(0), backgroundEventWeight);
-            back_h_leading_offlineLRJ_Mass_unique->Fill(recoAntiKt10LRJLeadingMassValuesBack->at(0), backgroundEventWeight);
-        }
+        // The "unique" selection cuts on cone_{singleJet,multiJet,HT} thresholds derived
+        // from the FULL background rate curves. A compute chunk sees 1/N of the background
+        // (chunk 0 is entirely JZ0), so deriving them per chunk would apply a DIFFERENT cut
+        // in every chunk and hadd would sum incompatible fills — silently, with no error.
+        // Record the inputs instead; the plot stage, which has the full-sample thresholds,
+        // does these two fills after loading the per-event cache.
+        back_offlineLeadEt_perEvt[i]   = recoAntiKt10LRJLeadingEtValuesBack->at(0);
+        back_offlineLeadMass_perEvt[i] = recoAntiKt10LRJLeadingMassValuesBack->at(0);
 
         if(recoAntiKt10LRJSubleadingEtValuesBack->size() > 0) back_h_subleading_offlineLRJ_Et->Fill(recoAntiKt10LRJSubleadingEtValuesBack->at(0), backgroundEventWeight);
         //std::cout << "test 4" << "\n";
@@ -10555,10 +10890,22 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         if (gFexLRJSimLeadingEtaValuesBack->size() > 0)
             back_h_leading_LRJ_gFexLRJ_deltaR->Fill(sqrt(calcDeltaR2(gFexLRJSimLeadingEtaValuesBack->at(0), gFexLRJSimLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][highestEtIndexLRJBack], back_LRJ_Phi[i][highestEtIndexLRJBack])), backgroundEventWeight);
         //std::cout << "test 6" << "\n";
-        back_h_leading_LRJ_offlineLRJ_deltaR->Fill(sqrt(calcDeltaR2(recoAntiKt10LRJLeadingEtaValuesBack->at(0), recoAntiKt10LRJLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][highestEtIndexLRJBack], back_LRJ_Phi[i][highestEtIndexLRJBack])), backgroundEventWeight);
-        back_h_first_LRJ_jFexSRJ_deltaR->Fill(sqrt(calcDeltaR2(jFexSRJLeadingEtaValuesBack->at(0), jFexSRJLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][0], back_LRJ_Phi[i][0])));
-        back_h_second_LRJ_jFexSRJ_deltaR->Fill(sqrt(calcDeltaR2(jFexSRJSubleadingEtaValuesBack->at(0), jFexSRJSubleadingPhiValuesBack->at(0), back_LRJ_Eta[i][1], back_LRJ_Phi[i][1])), backgroundEventWeight);
-        back_h_lead_sublead_LRJ_deltaR->Fill(sqrt(calcDeltaR2(back_LRJ_Eta[i][0], back_LRJ_Phi[i][0], back_LRJ_Eta[i][1], back_LRJ_Phi[i][1])), backgroundEventWeight);
+        // These four deltaR diagnostics were unguarded, unlike the gFEX one just above.
+        // A background event with only ONE large-R jet leaves the jFEX SRJ subleading
+        // collections empty and back_LRJ_*[i] of size 1, so the ->at(0) throws
+        // out_of_range and the [i][1] reads past the end. PU200 never produced such an
+        // event in this code path; PU140 does (event 114737 of the r16129 dijet chain,
+        // 2026-08-24), which is what killed all six PU140 compute jobs. Guarded here to
+        // match the gFEX line above; each fill is simply skipped when its inputs are
+        // absent, which is the same thing the guarded lines already do.
+        if (recoAntiKt10LRJLeadingEtaValuesBack->size() > 0)
+            back_h_leading_LRJ_offlineLRJ_deltaR->Fill(sqrt(calcDeltaR2(recoAntiKt10LRJLeadingEtaValuesBack->at(0), recoAntiKt10LRJLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][highestEtIndexLRJBack], back_LRJ_Phi[i][highestEtIndexLRJBack])), backgroundEventWeight);
+        if (jFexSRJLeadingEtaValuesBack->size() > 0 && back_LRJ_Eta[i].size() > 0)
+            back_h_first_LRJ_jFexSRJ_deltaR->Fill(sqrt(calcDeltaR2(jFexSRJLeadingEtaValuesBack->at(0), jFexSRJLeadingPhiValuesBack->at(0), back_LRJ_Eta[i][0], back_LRJ_Phi[i][0])));
+        if (jFexSRJSubleadingEtaValuesBack->size() > 0 && back_LRJ_Eta[i].size() > 1)
+            back_h_second_LRJ_jFexSRJ_deltaR->Fill(sqrt(calcDeltaR2(jFexSRJSubleadingEtaValuesBack->at(0), jFexSRJSubleadingPhiValuesBack->at(0), back_LRJ_Eta[i][1], back_LRJ_Phi[i][1])), backgroundEventWeight);
+        if (back_LRJ_Eta[i].size() > 1)
+            back_h_lead_sublead_LRJ_deltaR->Fill(sqrt(calcDeltaR2(back_LRJ_Eta[i][0], back_LRJ_Phi[i][0], back_LRJ_Eta[i][1], back_LRJ_Phi[i][1])), backgroundEventWeight);
 
         // Dijet efficiencies (background)
         if(backgroundSubjetCounterLeading == 1){
@@ -10926,6 +11273,30 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 else                             back_h_subSubjet_matchFrac->Fill(3.5, backgroundEventWeight);
             }
         }
+        } catch (const std::exception& e) {
+            // An unguarded ->at(0) on an empty collection lands here. PU140 background
+            // hits it where PU200 does not, so name the event and the empty containers
+            // rather than letting std::terminate print nothing useful.
+            std::cerr << "\n[bkg2-debug] EXCEPTION at background event i=" << i
+                      << " : " << e.what() << "\n";
+            auto rep = [](const char* n, const std::vector<double>* v){
+                std::cerr << "[bkg2-debug]   " << n << " = "
+                          << (v ? std::to_string(v->size()) : std::string("NULL")) << "\n"; };
+            rep("recoAntiKt10LRJLeadingEtValuesBack",     recoAntiKt10LRJLeadingEtValuesBack);
+            rep("recoAntiKt10LRJLeadingMassValuesBack",   recoAntiKt10LRJLeadingMassValuesBack);
+            rep("recoAntiKt10LRJSubleadingEtValuesBack",  recoAntiKt10LRJSubleadingEtValuesBack);
+            rep("recoAntiKt10LRJSubleadingMassValuesBack",recoAntiKt10LRJSubleadingMassValuesBack);
+            rep("jetTaggerLeadingLRJEtValuesBack",        jetTaggerLeadingLRJEtValuesBack);
+            rep("jetTaggerSubleadingLRJEtValuesBack",     jetTaggerSubleadingLRJEtValuesBack);
+            rep("recoAntiKt10UFOCSSKSDLeadingEtValuesBack",    recoAntiKt10UFOCSSKSDLeadingEtValuesBack);
+            rep("recoAntiKt10UFOCSSKSDSubleadingEtValuesBack", recoAntiKt10UFOCSSKSDSubleadingEtValuesBack);
+            rep("antiKt10TruthLeadingEtValuesBack",       antiKt10TruthLeadingEtValuesBack);
+            rep("antiKt10TruthSubleadingEtValuesBack",    antiKt10TruthSubleadingEtValuesBack);
+            rep("antiKt10TruthSDLeadingEtValuesBack",     antiKt10TruthSDLeadingEtValuesBack);
+            rep("antiKt10TruthSDSubleadingEtValuesBack",  antiKt10TruthSDSubleadingEtValuesBack);
+            std::cerr << "[bkg2-debug] aborting after report\n" << std::flush;
+            gSystem->Exit(3);
+        }
     } // end of background event loop
     _lap(Form("[file %u] background loop 2 (detailed)", fileIt));
 
@@ -10939,6 +11310,107 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                   << " | " << frac << "%\n";
     }
     std::cout << "========================================================\n\n";
+
+    // ================= compute/plot stage boundary (largeRJetSplitPlan.md) =================
+    // Everything above: file open, branch setup, histogram booking, and the two raw
+    // background event loops. Everything below: threshold derivations, signal loops,
+    // turn-ons, drawing — plot-stage territory.
+    if (gLRJState.stage == LRJStage::kCompute) {
+        // Histograms first (SaveState RECREATEs the chunk file), then the per-event cache
+        // tree: the three background arrays written by loop 2 above and consumed by the
+        // threshold-dependent background loop in the leadingLRJSubjetScan block, which
+        // runs in the plot stage. Rows carry the global entry index so hadd order and
+        // chunk boundaries cannot misalign them.
+        gLRJState.SaveState();
+        {
+            TFile cacheF(gLRJState.chunkPath().c_str(), "UPDATE");
+            TTree cacheT("lrjBackEventCache",
+                         "per-event background cache for plot-stage threshold loops");
+            Long64_t cIdx = 0; UInt_t cNLead = 0, cNSubl = 0; Double_t cLeadCM = 0.0;
+            Double_t cLeadCone = 0.0, c4thCone = 0.0, cHT = 0.0, cW = 0.0;
+            Double_t cOffEt = -1.0, cOffMass = -1.0;
+            cacheT.Branch("idx",                 &cIdx);
+            cacheT.Branch("nSubjetsLeading",     &cNLead);
+            cacheT.Branch("nSubjetsSubleading",  &cNSubl);
+            cacheT.Branch("leadConstituentMass", &cLeadCM);
+            // Inputs to the plot-stage "unique" fills (see background loop 2).
+            cacheT.Branch("leadConeEt",          &cLeadCone);
+            cacheT.Branch("fourthConeEt",        &c4thCone);
+            cacheT.Branch("HT",                  &cHT);
+            cacheT.Branch("weight",              &cW);
+            cacheT.Branch("offlineLeadEt",       &cOffEt);
+            cacheT.Branch("offlineLeadMass",     &cOffMass);
+            for (Long64_t e = lrjB2First; e < lrjB2End; ++e) {
+                cIdx      = e;
+                cNLead    = nSubjetsLeadingLRJBack[e];
+                cNSubl    = nSubjetsSubleadingLRJBack[e];
+                cLeadCM   = back_lead_constituent_mass_vec[e];
+                cLeadCone = back_leadConeEt_perEvt[e];
+                c4thCone  = back_4thConeEt_perEvt[e];
+                cHT       = back_HT_perEvt[e];
+                cW        = back_weight_perEvt[e];
+                cOffEt    = back_offlineLeadEt_perEvt[e];
+                cOffMass  = back_offlineLeadMass_perEvt[e];
+                cacheT.Fill();
+            }
+            cacheF.Write();
+        }
+        gLRJState.EndPair();
+        std::cout << "[state] compute checkpoint reached for pair " << fileIt
+                  << " — thresholds, turn-ons and plots belong to the plot stage\n";
+        // One pair per compute job, so skipping this pair's file cleanup is fine: the
+        // process exits right after the loop.
+        continue;
+    }
+    if (gLRJState.stage == LRJStage::kPlot) {
+        // Refill the three background per-event arrays from the merged cache tree.
+        TTree* cacheT = (TTree*)gLRJState.stateFile->Get("lrjBackEventCache");
+        if (!cacheT) {
+            std::cerr << "[state] FATAL: lrjBackEventCache not found in "
+                      << gLRJState.mergedPath() << " — re-run the compute stage\n";
+            gSystem->Exit(1);
+        }
+        Long64_t cIdx = 0; UInt_t cNLead = 0, cNSubl = 0; Double_t cLeadCM = 0.0;
+        Double_t cLeadCone = 0.0, c4thCone = 0.0, cHT = 0.0, cW = 0.0;
+        Double_t cOffEt = -1.0, cOffMass = -1.0;
+        cacheT->SetBranchAddress("idx",                 &cIdx);
+        cacheT->SetBranchAddress("nSubjetsLeading",     &cNLead);
+        cacheT->SetBranchAddress("nSubjetsSubleading",  &cNSubl);
+        cacheT->SetBranchAddress("leadConstituentMass", &cLeadCM);
+        cacheT->SetBranchAddress("leadConeEt",          &cLeadCone);
+        cacheT->SetBranchAddress("fourthConeEt",        &c4thCone);
+        cacheT->SetBranchAddress("HT",                  &cHT);
+        cacheT->SetBranchAddress("weight",              &cW);
+        cacheT->SetBranchAddress("offlineLeadEt",       &cOffEt);
+        cacheT->SetBranchAddress("offlineLeadMass",     &cOffMass);
+        const Long64_t nRows = cacheT->GetEntries();
+        Long64_t nOutOfRange = 0, nUnique = 0;
+        for (Long64_t r = 0; r < nRows; ++r) {
+            cacheT->GetEntry(r);
+            if (cIdx < 0 || cIdx >= (Long64_t)num_processed_events_background) { ++nOutOfRange; continue; }
+            nSubjetsLeadingLRJBack[cIdx]        = cNLead;
+            nSubjetsSubleadingLRJBack[cIdx]     = cNSubl;
+            back_lead_constituent_mass_vec[cIdx] = cLeadCM;
+            // The "unique" selection, deferred out of background loop 2 because its cut
+            // needs these FULL-sample cone thresholds (derived above in this stage).
+            if (cOffEt >= 0.0 &&
+                cLeadCone < cone_singleJet_25kHz_threshold &&
+                c4thCone  < cone_multiJet_100kHz_threshold &&
+                cHT       < cone_HT_50kHz_threshold) {
+                back_h_leading_offlineLRJ_Et_unique->Fill(cOffEt, cW);
+                back_h_leading_offlineLRJ_Mass_unique->Fill(cOffMass, cW);
+                ++nUnique;
+            }
+        }
+        std::cout << "[state] unique-selection fills done plot-side: " << nUnique
+                  << " event(s) passed the cone thresholds\n";
+        std::cout << "[state] event cache: " << nRows << " rows loaded";
+        if (nOutOfRange > 0)
+            std::cout << "  (WARNING: " << nOutOfRange << " rows out of range — chunking"
+                      << " was run against different input files than this plot run?)";
+        std::cout << "\n";
+    }
+    // =======================================================================================
 
     std::cout << "test 1" << "\n";
 
@@ -11338,7 +11810,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             }
         }
 
-        // Find best ET threshold for ET-only scan
+        // Find best ET threshold for ET-only scan.
+        // The threshold is a bin low edge, so the scan binning is its rounding: `out` is built
+        // from the leading LRJ E_T histograms, which are on rateVsEffBins_EtOnly (1 GeV below
+        // 400 GeV), hence a 1 GeV answer rather than the old 5 GeV one.
         {
             for(int ix = 1; ix <= out.hRate_vsThr->GetNbinsX(); ++ix){
                 if(out.hRate_vsThr->GetBinContent(ix) <= 1e4){
@@ -12026,15 +12501,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             thr_ET_mass_10kHz_p = thr_ET_mass;
             thr_mass_min_10kHz_p = thr_mass_min;
 
-            TH1F* h_num_Et   = new TH1F("h_num_Et_tOn",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_mass = new TH1F("h_num_mass_tOn",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_tOn  = new TH1F("h_den_tOn",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_Et_massSel    = new TH1F("h_num_Et_tOn_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_Et_noMassSel  = new TH1F("h_num_Et_tOn_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_mass_massSel  = new TH1F("h_num_mass_tOn_massSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_mass_noMassSel= new TH1F("h_num_mass_tOn_noMassSel",";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_massSel       = new TH1F("h_den_tOn_massSel",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_noMassSel     = new TH1F("h_den_tOn_noMassSel",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et   = bookTH1F("h_num_Et_tOn",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass = bookTH1F("h_num_mass_tOn",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_tOn  = bookTH1F("h_den_tOn",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_massSel    = bookTH1F("h_num_Et_tOn_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_noMassSel  = bookTH1F("h_num_Et_tOn_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_massSel  = bookTH1F("h_num_mass_tOn_massSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_noMassSel= bookTH1F("h_num_mass_tOn_noMassSel",";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_massSel       = bookTH1F("h_den_tOn_massSel",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_noMassSel     = bookTH1F("h_den_tOn_noMassSel",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
 
             for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
                 if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
@@ -12142,7 +12617,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
 
         {
-            // Find best ET-only threshold at <= 40 kHz
+            // Find best ET-only threshold at <= 40 kHz. Rounded to the scan binning, which for
+            // the E_T-only legs is rateVsEffBins_EtOnly — 1 GeV below 400 GeV. The subjet-based
+            // thresholds a few lines up come from the five-category scan and stay on the 5 GeV
+            // grid; see the comment on rateVsEffBins_EtOnly for why.
             double thr_ET_only_35 = -1.0;
             for(int ix = 1; ix <= out.hRate_vsThr->GetNbinsX(); ++ix){
                 if(out.hRate_vsThr->GetBinContent(ix) <= 4.0e4){
@@ -12173,38 +12651,38 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             thr_mass_min_40kHz_p = thr_mass_min_35;
 
             // Turn-on event loop for 40 kHz subjet-based, ET-only, ET+mass
-            TH1F* h_num_Et_35   = new TH1F("h_num_Et_35",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_mass_35 = new TH1F("h_num_mass_35", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_sub_35  = new TH1F("h_num_sub_35",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_35      = new TH1F("h_den_35",      ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_Et_35_massSel    = new TH1F("h_num_Et_35_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_Et_35_noMassSel  = new TH1F("h_num_Et_35_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_mass_35_massSel  = new TH1F("h_num_mass_35_massSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_mass_35_noMassSel= new TH1F("h_num_mass_35_noMassSel",";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_sub_35_massSel   = new TH1F("h_num_sub_35_massSel",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_sub_35_noMassSel = new TH1F("h_num_sub_35_noMassSel", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_35_massSel       = new TH1F("h_den_35_massSel",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_35_noMassSel     = new TH1F("h_den_35_noMassSel",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_35   = bookTH1F("h_num_Et_35",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_35 = bookTH1F("h_num_mass_35", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_sub_35  = bookTH1F("h_num_sub_35",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_35      = bookTH1F("h_den_35",      ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_35_massSel    = bookTH1F("h_num_Et_35_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_35_noMassSel  = bookTH1F("h_num_Et_35_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_35_massSel  = bookTH1F("h_num_mass_35_massSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_mass_35_noMassSel= bookTH1F("h_num_mass_35_noMassSel",";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_sub_35_massSel   = bookTH1F("h_num_sub_35_massSel",   ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_sub_35_noMassSel = bookTH1F("h_num_sub_35_noMassSel", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_35_massSel       = bookTH1F("h_den_35_massSel",       ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_35_noMassSel     = bookTH1F("h_den_35_noMassSel",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             // gFEX (resim) E_T-only numerators (share the JetTagger denominators above)
-            TH1F* h_num_gFEXEt_35            = new TH1F("h_num_gFEXEt_35",            ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_gFEXEt_35_massSel    = new TH1F("h_num_gFEXEt_35_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_gFEXEt_35_noMassSel  = new TH1F("h_num_gFEXEt_35_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_gFEXEt_35            = bookTH1F("h_num_gFEXEt_35",            ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_gFEXEt_35_massSel    = bookTH1F("h_num_gFEXEt_35_massSel",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_gFEXEt_35_noMassSel  = bookTH1F("h_num_gFEXEt_35_noMassSel",  ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             // Offline-truth-subjet split of the same E_T-only selection. The 10 kHz turn-ons
             // already split this way (sig_h_offlineLRJ_Et_num10kHz_1Subjet / _GrEq2Subjets);
             // these are the 40 kHz twins, which had no equivalent. The split is on the OFFLINE
             // subjet count of the leading LRJ, not the tagger's, so it says something about the
             // jet rather than about the algorithm being compared.
-            TH1F* h_num_Et_35_subjGe2 = new TH1F("h_num_Et_35_subjGe2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_Et_35_subjLt2 = new TH1F("h_num_Et_35_subjLt2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_35_subjGe2    = new TH1F("h_den_35_subjGe2",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_35_subjLt2    = new TH1F("h_den_35_subjLt2",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_gFEXEt_35_subjGe2 = new TH1F("h_num_gFEXEt_35_subjGe2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_gFEXEt_35_subjLt2 = new TH1F("h_num_gFEXEt_35_subjLt2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_35_subjGe2 = bookTH1F("h_num_Et_35_subjGe2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_Et_35_subjLt2 = bookTH1F("h_num_Et_35_subjLt2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_35_subjGe2    = bookTH1F("h_den_35_subjGe2",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_35_subjLt2    = bookTH1F("h_den_35_subjLt2",    ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_gFEXEt_35_subjGe2 = bookTH1F("h_num_gFEXEt_35_subjGe2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_gFEXEt_35_subjLt2 = bookTH1F("h_num_gFEXEt_35_subjLt2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             // Subjet-based twins of the two above. The mass split already had all three curves
             // (subjet-based, lead-E_T, gFEX); the subjet-count split only had the latter two, so
             // the seed-comparison overlay could not be repeated against N_subjet without these.
-            TH1F* h_num_sub_35_subjGe2 = new TH1F("h_num_sub_35_subjGe2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_num_sub_35_subjLt2 = new TH1F("h_num_sub_35_subjLt2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_sub_35_subjGe2 = bookTH1F("h_num_sub_35_subjGe2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_sub_35_subjLt2 = bookTH1F("h_num_sub_35_subjLt2", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
 
             for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
                 if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
@@ -12330,8 +12808,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
         // Turn-on event loop for 40 kHz subjet-based selection
         {
-            TH1F* h_num_sub_40 = new TH1F("h_num_sub_40", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
-            TH1F* h_den_40     = new TH1F("h_den_40",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_num_sub_40 = bookTH1F("h_num_sub_40", ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
+            TH1F* h_den_40     = bookTH1F("h_den_40",     ";Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency", 75, 50, 800);
             for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt++){
                 if (kMaxEventsPerSlice >= 0 && iEvt >= (unsigned int)kMaxEventsPerSlice) break;
                 jetTaggerLeadingLRJsSignal->GetEntry(iEvt);
@@ -12385,18 +12863,18 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
 
 
-        TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
-        TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
-        //TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel   = new TH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel",   "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
-        //TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
-        //TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel   = new TH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel",   "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
-        //TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        //TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel   = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased_MassSel",   "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        //TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_MassSel", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        //TH1F* sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel   = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_SubjetBased_NoMassSel",   "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        //TH1F* sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_SubjetBased_NoMassSel", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
 
-        TH1F* sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
-        TH1F* sig_h_offlineLRJ_Et_denom10kHz_1OfflineSubjet_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_1OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_1OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_denom10kHz_1OfflineSubjet_SubjetBased = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_1OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
 
-        TH1F* sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
-        TH1F* sig_h_offlineLRJ_Et_denom10kHz_GrEq2OfflineSubjet_SubjetBased = new TH1F("sig_h_offlineLRJ_Et_denom10kHz_GrEq2OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased = bookTH1F("sig_h_offlineLRJ_Et_num10kHz_GrEq2OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
+        TH1F* sig_h_offlineLRJ_Et_denom10kHz_GrEq2OfflineSubjet_SubjetBased = bookTH1F("sig_h_offlineLRJ_Et_denom10kHz_GrEq2OfflineSubjet_SubjetBased", "LRJ Et Distribution;Offline Leading LRJ E_{T} [GeV];Emulated Trigger Efficiency (Signal)", 75, 50, 800);
         // use the thresholds to compute efficiency turn-on curves & before & after leading offline LRJ E_T distributions
         std::cout << "before another signal loop" << "\n";
         for(unsigned int iEvt = 0; iEvt < num_processed_events_signal; iEvt ++ ){
@@ -12611,76 +13089,76 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         c_effLRJ10kHz_Subjet.cd(); DrawATLASLabel(); c_effLRJ10kHz_Subjet.SaveAs(rateVsEffFileDir + "sig_eff_offline_LRJ10kHz_overlay_Subjets_subjetbased.pdf");
 
         // --- Leading offline LRJ mass distributions ---
-        TH1F* back_h_leading_offlineLRJ_Mass_beforeselection = new TH1F("back_h_leading_offlineLRJ_Mass_beforeselection", "Leading LRJ Et Distribution;Leading Offline LRJ Mass (Before Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* back_h_leading_offlineLRJ_Mass_afterEtselection = new TH1F("back_h_leading_offlineLRJ_Mass_afterEtselection", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass (After ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* back_h_leading_offlineLRJ_Mass_afterselection = new TH1F("back_h_leading_offlineLRJ_Mass_afterselection", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass (After Subjet-based ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* back_h_leading_offlineLRJ_Mass_afterEtAndMassselection = new TH1F("back_h_leading_offlineLRJ_Mass_afterEtAndMassselection", "Leading Offline LRJ Mass (After ET+Constituent Mass Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_leading_offlineLRJ_Mass_beforeselection = bookTH1F("back_h_leading_offlineLRJ_Mass_beforeselection", "Leading LRJ Et Distribution;Leading Offline LRJ Mass (Before Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_leading_offlineLRJ_Mass_afterEtselection = bookTH1F("back_h_leading_offlineLRJ_Mass_afterEtselection", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass (After ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_leading_offlineLRJ_Mass_afterselection = bookTH1F("back_h_leading_offlineLRJ_Mass_afterselection", "Subleading LRJ Et Distribution;Leading Offline LRJ Mass (After Subjet-based ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_leading_offlineLRJ_Mass_afterEtAndMassselection = bookTH1F("back_h_leading_offlineLRJ_Mass_afterEtAndMassselection", "Leading Offline LRJ Mass (After ET+Constituent Mass Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
 
         // --- Subleading offline LRJ mass distributions ---
-        TH1F* back_h_subleading_offlineLRJ_Mass_beforeselection = new TH1F("back_h_subleading_offlineLRJ_Mass_beforeselection", "Subleading Offline LRJ Mass (Before Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* back_h_subleading_offlineLRJ_Mass_afterEtselection = new TH1F("back_h_subleading_offlineLRJ_Mass_afterEtselection", "Subleading Offline LRJ Mass (After ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* back_h_subleading_offlineLRJ_Mass_afterselection = new TH1F("back_h_subleading_offlineLRJ_Mass_afterselection", "Subleading Offline LRJ Mass (After Subjet-based ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection = new TH1F("back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection", "Subleading Offline LRJ Mass (After ET+Constituent Mass Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_subleading_offlineLRJ_Mass_beforeselection = bookTH1F("back_h_subleading_offlineLRJ_Mass_beforeselection", "Subleading Offline LRJ Mass (Before Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_subleading_offlineLRJ_Mass_afterEtselection = bookTH1F("back_h_subleading_offlineLRJ_Mass_afterEtselection", "Subleading Offline LRJ Mass (After ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_subleading_offlineLRJ_Mass_afterselection = bookTH1F("back_h_subleading_offlineLRJ_Mass_afterselection", "Subleading Offline LRJ Mass (After Subjet-based ET Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection = bookTH1F("back_h_subleading_offlineLRJ_Mass_afterEtAndMassselection", "Subleading Offline LRJ Mass (After ET+Constituent Mass Selection) [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
 
         // --- Leading offline LRJ eta distributions ---
-        TH1F* back_h_leading_offlineLRJ_Eta_beforeselection = new TH1F("back_h_leading_offlineLRJ_Eta_beforeselection", "Leading Offline LRJ #eta (Before Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* back_h_leading_offlineLRJ_Eta_afterEtselection = new TH1F("back_h_leading_offlineLRJ_Eta_afterEtselection", "Leading Offline LRJ #eta (After ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* back_h_leading_offlineLRJ_Eta_afterselection = new TH1F("back_h_leading_offlineLRJ_Eta_afterselection", "Leading Offline LRJ #eta (After Subjet-based ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* back_h_leading_offlineLRJ_Eta_afterEtAndMassselection = new TH1F("back_h_leading_offlineLRJ_Eta_afterEtAndMassselection", "Leading Offline LRJ #eta (After ET+Constituent Mass Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_leading_offlineLRJ_Eta_beforeselection = bookTH1F("back_h_leading_offlineLRJ_Eta_beforeselection", "Leading Offline LRJ #eta (Before Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_leading_offlineLRJ_Eta_afterEtselection = bookTH1F("back_h_leading_offlineLRJ_Eta_afterEtselection", "Leading Offline LRJ #eta (After ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_leading_offlineLRJ_Eta_afterselection = bookTH1F("back_h_leading_offlineLRJ_Eta_afterselection", "Leading Offline LRJ #eta (After Subjet-based ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_leading_offlineLRJ_Eta_afterEtAndMassselection = bookTH1F("back_h_leading_offlineLRJ_Eta_afterEtAndMassselection", "Leading Offline LRJ #eta (After ET+Constituent Mass Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
 
         // --- Subleading offline LRJ eta distributions ---
-        TH1F* back_h_subleading_offlineLRJ_Eta_beforeselection = new TH1F("back_h_subleading_offlineLRJ_Eta_beforeselection", "Subleading Offline LRJ #eta (Before Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* back_h_subleading_offlineLRJ_Eta_afterEtselection = new TH1F("back_h_subleading_offlineLRJ_Eta_afterEtselection", "Subleading Offline LRJ #eta (After ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* back_h_subleading_offlineLRJ_Eta_afterselection = new TH1F("back_h_subleading_offlineLRJ_Eta_afterselection", "Subleading Offline LRJ #eta (After Subjet-based ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection = new TH1F("back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection", "Subleading Offline LRJ #eta (After ET+Constituent Mass Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_subleading_offlineLRJ_Eta_beforeselection = bookTH1F("back_h_subleading_offlineLRJ_Eta_beforeselection", "Subleading Offline LRJ #eta (Before Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_subleading_offlineLRJ_Eta_afterEtselection = bookTH1F("back_h_subleading_offlineLRJ_Eta_afterEtselection", "Subleading Offline LRJ #eta (After ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_subleading_offlineLRJ_Eta_afterselection = bookTH1F("back_h_subleading_offlineLRJ_Eta_afterselection", "Subleading Offline LRJ #eta (After Subjet-based ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection = bookTH1F("back_h_subleading_offlineLRJ_Eta_afterEtAndMassselection", "Subleading Offline LRJ #eta (After ET+Constituent Mass Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
 
         // --- Leading offline LRJ ET distributions ---
-        TH1F* back_h_leading_offlineLRJ_Et_beforeselection = new TH1F("back_h_leading_offlineLRJ_Et_beforeselection", "Leading Offline LRJ E_{T} (Before Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* back_h_leading_offlineLRJ_Et_afterEtselection = new TH1F("back_h_leading_offlineLRJ_Et_afterEtselection", "Leading Offline LRJ E_{T} (After ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* back_h_leading_offlineLRJ_Et_afterselection = new TH1F("back_h_leading_offlineLRJ_Et_afterselection", "Leading Offline LRJ E_{T} (After Subjet-based ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* back_h_leading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("back_h_leading_offlineLRJ_Et_afterEtAndMassselection", "Leading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_leading_offlineLRJ_Et_beforeselection = bookTH1F("back_h_leading_offlineLRJ_Et_beforeselection", "Leading Offline LRJ E_{T} (Before Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_leading_offlineLRJ_Et_afterEtselection = bookTH1F("back_h_leading_offlineLRJ_Et_afterEtselection", "Leading Offline LRJ E_{T} (After ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_leading_offlineLRJ_Et_afterselection = bookTH1F("back_h_leading_offlineLRJ_Et_afterselection", "Leading Offline LRJ E_{T} (After Subjet-based ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_leading_offlineLRJ_Et_afterEtAndMassselection = bookTH1F("back_h_leading_offlineLRJ_Et_afterEtAndMassselection", "Leading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
 
         // --- Subleading offline LRJ ET distributions ---
-        TH1F* back_h_subleading_offlineLRJ_Et_beforeselection = new TH1F("back_h_subleading_offlineLRJ_Et_beforeselection", "Subleading Offline LRJ E_{T} (Before Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* back_h_subleading_offlineLRJ_Et_afterEtselection = new TH1F("back_h_subleading_offlineLRJ_Et_afterEtselection", "Subleading Offline LRJ E_{T} (After ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* back_h_subleading_offlineLRJ_Et_afterselection = new TH1F("back_h_subleading_offlineLRJ_Et_afterselection", "Subleading Offline LRJ E_{T} (After Subjet-based ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* back_h_subleading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("back_h_subleading_offlineLRJ_Et_afterEtAndMassselection", "Subleading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_subleading_offlineLRJ_Et_beforeselection = bookTH1F("back_h_subleading_offlineLRJ_Et_beforeselection", "Subleading Offline LRJ E_{T} (Before Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_subleading_offlineLRJ_Et_afterEtselection = bookTH1F("back_h_subleading_offlineLRJ_Et_afterEtselection", "Subleading Offline LRJ E_{T} (After ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_subleading_offlineLRJ_Et_afterselection = bookTH1F("back_h_subleading_offlineLRJ_Et_afterselection", "Subleading Offline LRJ E_{T} (After Subjet-based ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* back_h_subleading_offlineLRJ_Et_afterEtAndMassselection = bookTH1F("back_h_subleading_offlineLRJ_Et_afterEtAndMassselection", "Subleading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
 
         // --- Signal: Leading offline LRJ mass distributions ---
-        TH1F* sig_h_leading_offlineLRJ_Mass_beforeselection = new TH1F("sig_h_leading_offlineLRJ_Mass_beforeselection", "Leading Offline LRJ Mass (Before Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* sig_h_leading_offlineLRJ_Mass_afterEtselection = new TH1F("sig_h_leading_offlineLRJ_Mass_afterEtselection", "Leading Offline LRJ Mass (After ET Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* sig_h_leading_offlineLRJ_Mass_afterselection = new TH1F("sig_h_leading_offlineLRJ_Mass_afterselection", "Leading Offline LRJ Mass (After Subjet-based ET Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection = new TH1F("sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection", "Leading Offline LRJ Mass (After ET+Constituent Mass Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_leading_offlineLRJ_Mass_beforeselection = bookTH1F("sig_h_leading_offlineLRJ_Mass_beforeselection", "Leading Offline LRJ Mass (Before Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_leading_offlineLRJ_Mass_afterEtselection = bookTH1F("sig_h_leading_offlineLRJ_Mass_afterEtselection", "Leading Offline LRJ Mass (After ET Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_leading_offlineLRJ_Mass_afterselection = bookTH1F("sig_h_leading_offlineLRJ_Mass_afterselection", "Leading Offline LRJ Mass (After Subjet-based ET Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection = bookTH1F("sig_h_leading_offlineLRJ_Mass_afterEtAndMassselection", "Leading Offline LRJ Mass (After ET+Constituent Mass Selection);Leading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
 
         // --- Signal: Subleading offline LRJ mass distributions ---
-        TH1F* sig_h_subleading_offlineLRJ_Mass_beforeselection = new TH1F("sig_h_subleading_offlineLRJ_Mass_beforeselection", "Subleading Offline LRJ Mass (Before Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* sig_h_subleading_offlineLRJ_Mass_afterEtselection = new TH1F("sig_h_subleading_offlineLRJ_Mass_afterEtselection", "Subleading Offline LRJ Mass (After ET Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* sig_h_subleading_offlineLRJ_Mass_afterselection = new TH1F("sig_h_subleading_offlineLRJ_Mass_afterselection", "Subleading Offline LRJ Mass (After Subjet-based ET Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
-        TH1F* sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection = new TH1F("sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection", "Subleading Offline LRJ Mass (After ET+Constituent Mass Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_subleading_offlineLRJ_Mass_beforeselection = bookTH1F("sig_h_subleading_offlineLRJ_Mass_beforeselection", "Subleading Offline LRJ Mass (Before Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_subleading_offlineLRJ_Mass_afterEtselection = bookTH1F("sig_h_subleading_offlineLRJ_Mass_afterEtselection", "Subleading Offline LRJ Mass (After ET Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_subleading_offlineLRJ_Mass_afterselection = bookTH1F("sig_h_subleading_offlineLRJ_Mass_afterselection", "Subleading Offline LRJ Mass (After Subjet-based ET Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
+        TH1F* sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection = bookTH1F("sig_h_subleading_offlineLRJ_Mass_afterEtAndMassselection", "Subleading Offline LRJ Mass (After ET+Constituent Mass Selection);Subleading Offline LRJ Mass [GeV];Fraction of Events / 10 GeV", 40, 0, 400);
 
         // --- Signal: Leading offline LRJ eta distributions ---
-        TH1F* sig_h_leading_offlineLRJ_Eta_beforeselection = new TH1F("sig_h_leading_offlineLRJ_Eta_beforeselection", "Leading Offline LRJ #eta (Before Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* sig_h_leading_offlineLRJ_Eta_afterEtselection = new TH1F("sig_h_leading_offlineLRJ_Eta_afterEtselection", "Leading Offline LRJ #eta (After ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* sig_h_leading_offlineLRJ_Eta_afterselection = new TH1F("sig_h_leading_offlineLRJ_Eta_afterselection", "Leading Offline LRJ #eta (After Subjet-based ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection = new TH1F("sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection", "Leading Offline LRJ #eta (After ET+Constituent Mass Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_leading_offlineLRJ_Eta_beforeselection = bookTH1F("sig_h_leading_offlineLRJ_Eta_beforeselection", "Leading Offline LRJ #eta (Before Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_leading_offlineLRJ_Eta_afterEtselection = bookTH1F("sig_h_leading_offlineLRJ_Eta_afterEtselection", "Leading Offline LRJ #eta (After ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_leading_offlineLRJ_Eta_afterselection = bookTH1F("sig_h_leading_offlineLRJ_Eta_afterselection", "Leading Offline LRJ #eta (After Subjet-based ET Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection = bookTH1F("sig_h_leading_offlineLRJ_Eta_afterEtAndMassselection", "Leading Offline LRJ #eta (After ET+Constituent Mass Selection);Leading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
 
         // --- Signal: Subleading offline LRJ eta distributions ---
-        TH1F* sig_h_subleading_offlineLRJ_Eta_beforeselection = new TH1F("sig_h_subleading_offlineLRJ_Eta_beforeselection", "Subleading Offline LRJ #eta (Before Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* sig_h_subleading_offlineLRJ_Eta_afterEtselection = new TH1F("sig_h_subleading_offlineLRJ_Eta_afterEtselection", "Subleading Offline LRJ #eta (After ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* sig_h_subleading_offlineLRJ_Eta_afterselection = new TH1F("sig_h_subleading_offlineLRJ_Eta_afterselection", "Subleading Offline LRJ #eta (After Subjet-based ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
-        TH1F* sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection = new TH1F("sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection", "Subleading Offline LRJ #eta (After ET+Constituent Mass Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_subleading_offlineLRJ_Eta_beforeselection = bookTH1F("sig_h_subleading_offlineLRJ_Eta_beforeselection", "Subleading Offline LRJ #eta (Before Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_subleading_offlineLRJ_Eta_afterEtselection = bookTH1F("sig_h_subleading_offlineLRJ_Eta_afterEtselection", "Subleading Offline LRJ #eta (After ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_subleading_offlineLRJ_Eta_afterselection = bookTH1F("sig_h_subleading_offlineLRJ_Eta_afterselection", "Subleading Offline LRJ #eta (After Subjet-based ET Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
+        TH1F* sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection = bookTH1F("sig_h_subleading_offlineLRJ_Eta_afterEtAndMassselection", "Subleading Offline LRJ #eta (After ET+Constituent Mass Selection);Subleading Offline LRJ #eta;Fraction of Events / 0.2", 49, -4.9, 4.9);
 
         // --- Signal: Leading offline LRJ ET distributions ---
-        TH1F* sig_h_leading_offlineLRJ_Et_beforeselection = new TH1F("sig_h_leading_offlineLRJ_Et_beforeselection", "Leading Offline LRJ E_{T} (Before Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* sig_h_leading_offlineLRJ_Et_afterEtselection = new TH1F("sig_h_leading_offlineLRJ_Et_afterEtselection", "Leading Offline LRJ E_{T} (After ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* sig_h_leading_offlineLRJ_Et_afterselection = new TH1F("sig_h_leading_offlineLRJ_Et_afterselection", "Leading Offline LRJ E_{T} (After Subjet-based ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* sig_h_leading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("sig_h_leading_offlineLRJ_Et_afterEtAndMassselection", "Leading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_leading_offlineLRJ_Et_beforeselection = bookTH1F("sig_h_leading_offlineLRJ_Et_beforeselection", "Leading Offline LRJ E_{T} (Before Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_leading_offlineLRJ_Et_afterEtselection = bookTH1F("sig_h_leading_offlineLRJ_Et_afterEtselection", "Leading Offline LRJ E_{T} (After ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_leading_offlineLRJ_Et_afterselection = bookTH1F("sig_h_leading_offlineLRJ_Et_afterselection", "Leading Offline LRJ E_{T} (After Subjet-based ET Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_leading_offlineLRJ_Et_afterEtAndMassselection = bookTH1F("sig_h_leading_offlineLRJ_Et_afterEtAndMassselection", "Leading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Leading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
 
         // --- Signal: Subleading offline LRJ ET distributions ---
-        TH1F* sig_h_subleading_offlineLRJ_Et_beforeselection = new TH1F("sig_h_subleading_offlineLRJ_Et_beforeselection", "Subleading Offline LRJ E_{T} (Before Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* sig_h_subleading_offlineLRJ_Et_afterEtselection = new TH1F("sig_h_subleading_offlineLRJ_Et_afterEtselection", "Subleading Offline LRJ E_{T} (After ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* sig_h_subleading_offlineLRJ_Et_afterselection = new TH1F("sig_h_subleading_offlineLRJ_Et_afterselection", "Subleading Offline LRJ E_{T} (After Subjet-based ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
-        TH1F* sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection = new TH1F("sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection", "Subleading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_subleading_offlineLRJ_Et_beforeselection = bookTH1F("sig_h_subleading_offlineLRJ_Et_beforeselection", "Subleading Offline LRJ E_{T} (Before Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_subleading_offlineLRJ_Et_afterEtselection = bookTH1F("sig_h_subleading_offlineLRJ_Et_afterEtselection", "Subleading Offline LRJ E_{T} (After ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_subleading_offlineLRJ_Et_afterselection = bookTH1F("sig_h_subleading_offlineLRJ_Et_afterselection", "Subleading Offline LRJ E_{T} (After Subjet-based ET Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
+        TH1F* sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection = bookTH1F("sig_h_subleading_offlineLRJ_Et_afterEtAndMassselection", "Subleading Offline LRJ E_{T} (After ET+Constituent Mass Selection);Subleading Offline LRJ E_{T} [GeV];Fraction of Events / 20 GeV", 40, 0, 800);
         
         std::cout << "before another background loop" << "\n";
         // Per-JZ-slice counter for this background pass — see top-level rate loop.
@@ -23003,6 +23481,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     _lap(Form("[file %u] plotting section", fileIt));
     } // End of original loop through files
 
+    // Compute jobs are done once their pair's state chunk is written: the overlay section
+    // below consumes the _vec vectors, which only the plot stage fills.
+    if (gLRJState.stage == LRJStage::kCompute) {
+        std::cout << "[state] compute stage complete\n";
+        return;
+    }
+    // Plot stage: the last pair's state file is still open — release it before the overlays.
+    gLRJState.EndPair();
+
     // Do overlay plots for multiple files here
 
     // Need different canvases for each sets of plots when overlaying like this.... very annoying FIXME
@@ -23065,23 +23552,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                                "Re-clustering comparison, E_{T}-only rate vs eff (log)", 800, 600);
     cReclusterEtOnly_Log.SetLogy();
 
-    TCanvas cReclusterTurnOn40k = new TCanvas("cReclusterTurnOn40k",
-                                              "Re-clustering comparison, E_{T}-only turn-on @ 40 kHz", 800, 600);
-    cReclusterTurnOn40k.SetLeftMargin(0.16); cReclusterTurnOn40k.SetBottomMargin(0.16);
-    cReclusterTurnOn40k.SetTicks(1, 1);
+    // The E_T-only turn-on itself is drawn by DrawTurnOnWithRatio (analysisHelperFunctions.h),
+    // which owns its canvas, legend and ratio pad. All this side has to do is collect the curves
+    // as the file loop goes and hand the vector over once the last file is in.
+    std::vector<TurnOnCurve> reclusterTurnOn40kCurves;
 
     // Split versions of the same turn-on: by offline leading LRJ mass, and by offline truth
     // subjet multiplicity. Same open/filled marker convention as the existing mass-split
-    // overlays (open = the "higher" category, filled = the "lower" one).
-    TCanvas cReclusterTurnOn40k_MassSplit = new TCanvas("cReclusterTurnOn40k_MassSplit",
-                                              "Re-clustering, E_{T}-only turn-on @ 40 kHz, mass split", 800, 600);
-    cReclusterTurnOn40k_MassSplit.SetLeftMargin(0.16); cReclusterTurnOn40k_MassSplit.SetBottomMargin(0.16);
-    cReclusterTurnOn40k_MassSplit.SetTicks(1, 1);
-
-    TCanvas cReclusterTurnOn40k_SubjetSplit = new TCanvas("cReclusterTurnOn40k_SubjetSplit",
-                                              "Re-clustering, E_{T}-only turn-on @ 40 kHz, subjet split", 800, 600);
-    cReclusterTurnOn40k_SubjetSplit.SetLeftMargin(0.16); cReclusterTurnOn40k_SubjetSplit.SetBottomMargin(0.16);
-    cReclusterTurnOn40k_SubjetSplit.SetTicks(1, 1);
+    // overlays (open = the "higher" category, filled = the "lower" one). Two curves per file,
+    // so these are the widest legends of the set.
+    std::vector<TurnOnCurve> reclusterTurnOn40kMassSplitCurves;
+    std::vector<TurnOnCurve> reclusterTurnOn40kSubjetSplitCurves;
 
     TCanvas c10_Log = new TCanvas("c10_Log", "Overlays (log)", 800, 600);
     c10_Log.SetLogy();
@@ -23115,15 +23596,16 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TCanvas c14 = new TCanvas("c14", "Overlays (non-log)", 800, 600);
     TCanvas c15 = new TCanvas("c15", "Overlays (non-log)", 800, 600);
 
-    // Mass-split overlays: one canvas per selection type × rate (6 total)
-    TCanvas cMassSplit_SubjetBased_10kHz = new TCanvas("cMassSplit_SubjetBased_10kHz", "Mass split subjet-based 10 kHz", 900, 700);
-    TCanvas cMassSplit_ETonly_10kHz      = new TCanvas("cMassSplit_ETonly_10kHz",      "Mass split ET-only 10 kHz",      900, 700);
-    TCanvas cMassSplit_ETmass_10kHz      = new TCanvas("cMassSplit_ETmass_10kHz",      "Mass split ET+mass 10 kHz",      900, 700);
-    TCanvas cMassSplit_SubjetBased_35kHz = new TCanvas("cMassSplit_SubjetBased_35kHz", "Mass split subjet-based 40 kHz", 900, 700);
+    // Mass-split overlays: one curve list per selection type × rate, each drawn by the turn-on
+    // template once the file loop has finished (see addMassSplitPair / drawMassSplit below).
+    // The subjet-based 10 kHz canvas is commented out at its draw site, so it has no list.
+    std::vector<TurnOnCurve> massSplit_ETonly_10kHz_Curves;
+    std::vector<TurnOnCurve> massSplit_ETmass_10kHz_Curves;
+    std::vector<TurnOnCurve> massSplit_SubjetBased_35kHz_Curves;
     // As above, but with the gFEX (Resim) leading LRJ E_T-only selection overlaid
-    TCanvas cMassSplit_SubjetBased_35kHz_gFEX = new TCanvas("cMassSplit_SubjetBased_35kHz_gFEX", "Mass split subjet-based 40 kHz + gFEX", 900, 700);
-    TCanvas cMassSplit_ETonly_40kHz      = new TCanvas("cMassSplit_ETonly_40kHz",      "Mass split ET-only 40 kHz",      900, 700);
-    TCanvas cMassSplit_ETmass_40kHz      = new TCanvas("cMassSplit_ETmass_40kHz",      "Mass split ET+mass 40 kHz",      900, 700);
+    std::vector<TurnOnCurve> massSplit_SubjetBased_35kHz_gFEX_Curves;
+    std::vector<TurnOnCurve> massSplit_ETonly_40kHz_Curves;
+    std::vector<TurnOnCurve> massSplit_ETmass_40kHz_Curves;
 
     TCanvas cBar_sigLead  = new TCanvas("cBar_sigLead",  "Signal Leading Subjet Match Frac Overlay",    800, 600);
     TCanvas cBar_sigSub   = new TCanvas("cBar_sigSub",   "Signal Subleading Subjet Match Frac Overlay", 800, 600);
@@ -23156,10 +23638,6 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     // repeated in every legend entry.
     TLatex reclusterProcTex; reclusterProcTex.SetNDC(); reclusterProcTex.SetTextFont(42);
     reclusterProcTex.SetTextColor(kBlack); reclusterProcTex.SetTextSize(0.032);
-    // Which curve draws the axes is "the first one that exists", not "file 0" — file 0 having
-    // no turn-on histogram would otherwise leave every later file drawn with SAME onto a pad
-    // that has no frame.
-    bool reclusterTurnOnAxesDrawn = false;
 
     TLegend* leg_SampleInfoOnly = new TLegend(0.17, 0.17, 0.45, 0.5);
     leg_SampleInfoOnly->SetBorderSize(0);
@@ -23177,33 +23655,46 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     legSigOnlyNoIOTypes->SetTextSize(0.03);
 
     // Legends for the two re-clustering E_T-only comparison canvases added above.
-    TLegend* legReclusterEtOnly = new TLegend(0.30, 0.20, 0.78, 0.42);
+    // Wider and a little smaller than they were: each entry now also carries the input-tower
+    // E_T cut and the pileup suppression, which is roughly half again the old width even
+    // after "Re-clustering" was dropped from the noun.
+    TLegend* legReclusterEtOnly = new TLegend(0.26, 0.18, 0.94, 0.44);
     legReclusterEtOnly->SetBorderSize(0);
     legReclusterEtOnly->SetFillStyle(0);
-    legReclusterEtOnly->SetTextSize(0.030);
+    legReclusterEtOnly->SetTextSize(0.026);
 
-    TLegend* legReclusterTurnOn40k = new TLegend(0.32, 0.20, 0.80, 0.42);
-    legReclusterTurnOn40k->SetBorderSize(0);
-    legReclusterTurnOn40k->SetFillStyle(0);
-    legReclusterTurnOn40k->SetTextSize(0.028);
-    // Same convention as the other rate-tuned legends (leg_10kHz_effs etc.): say what the
-    // working point is, so the curves are not read as if they sat at a common threshold.
-    legReclusterTurnOn40k->SetHeader("Cuts tuned to 40 kHz background", "C");
-
-    TLegend* legReclusterTurnOn40k_MassSplit = new TLegend(0.32, 0.18, 0.86, 0.46);
-    legReclusterTurnOn40k_MassSplit->SetBorderSize(0);
-    legReclusterTurnOn40k_MassSplit->SetFillStyle(0);
-    legReclusterTurnOn40k_MassSplit->SetTextSize(0.024);
-    legReclusterTurnOn40k_MassSplit->SetHeader("Cuts tuned to 40 kHz background", "C");
-
-    TLegend* legReclusterTurnOn40k_SubjetSplit = new TLegend(0.32, 0.18, 0.86, 0.46);
-    legReclusterTurnOn40k_SubjetSplit->SetBorderSize(0);
-    legReclusterTurnOn40k_SubjetSplit->SetFillStyle(0);
-    legReclusterTurnOn40k_SubjetSplit->SetTextSize(0.024);
-    legReclusterTurnOn40k_SubjetSplit->SetHeader("Cuts tuned to 40 kHz background", "C");
-
-    bool reclusterMassSplitAxesDrawn = false, reclusterSubjetSplitAxesDrawn = false;
+    // Header text for the turn-on template's legend (same convention as the other rate-tuned
+    // legends: say what working point the curves sit at, so they are not read as sharing a cut).
+    const std::string reclusterTurnOn40kHeader = "Cuts tuned to 40 kHz background";
+    // The split canvases reuse the same header; their legends, like the inclusive one, are
+    // built and placed by the turn-on template.
     std::vector<std::string> drawnGFexResimModes_reclusterMassSplit, drawnGFexResimModes_reclusterSubjetSplit;
+
+    // --- Config-first legend copies of the two subjet-vs-E_T comparisons -----------------
+    // Same curves as subjetBased_ET_Scan_RatesVsEff and sig_eff_compare_SubjetVsET_40kHz_overlay,
+    // written to their own "_configLegend" PDFs; the originals are produced unchanged as well.
+    // Only the legend text differs: it leads with the trigger selection and follows it with how
+    // the input objects were built (input-tower E_T cut, pileup suppression, object count),
+    // which is the axis of comparison in the input-object studies these are for.
+    //
+    // What the new text DROPS is the seed and d_{search} labels the originals carry. Those are
+    // constant across every row of an input-object overlay, and the process bracket ("[ggF]")
+    // goes for the same reason — the width buys the configuration instead. An overlay that
+    // varies the seed or d_{search} should be read off the ORIGINAL PDFs, where they are named.
+    TCanvas cSubjetVsET_RatesVsEff_ConfigLeg = new TCanvas("cSubjetVsET_RatesVsEff_ConfigLeg",
+        "Subjet-based vs lead. E_{T} rate vs eff (config legend)", 800, 600);
+    cSubjetVsET_RatesVsEff_ConfigLeg.SetLogy();
+    // Two rows per file plus one gFEX row, so this holds ~15 entries on a 7-file overlay —
+    // hence a taller box and smaller text than the original's.
+    TLegend* legSubjetVsET_RatesVsEff_ConfigLeg = new TLegend(0.30, 0.13, 0.98, 0.55);
+    legSubjetVsET_RatesVsEff_ConfigLeg->SetBorderSize(0);
+    legSubjetVsET_RatesVsEff_ConfigLeg->SetFillStyle(0);
+    legSubjetVsET_RatesVsEff_ConfigLeg->SetTextSize(0.0155);
+    bool subjetVsET_RatesVsEff_ConfigLeg_AxesDrawn = false;
+    std::vector<std::string> drawnGFexResimModes_configLegRateEff;
+
+    std::vector<TurnOnCurve> compareSubjetVsET40kHzConfigLegCurves;
+    std::vector<std::string> drawnGFexResimModes_configLegCompare;
 
     TLegend* legSigOnlyNoIOTypes_OR4thCone = new TLegend(0.4, 0.25, 0.69, 0.68);
     legSigOnlyNoIOTypes_OR4thCone->SetBorderSize(0);
@@ -23236,74 +23727,26 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     leg_10kHz_effs_Subjets->SetTextSize(0.025);
     leg_10kHz_effs_Subjets->SetHeader("Cuts tuned to 10 kHz background","C"); // state the rate
 
-    TLegend *leg_10kHz_effs_SubjetBased = new TLegend(0.4, 0.18, 0.78, 0.38);
-    leg_10kHz_effs_SubjetBased->SetBorderSize(0);
-    leg_10kHz_effs_SubjetBased->SetFillStyle(0);
-    leg_10kHz_effs_SubjetBased->SetTextSize(0.025);
-    leg_10kHz_effs_SubjetBased->SetHeader("Subjet-based cuts tuned to 10 kHz","C");
-
-    TLegend *leg_10kHz_effs_SubjetBased_OfflineSubjets = new TLegend(0.4, 0.18, 0.78, 0.38);
-    leg_10kHz_effs_SubjetBased_OfflineSubjets->SetBorderSize(0);
-    leg_10kHz_effs_SubjetBased_OfflineSubjets->SetFillStyle(0);
-    leg_10kHz_effs_SubjetBased_OfflineSubjets->SetTextSize(0.025);
-    leg_10kHz_effs_SubjetBased_OfflineSubjets->SetHeader("Subjet-based cuts tuned to 10 kHz","C");
+    // The five 10 kHz multi-file turn-on overlays, collected per file and drawn by the turn-on
+    // template. (leg_10kHz_effs, _HiggsMassWindow and _Subjets above stay: each is also used by
+    // a single-file canvas in this same scope, which is not part of this conversion.)
+    std::vector<TurnOnCurve> turnOn10kHz_Curves;
+    std::vector<TurnOnCurve> turnOn10kHz_HiggsMassWindow_Curves;
+    std::vector<TurnOnCurve> turnOn10kHz_Subjets_Curves;
+    std::vector<TurnOnCurve> turnOn10kHz_SubjetBased_Curves;
+    std::vector<TurnOnCurve> turnOn10kHz_SubjetBased_OfflineSubjets_Curves;
 
     // Legends for mass-split multi-file overlays
-    TLegend *leg_massSplit_SubjetBased_10kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
-    leg_massSplit_SubjetBased_10kHz->SetBorderSize(0); leg_massSplit_SubjetBased_10kHz->SetFillStyle(0); leg_massSplit_SubjetBased_10kHz->SetTextSize(0.018);
-    leg_massSplit_SubjetBased_10kHz->SetHeader(Form("5-cat subjet-based E_{T} thresholds @ 10 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+    // The mass-split legends are gone: DrawTurnOnWithRatio builds and places each one, and
+    // the header text that used to live here is passed at the drawMassSplit call sites.
 
-    TLegend *leg_massSplit_ETonly_10kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
-    leg_massSplit_ETonly_10kHz->SetBorderSize(0); leg_massSplit_ETonly_10kHz->SetFillStyle(0); leg_massSplit_ETonly_10kHz->SetTextSize(0.018);
-    leg_massSplit_ETonly_10kHz->SetHeader(Form("Lead. LRJ E_{T}-only threshold @ 10 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
+    // Subjet-based vs ET-only comparison (no mass split) @ 40 kHz. Two curves per file plus the
+    // gFEX reference, collected here and drawn once by the turn-on template.
+    std::vector<TurnOnCurve> compareSubjetVsET40kHzCurves;
 
-    TLegend *leg_massSplit_ETmass_10kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
-    leg_massSplit_ETmass_10kHz->SetBorderSize(0); leg_massSplit_ETmass_10kHz->SetFillStyle(0); leg_massSplit_ETmass_10kHz->SetTextSize(0.018);
-    leg_massSplit_ETmass_10kHz->SetHeader(
-        Form("Trigger: E_{T} > %.0f GeV + const. mass > %.0f GeV @ 10 kHz",
-             thr_ET_mass_10kHz_vec.empty() ? -1.0 : thr_ET_mass_10kHz_vec[0],
-             thr_mass_min_10kHz_vec.empty() ? -1.0 : thr_mass_min_10kHz_vec[0]), "C");
-
-    TLegend *leg_massSplit_SubjetBased_35kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
-    leg_massSplit_SubjetBased_35kHz->SetBorderSize(0); leg_massSplit_SubjetBased_35kHz->SetFillStyle(0); leg_massSplit_SubjetBased_35kHz->SetTextSize(0.018);
-    leg_massSplit_SubjetBased_35kHz->SetHeader(Form("5-cat subjet-based E_{T} thresholds @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
-
-    // Legend for the gFEX-overlay version: same entries plus a gFEX line, moved up to fit the extra entry.
-    TLegend *leg_massSplit_SubjetBased_35kHz_gFEX = new TLegend(0.27, 0.34, 0.92, 0.60);
-    leg_massSplit_SubjetBased_35kHz_gFEX->SetBorderSize(0); leg_massSplit_SubjetBased_35kHz_gFEX->SetFillStyle(0); leg_massSplit_SubjetBased_35kHz_gFEX->SetTextSize(0.018);
-    leg_massSplit_SubjetBased_35kHz_gFEX->SetHeader(Form("5-cat subjet-based E_{T} thresholds @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
-
-    TLegend *leg_massSplit_ETonly_40kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
-    leg_massSplit_ETonly_40kHz->SetBorderSize(0); leg_massSplit_ETonly_40kHz->SetFillStyle(0); leg_massSplit_ETonly_40kHz->SetTextSize(0.018);
-    leg_massSplit_ETonly_40kHz->SetHeader(Form("Lead. LRJ E_{T}-only threshold @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold), "C");
-
-    TLegend *leg_massSplit_ETmass_40kHz = new TLegend(0.27, 0.18, 0.92, 0.42);
-    leg_massSplit_ETmass_40kHz->SetBorderSize(0); leg_massSplit_ETmass_40kHz->SetFillStyle(0); leg_massSplit_ETmass_40kHz->SetTextSize(0.018);
-    leg_massSplit_ETmass_40kHz->SetHeader(
-        Form("Trigger: E_{T} > %.0f GeV + const. mass > %.0f GeV @ 40 kHz",
-             thr_ET_mass_40kHz_vec.empty() ? -1.0 : thr_ET_mass_40kHz_vec[0],
-             thr_mass_min_40kHz_vec.empty() ? -1.0 : thr_mass_min_40kHz_vec[0]), "C");
-
-    // Subjet-based vs ET-only comparison (no mass split) @ 40 kHz
-    TCanvas cCompare_SubjetVsET_40kHz = new TCanvas("cCompare_SubjetVsET_40kHz", "Subjet-based vs ET-only 40 kHz", 900, 700);
-    // Raised off the x axis: with one entry per config plus the header this runs to eight rows,
-    // and anchored at y1 = 0.12 the last one fell below the frame and collided with the axis
-    // labels. The top stays clear of the curves, which are on their plateau over this x range.
-    TLegend *leg_compare_SubjetVsET_40kHz = new TLegend(0.30, 0.20, 0.92, 0.58);
-    leg_compare_SubjetVsET_40kHz->SetBorderSize(0); leg_compare_SubjetVsET_40kHz->SetFillStyle(0); leg_compare_SubjetVsET_40kHz->SetTextSize(0.022);
-    leg_compare_SubjetVsET_40kHz->SetHeader("Subjet-based vs lead. LRJ E_{T}-only thresholds @ 40 kHz", "C");
-
-    // Single-process seed-comparison turn-on overlay (Seeded cone only vs Seed Opt.) @ 40 kHz
-    TCanvas cCompare_SubjetVsET_40kHz_seedComparison = new TCanvas("cCompare_SubjetVsET_40kHz_seedComparison", "Seed comparison turn-on 40 kHz", 900, 700);
-    // As above, but with per-curve integrated-efficiency printouts (all / m>=thr / m<thr) below the process label
-    TCanvas cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts = new TCanvas("cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts", "Seed comparison turn-on 40 kHz + int eff printouts", 900, 700);
-    // Widened and slightly smaller text so the seed type fits.
-    // Sits in the empty region to the right of the turn-on, under the plateau: at x >~ 225 GeV
-    // the curves are already at ~1 and the offline E_T distribution has fallen away, so nothing
-    // is covered. Width is held at ~0.59 because the header ("Fixed to 40 kHz rate, Seed: ...")
-    // is the widest line and only gets (1 - margin) of the legend to itself.
-    TLegend *legSeedCompare_TurnOn = new TLegend(0.38, 0.18, 0.97, 0.44);
-    legSeedCompare_TurnOn->SetBorderSize(0); legSeedCompare_TurnOn->SetFillStyle(0); legSeedCompare_TurnOn->SetTextSize(0.030);
+    // Single-process seed-comparison turn-on overlay (Seeded cone only vs Seed Opt.) @ 40 kHz,
+    // and its integrated-efficiency twin: both drawn by the turn-on template, which owns their
+    // canvases and legends. Only the category-split twins below still keep their own.
 
     // Category-split twins of the seed-comparison turn-on: the same three approaches (Seed Opt.
     // subjet-based, seeded-cone-only lead-LRJ, gFEX lead-LRJ), each drawn twice — once for jets
@@ -23311,13 +23754,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     //   * offline truth-subjet count of the leading LRJ, >= 2 vs <= 1
     //   * offline leading LRJ mass, >= threshold vs <
     // Six curves instead of three, so the legend is taller and the text smaller than above.
-    TCanvas cSeedCompare_TurnOn_SubjetSplit = new TCanvas("cSeedCompare_TurnOn_SubjetSplit", "Seed comparison turn-on 40 kHz, subjet split", 900, 700);
-    TLegend *legSeedCompare_TurnOn_SubjetSplit = new TLegend(0.34, 0.15, 0.97, 0.50);
-    legSeedCompare_TurnOn_SubjetSplit->SetBorderSize(0); legSeedCompare_TurnOn_SubjetSplit->SetFillStyle(0); legSeedCompare_TurnOn_SubjetSplit->SetTextSize(0.024);
-    TCanvas cSeedCompare_TurnOn_MassSplit = new TCanvas("cSeedCompare_TurnOn_MassSplit", "Seed comparison turn-on 40 kHz, mass split", 900, 700);
-    TLegend *legSeedCompare_TurnOn_MassSplit = new TLegend(0.34, 0.15, 0.97, 0.50);
-    legSeedCompare_TurnOn_MassSplit->SetBorderSize(0); legSeedCompare_TurnOn_MassSplit->SetFillStyle(0); legSeedCompare_TurnOn_MassSplit->SetTextSize(0.024);
-    legSeedCompare_TurnOn->SetHeader("Fixed to 40 kHz rate", "C"); // header above the entries
+    // Six curves each, so the template gives these two the widest legends of the seed-comparison
+    // set; it owns their canvases as well.
     // track which sample types have had their gFEX (Resim) LRJ E_T-only curve drawn (once per sample)
     std::vector<std::string> drawnGFexResimModes_compare;
     // same, for the subjet-based mass-split + gFEX overlay
@@ -23358,6 +23796,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         }
     }
 
+    // Same idea for the algorithm version (the trailing _v2 / _v3 in the tagger name) and
+    // for the input-object count (_IOs_N_). Neither appears anywhere in the legend text
+    // otherwise, so an overlay mixing v2 with v3 — or 128 with 256 input objects — would
+    // draw curves whose labels are identical. Only appended when the run actually mixes
+    // them, to keep single-configuration legends as short as they are today.
+    bool overlayMixesVersion = false, overlayMixesNIOs = false;
+    {
+        std::set<std::string> versions, nios;
+        for (unsigned int f = 0; f < backgroundFiles.size(); ++f) {
+            std::smatch m;
+            const std::string& bt = backgroundFiles[f].second;
+            if (std::regex_search(bt, m, std::regex("_v(\\d)\\.root"))) versions.insert(m[1]);
+            if (std::regex_search(bt, m, std::regex("_IOs_(\\d+)_")))      nios.insert(m[1]);
+        }
+        overlayMixesVersion = versions.size() > 1;
+        overlayMixesNIOs    = nios.size() > 1;
+        if (overlayMixesVersion)
+            std::cout << "Overlay mixes algorithm versions — appending v<N> to legend labels\n";
+        if (overlayMixesNIOs)
+            std::cout << "Overlay mixes input-object counts — appending IOs=<N> to legend labels\n";
+    }
+
     //std::cout << "looping through " << backgroundFiles.size() << " background files" << "\n";
     for(unsigned int fileIt = 0; fileIt < backgroundFiles.size(); fileIt++){ 
         //std::cout << "fileIt: " << fileIt << "\n";
@@ -23377,12 +23837,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         std::string dSearchLabel = (std::stod(rMergeValue) == 0.001)
             ? std::string("d_{search} disabled")
             : Form("d_{search} = %s", rMergeValue.c_str());
-        // dSearchLabel closes almost every overlay legend label, so appending the pileup here
-        // puts "#LTPU#GT = 140/200" at the end of each legend row with one change — and only
-        // for runs that actually mix the two pileups (see overlayMixesPileup above).
+        // The "what differs between these curves" suffixes — pileup, input-object count,
+        // algorithm version — each added only when the run actually mixes that quantity.
+        // Kept in their OWN string as well as appended to dSearchLabel, so a legend that
+        // wants to drop the d_{search} text can still carry the part that distinguishes
+        // one curve from another (see rateVsThr_overlay_labels).
+        std::string labelVaryingSuffix;
         if (overlayMixesPileup)
-            dSearchLabel += Form(", #LTPU#GT = %d",
-                                 PileupFromPath(backgroundFiles[fileIt].first + " " + backgroundFiles[fileIt].second));
+            labelVaryingSuffix += Form(", #LTPU#GT = %d",
+                                       PileupFromPath(backgroundFiles[fileIt].first + " " + backgroundFiles[fileIt].second));
+        if (overlayMixesNIOs) {
+            std::smatch mIO;
+            if (std::regex_search(backgroundFiles[fileIt].second, mIO, std::regex("_IOs_(\\d+)_")))
+                labelVaryingSuffix += Form(", IOs = %s", std::string(mIO[1]).c_str());
+        }
+        if (overlayMixesVersion) {
+            std::smatch mV;
+            if (std::regex_search(backgroundFiles[fileIt].second, mV, std::regex("_v(\\d)\\.root")))
+                labelVaryingSuffix += Form(", v%s", std::string(mV[1]).c_str());
+        }
+        // dSearchLabel closes almost every overlay legend label, so appending here puts the
+        // suffixes at the end of each legend row with one change.
+        dSearchLabel += labelVaryingSuffix;
 
         unsigned int nInputObjectsAlgorithmConfiguration = 0;
         std::regex re("_IOs_(\\d+)_");
@@ -23466,6 +23942,35 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         std::string legLabelSigNoIOType_SubjetBased_OR_4thCone =
             legLabelSigNoIOType_SubjetBasedCut + " OR 4th lead. cone jet";
 
+        // --- Text for the config-first legend copies (see the canvases above) ---
+        // How this file's input objects were built, in the order the comparison is read:
+        // input-tower E_T cut, pileup suppression, then how many objects were kept.
+        // Everything here comes from the tagger filename via ParseFileName.
+        std::string configFirstLegLabel;
+        {
+            const std::string noun = (inputObjectType == "ConeJets") ? "Jets"
+                                   : (inputObjectType == "Towers")   ? "Towers"
+                                                                     : inputObjectType;
+            if (fileInfo.inputTowerEtThreshold >= 0.0)
+                configFirstLegLabel += Form("E_{T, tower} > %.0f GeV, ",
+                                            fileInfo.inputTowerEtThreshold);
+            if (!fileInfo.puSuppression.empty())
+                configFirstLegLabel += fileInfo.puSuppression + ", ";
+            // The count is quoted unconditionally here, unlike the overlayMixesNIOs-gated
+            // labels elsewhere: these legends exist to spell the configuration out.
+            configFirstLegLabel += (nInputObjectsAlgorithmConfiguration > 0)
+                ? Form("%u %s", nInputObjectsAlgorithmConfiguration, noun.c_str())
+                : noun;
+        }
+        // Physics process without the production-mode bracket. Only "[ggF]" is dropped: the
+        // VBF brackets carry the c_{vv} value and "[had]" the decay, which are what tell those
+        // samples apart, whereas hh->4b is only ever ggF-produced on these plots.
+        std::string procLabelNoProdMode = legLabelSig_SampleInfoOnly;
+        {
+            const size_t ggFPos = procLabelNoProdMode.find(" [ggF]");
+            if (ggFPos != std::string::npos) procLabelNoProdMode.erase(ggFPos, 6);
+        }
+
         std::string legLabelBkg = Form("Bkg. (dijet): IO: %s, Seed: %s, %s",
                                     inputObjectType.c_str(),
                                     seedLabel.c_str(),
@@ -23481,11 +23986,15 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // ATLAS info line instead.
         if (fileIt < rateVsThr_overlay_colors.size()) {
             rateVsThr_overlay_colors[fileIt] = color;
+            // d_{search} is deliberately NOT in this label. On these rate-vs-threshold
+            // overlays it is usually the same for every curve, so it added a long constant
+            // tail — and its "search" subscript pushed the varying part (the pileup) off
+            // the right edge of the pad. labelVaryingSuffix carries exactly what differs.
             rateVsThr_overlay_labels[fileIt] =
-                Form("IO: %s, Seed: %s, %s",
+                Form("IO: %s, Seed: %s%s",
                      inputObjectType.c_str(),
                      seedLabel.c_str(),
-                     dSearchLabel.c_str());
+                     labelVaryingSuffix.c_str());
         }
 
 
@@ -23782,18 +24291,20 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             seedLabel.c_str(),
             dSearchLabel.c_str()
         );
-        leg_10kHz_effs->AddEntry(sig_eff_offlineLRJ10kHz_vec[fileIt],
-                            legLabelEff_10kHz.c_str(),
-                            "lp");
-        if (fileIt == 0) {
-            sig_eff_offlineLRJ10kHz_vec[fileIt]->Draw("P"); 
-        } else {
-            sig_eff_offlineLRJ10kHz_vec[fileIt]->Draw("P SAME");
+        {
+            TurnOnCurve tc;
+            tc.h = sig_eff_offlineLRJ10kHz_vec[fileIt];
+            tc.color = color; tc.marker = 20;
+            tc.label = legLabelEff_10kHz;
+            turnOn10kHz_Curves.push_back(tc);
         }
         if(fileIt == (backgroundFiles.size() - 1)){
-            sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-            leg_10kHz_effs->Draw();
-            c4.cd(); DrawATLASLabel(); c4.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz.pdf");
+            TurnOnOpts o;
+            o.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+            o.legendHeader = "Cuts tuned to 10 kHz background";
+            o.spectrum     = sig_h_leading_offlineLRJ_Et;
+            DrawTurnOnWithRatio(turnOn10kHz_Curves, o,
+                                overlayOutputFileDir + "sig_eff_offline_LRJ10kHz.pdf");
         }
 
         c5.cd();
@@ -23819,20 +24330,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             seedLabel.c_str(),
             dSearchLabel.c_str()
         );
-        leg_10kHz_effs_HiggsMassWindow->AddEntry(sig_eff_offlineLRJ10kHz_HiggsMassWindow_vec[fileIt],
-                            legLabelEff_10kHz_HiggsMassWindow.c_str(),
-                            "lp");
-        if (fileIt == 0) {
-            sig_eff_offlineLRJ10kHz_vec[fileIt]->Draw("P"); 
-            sig_eff_offlineLRJ10kHz_HiggsMassWindow_vec[fileIt]->Draw("P SAME"); 
-        } else {
-            sig_eff_offlineLRJ10kHz_vec[fileIt]->Draw("P SAME"); 
-            sig_eff_offlineLRJ10kHz_HiggsMassWindow_vec[fileIt]->Draw("P SAME");
+        {
+            TurnOnCurve tcAll, tcMH;
+            tcAll.h = sig_eff_offlineLRJ10kHz_vec[fileIt];
+            tcAll.color = color; tcAll.marker = 20;
+            tcAll.label = legLabelEff_10kHz;
+            tcMH.h = sig_eff_offlineLRJ10kHz_HiggsMassWindow_vec[fileIt];
+            tcMH.color = color; tcMH.marker = 4;   // open circle = Higgs mass window
+            tcMH.label = legLabelEff_10kHz_HiggsMassWindow;
+            turnOn10kHz_HiggsMassWindow_Curves.push_back(tcAll);
+            turnOn10kHz_HiggsMassWindow_Curves.push_back(tcMH);
         }
         if(fileIt == (backgroundFiles.size() - 1)){
-            sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-            leg_10kHz_effs_HiggsMassWindow->Draw();
-            c5.cd(); DrawATLASLabel(); c5.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_HiggsMassWindow.pdf");
+            TurnOnOpts o;
+            o.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+            o.legendHeader = "Cuts tuned to 10 kHz background";
+            o.spectrum     = sig_h_leading_offlineLRJ_Et;
+            DrawTurnOnWithRatio(turnOn10kHz_HiggsMassWindow_Curves, o,
+                                overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_HiggsMassWindow.pdf");
         }
 
         c6.cd();
@@ -23873,20 +24388,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             seedLabel.c_str(),
             dSearchLabel.c_str()
         );
-        leg_10kHz_effs_Subjets->AddEntry(sig_eff_offlineLRJ10kHz_GrEq2Subjets_vec[fileIt],
-                            legLabelEff_10kHz_GrEq2Subjets.c_str(),
-                            "lp");
-        if (fileIt == 0) {
-            sig_eff_offlineLRJ10kHz_1Subjet_vec[fileIt]->Draw("P"); 
-            sig_eff_offlineLRJ10kHz_GrEq2Subjets_vec[fileIt]->Draw("P SAME"); 
-        } else {
-            sig_eff_offlineLRJ10kHz_1Subjet_vec[fileIt]->Draw("P SAME"); 
-            sig_eff_offlineLRJ10kHz_GrEq2Subjets_vec[fileIt]->Draw("P SAME"); 
+        {
+            TurnOnCurve one, two;
+            one.h = sig_eff_offlineLRJ10kHz_1Subjet_vec[fileIt];
+            one.color = color; one.marker = 20;                 // filled circle = 1 subjet
+            one.label = legLabelEff_10kHz_1Subjet;
+            two.h = sig_eff_offlineLRJ10kHz_GrEq2Subjets_vec[fileIt];
+            two.color = color; two.marker = 24;                 // open circle   = >= 2 subjets
+            two.label = legLabelEff_10kHz_GrEq2Subjets;
+            turnOn10kHz_Subjets_Curves.push_back(one);
+            turnOn10kHz_Subjets_Curves.push_back(two);
         }
         if(fileIt == (backgroundFiles.size() - 1)){
-            sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-            leg_10kHz_effs_Subjets->Draw();
-            c6.cd(); DrawATLASLabel(); c6.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_Subjets.pdf");
+            TurnOnOpts o;
+            o.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+            o.legendHeader = "Cuts tuned to 10 kHz background";
+            o.spectrum     = sig_h_leading_offlineLRJ_Et;
+            DrawTurnOnWithRatio(turnOn10kHz_Subjets_Curves, o,
+                                overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_Subjets.pdf");
         }
 
         // SubjetBased 10kHz efficiency overlay (inclusive)
@@ -23902,20 +24421,21 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt]->SetMarkerSize(0.8);
         sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt]->SetAxisRange(0.0, 1.1, "Y");
 
-        leg_10kHz_effs_SubjetBased->AddEntry(sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt],
-            Form("Subjet-based E_{T} cut (IO: %s, Seed: %s, %s)",
-                 inputObjectType.c_str(), seedLabel.c_str(),
-                 dSearchLabel.c_str()),
-            "lp");
-        if (fileIt == 0) {
-            sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt]->Draw("P");
-        } else {
-            sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt]->Draw("P SAME");
+        {
+            TurnOnCurve tc;
+            tc.h = sig_eff_offlineLRJ10kHz_SubjetBased_vec[fileIt];
+            tc.color = color; tc.marker = 20;
+            tc.label = Form("Subjet-based E_{T} cut (IO: %s, Seed: %s, %s)",
+                 inputObjectType.c_str(), seedLabel.c_str(), dSearchLabel.c_str());
+            turnOn10kHz_SubjetBased_Curves.push_back(tc);
         }
         if(fileIt == (backgroundFiles.size() - 1)){
-            sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-            leg_10kHz_effs_SubjetBased->Draw();
-            c14.cd(); DrawATLASLabel(); c14.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased.pdf");
+            TurnOnOpts o;
+            o.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+            o.legendHeader = "Cuts tuned to 10 kHz background";
+            o.spectrum     = sig_h_leading_offlineLRJ_Et;
+            DrawTurnOnWithRatio(turnOn10kHz_SubjetBased_Curves, o,
+                                overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased.pdf");
         }
 
         // SubjetBased 10kHz efficiency overlay (1 vs >=2 offline subjets on same plot)
@@ -23937,31 +24457,32 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec[fileIt]->SetMarkerSize(0.8);
         sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec[fileIt]->SetAxisRange(0.0, 1.1, "Y");
 
-        leg_10kHz_effs_SubjetBased_OfflineSubjets->AddEntry(sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet_vec[fileIt],
-            Form("[1 offline subjet] (IO: %s, Seed: %s, %s)",
-                 inputObjectType.c_str(), seedLabel.c_str(),
-                 dSearchLabel.c_str()),
-            "lp");
-        leg_10kHz_effs_SubjetBased_OfflineSubjets->AddEntry(sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec[fileIt],
-            Form("[>= 2 offline subjets] (IO: %s, Seed: %s, %s)",
-                 inputObjectType.c_str(), seedLabel.c_str(),
-                 dSearchLabel.c_str()),
-            "lp");
-        if (fileIt == 0) {
-            sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet_vec[fileIt]->Draw("P");
-            sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec[fileIt]->Draw("P SAME");
-        } else {
-            sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet_vec[fileIt]->Draw("P SAME");
-            sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec[fileIt]->Draw("P SAME");
+        {
+            TurnOnCurve one, two;
+            one.h = sig_eff_offlineLRJ10kHz_SubjetBased_1OfflineSubjet_vec[fileIt];
+            one.color = color; one.marker = 20;                 // filled circle = 1 offline subjet
+            one.label = Form("[1 offline subjet] (IO: %s, Seed: %s, %s)",
+                 inputObjectType.c_str(), seedLabel.c_str(), dSearchLabel.c_str());
+            two.h = sig_eff_offlineLRJ10kHz_SubjetBased_GrEq2OfflineSubjet_vec[fileIt];
+            two.color = color; two.marker = 24;                 // open circle   = >= 2 offline subjets
+            two.label = Form("[>= 2 offline subjets] (IO: %s, Seed: %s, %s)",
+                 inputObjectType.c_str(), seedLabel.c_str(), dSearchLabel.c_str());
+            turnOn10kHz_SubjetBased_OfflineSubjets_Curves.push_back(one);
+            turnOn10kHz_SubjetBased_OfflineSubjets_Curves.push_back(two);
         }
         if(fileIt == (backgroundFiles.size() - 1)){
-            sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-            leg_10kHz_effs_SubjetBased_OfflineSubjets->Draw();
-            c15.cd(); DrawATLASLabel(); c15.SaveAs(overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased_OfflineSubjets.pdf");
+            TurnOnOpts o;
+            o.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+            o.legendHeader = "Cuts tuned to 10 kHz background";
+            o.spectrum     = sig_h_leading_offlineLRJ_Et;
+            DrawTurnOnWithRatio(turnOn10kHz_SubjetBased_OfflineSubjets_Curves, o,
+                                overlayOutputFileDir + "sig_eff_offline_LRJ10kHz_SubjetBased_OfflineSubjets.pdf");
         }
 
         // --- Mass-split multi-file overlays (mass >= threshold = open markers, < threshold = closed markers) ---
         // Helper: configures a histogram for a given file in the overlay (color per file, marker style fixed by caller)
+        // Only the commented-out subjet-based 10 kHz block below still calls this — every live
+        // mass-split canvas now hands its curves to the turn-on template, which does the styling.
         auto setupMassSplitHist = [&](TH1F* h, int markerStyle){
             h->SetLineColor(color); h->SetMarkerColor(color);
             h->SetMarkerStyle(markerStyle); h->SetMarkerSize(0.8);
@@ -23970,6 +24491,35 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // Label used in legend entries (config info)
         std::string msLegConfig = Form("IO: %s, Seed: %s, %s",
             inputObjectType.c_str(), seedLabel.c_str(), dSearchLabel.c_str());
+
+        // Every mass-split overlay below is the same shape: one pair of curves per file, the
+        // mass-selected one open and the rest filled, with the integrated efficiencies quoted
+        // on the "higher" entry. These two collect and then draw it, so each canvas is three
+        // lines rather than a block of Draw/SAME bookkeeping.
+        auto addMassSplitPair = [&](std::vector<TurnOnCurve>& acc, TH1F* hHi, TH1F* hLo,
+                                    double effAll, double effHi, double effLo){
+            if(!hHi || !hLo) return;
+            TurnOnCurve hi, lo;
+            hi.h = hHi; hi.color = color; hi.marker = 24;   // open circle   = m >= threshold
+            lo.h = hLo; lo.color = color; lo.marker = 20;   // filled circle = m <  threshold
+            hi.label = Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f,"
+                            " #varepsilon_{<}=%.3f] %s",
+                            offlineLRJMassSel_threshold, effAll, effHi, effLo, msLegConfig.c_str());
+            lo.label = Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str());
+            acc.push_back(hi); acc.push_back(lo);
+        };
+        // Draws only once the last file is in, so it can be called unconditionally each pass.
+        // The header is what each canvas's old legend carried: which trigger the curves are
+        // taken at, since that is the one thing the entries themselves do not say.
+        auto drawMassSplit = [&](std::vector<TurnOnCurve>& acc, const char* outName,
+                                 const std::string& header){
+            if(fileIt != (backgroundFiles.size() - 1) || acc.empty()) return;
+            TurnOnOpts o;
+            o.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+            o.legendHeader = header;
+            o.spectrum     = sig_h_leading_offlineLRJ_Et;
+            DrawTurnOnWithRatio(acc, o, overlayOutputFileDir + outName + ".pdf");
+        };
 
         // SubjetBased 10 kHz
         /*if(sig_eff_offlineLRJ10kHz_SubjetBased_MassSel_vec.size() > fileIt &&
@@ -24003,88 +24553,42 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // ET-only 10 kHz
         if(sig_eff_ETonly_10kHz_MassSel_vec.size() > fileIt &&
            sig_eff_ETonly_10kHz_NoMassSel_vec.size() > fileIt){
-            cMassSplit_ETonly_10kHz.cd();
-            setupMassSplitHist(sig_eff_ETonly_10kHz_MassSel_vec[fileIt],  24);
-            setupMassSplitHist(sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt], 20);
-            leg_massSplit_ETonly_10kHz->AddEntry(sig_eff_ETonly_10kHz_MassSel_vec[fileIt],
-                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
-                     offlineLRJMassSel_threshold,
-                     (intEff_ETonly_10kHz_all_vec.size()>fileIt    ? intEff_ETonly_10kHz_all_vec[fileIt]    : 0.),
-                     (intEff_ETonly_10kHz_massSel_vec.size()>fileIt  ? intEff_ETonly_10kHz_massSel_vec[fileIt]  : 0.),
-                     (intEff_ETonly_10kHz_noMassSel_vec.size()>fileIt ? intEff_ETonly_10kHz_noMassSel_vec[fileIt] : 0.),
-                     msLegConfig.c_str()), "lp");
-            leg_massSplit_ETonly_10kHz->AddEntry(sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt],
-                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
-            if(fileIt == 0){
-                sig_eff_ETonly_10kHz_MassSel_vec[fileIt]->Draw("P");
-                sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
-            } else {
-                sig_eff_ETonly_10kHz_MassSel_vec[fileIt]->Draw("P SAME");
-                sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
-            }
-            if(fileIt == (backgroundFiles.size() - 1)){
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_massSplit_ETonly_10kHz->Draw();
-                cMassSplit_ETonly_10kHz.cd(); DrawATLASLabel(); cMassSplit_ETonly_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETonly_10kHz_overlay.pdf");
-            }
+            addMassSplitPair(massSplit_ETonly_10kHz_Curves,
+                sig_eff_ETonly_10kHz_MassSel_vec[fileIt],
+                sig_eff_ETonly_10kHz_NoMassSel_vec[fileIt],
+                (intEff_ETonly_10kHz_all_vec.size()>fileIt      ? intEff_ETonly_10kHz_all_vec[fileIt]       : 0.),
+                (intEff_ETonly_10kHz_massSel_vec.size()>fileIt  ? intEff_ETonly_10kHz_massSel_vec[fileIt]   : 0.),
+                (intEff_ETonly_10kHz_noMassSel_vec.size()>fileIt? intEff_ETonly_10kHz_noMassSel_vec[fileIt] : 0.));
+            drawMassSplit(massSplit_ETonly_10kHz_Curves, "sig_eff_massSplit_ETonly_10kHz_overlay",
+                Form("Lead. LRJ E_{T}-only threshold @ 10 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold));
         }
 
         // ET+mass 10 kHz
         if(sig_eff_ETmass_10kHz_MassSel_vec.size() > fileIt &&
            sig_eff_ETmass_10kHz_NoMassSel_vec.size() > fileIt){
-            cMassSplit_ETmass_10kHz.cd();
-            setupMassSplitHist(sig_eff_ETmass_10kHz_MassSel_vec[fileIt],  24);
-            setupMassSplitHist(sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt], 20);
-            leg_massSplit_ETmass_10kHz->AddEntry(sig_eff_ETmass_10kHz_MassSel_vec[fileIt],
-                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
-                     offlineLRJMassSel_threshold,
-                     (intEff_ETmass_10kHz_all_vec.size()>fileIt    ? intEff_ETmass_10kHz_all_vec[fileIt]    : 0.),
-                     (intEff_ETmass_10kHz_massSel_vec.size()>fileIt  ? intEff_ETmass_10kHz_massSel_vec[fileIt]  : 0.),
-                     (intEff_ETmass_10kHz_noMassSel_vec.size()>fileIt ? intEff_ETmass_10kHz_noMassSel_vec[fileIt] : 0.),
-                     msLegConfig.c_str()), "lp");
-            leg_massSplit_ETmass_10kHz->AddEntry(sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt],
-                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
-            if(fileIt == 0){
-                sig_eff_ETmass_10kHz_MassSel_vec[fileIt]->Draw("P");
-                sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
-            } else {
-                sig_eff_ETmass_10kHz_MassSel_vec[fileIt]->Draw("P SAME");
-                sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
-            }
-            if(fileIt == (backgroundFiles.size() - 1)){
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_massSplit_ETmass_10kHz->Draw();
-                cMassSplit_ETmass_10kHz.cd(); DrawATLASLabel(); cMassSplit_ETmass_10kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETmass_10kHz_overlay.pdf");
-            }
+            addMassSplitPair(massSplit_ETmass_10kHz_Curves,
+                sig_eff_ETmass_10kHz_MassSel_vec[fileIt],
+                sig_eff_ETmass_10kHz_NoMassSel_vec[fileIt],
+                (intEff_ETmass_10kHz_all_vec.size()>fileIt      ? intEff_ETmass_10kHz_all_vec[fileIt]       : 0.),
+                (intEff_ETmass_10kHz_massSel_vec.size()>fileIt  ? intEff_ETmass_10kHz_massSel_vec[fileIt]   : 0.),
+                (intEff_ETmass_10kHz_noMassSel_vec.size()>fileIt? intEff_ETmass_10kHz_noMassSel_vec[fileIt] : 0.));
+            drawMassSplit(massSplit_ETmass_10kHz_Curves, "sig_eff_massSplit_ETmass_10kHz_overlay",
+                Form("Trigger: E_{T} > %.0f GeV + const. mass > %.0f GeV @ 10 kHz",
+                     thr_ET_mass_10kHz_vec.empty() ? -1.0 : thr_ET_mass_10kHz_vec[0],
+                     thr_mass_min_10kHz_vec.empty() ? -1.0 : thr_mass_min_10kHz_vec[0]));
         }
 
         // SubjetBased 40 kHz
         if(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec.size() > fileIt &&
            sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec.size() > fileIt){
-            cMassSplit_SubjetBased_35kHz.cd();
-            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],  24);
-            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt], 20);
-            leg_massSplit_SubjetBased_35kHz->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],
-                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
-                     offlineLRJMassSel_threshold,
-                     (intEff_SubjetBased_35kHz_all_vec.size()>fileIt    ? intEff_SubjetBased_35kHz_all_vec[fileIt]    : 0.),
-                     (intEff_SubjetBased_35kHz_massSel_vec.size()>fileIt  ? intEff_SubjetBased_35kHz_massSel_vec[fileIt]  : 0.),
-                     (intEff_SubjetBased_35kHz_noMassSel_vec.size()>fileIt ? intEff_SubjetBased_35kHz_noMassSel_vec[fileIt] : 0.),
-                     msLegConfig.c_str()), "lp");
-            leg_massSplit_SubjetBased_35kHz->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt],
-                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
-            if(fileIt == 0){
-                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P");
-                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
-            } else {
-                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P SAME");
-                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
-            }
-            if(fileIt == (backgroundFiles.size() - 1)){
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_massSplit_SubjetBased_35kHz->Draw();
-                cMassSplit_SubjetBased_35kHz.cd(); DrawATLASLabel(); cMassSplit_SubjetBased_35kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_40kHz_overlay.pdf");
-            }
+            addMassSplitPair(massSplit_SubjetBased_35kHz_Curves,
+                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],
+                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt],
+                (intEff_SubjetBased_35kHz_all_vec.size()>fileIt      ? intEff_SubjetBased_35kHz_all_vec[fileIt]       : 0.),
+                (intEff_SubjetBased_35kHz_massSel_vec.size()>fileIt  ? intEff_SubjetBased_35kHz_massSel_vec[fileIt]   : 0.),
+                (intEff_SubjetBased_35kHz_noMassSel_vec.size()>fileIt? intEff_SubjetBased_35kHz_noMassSel_vec[fileIt] : 0.));
+            drawMassSplit(massSplit_SubjetBased_35kHz_Curves, "sig_eff_massSplit_SubjetBased_40kHz_overlay",
+                Form("5-cat subjet-based E_{T} thresholds @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold));
         }
 
         // SubjetBased 40 kHz + gFEX (Resim) leading LRJ E_T-only overlay
@@ -24092,181 +24596,176 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // (Resim) leading LRJ E_T-only turn-on added (drawn once per sample type).
         if(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec.size() > fileIt &&
            sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec.size() > fileIt){
-            cMassSplit_SubjetBased_35kHz_gFEX.cd();
-            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],  24);
-            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt], 20);
-            leg_massSplit_SubjetBased_35kHz_gFEX->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],
-                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
-                     offlineLRJMassSel_threshold,
-                     (intEff_SubjetBased_35kHz_all_vec.size()>fileIt    ? intEff_SubjetBased_35kHz_all_vec[fileIt]    : 0.),
-                     (intEff_SubjetBased_35kHz_massSel_vec.size()>fileIt  ? intEff_SubjetBased_35kHz_massSel_vec[fileIt]  : 0.),
-                     (intEff_SubjetBased_35kHz_noMassSel_vec.size()>fileIt ? intEff_SubjetBased_35kHz_noMassSel_vec[fileIt] : 0.),
-                     msLegConfig.c_str()), "lp");
-            leg_massSplit_SubjetBased_35kHz_gFEX->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt],
-                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
-            if(fileIt == 0){
-                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P");
-                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
-            } else {
-                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt]->Draw("P SAME");
-                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt]->Draw("P SAME");
-            }
-            // Overlay gFEX (Resim) leading LRJ E_T-only turn-on once per sample type
+            addMassSplitPair(massSplit_SubjetBased_35kHz_gFEX_Curves,
+                sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec[fileIt],
+                sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec[fileIt],
+                (intEff_SubjetBased_35kHz_all_vec.size()>fileIt      ? intEff_SubjetBased_35kHz_all_vec[fileIt]       : 0.),
+                (intEff_SubjetBased_35kHz_massSel_vec.size()>fileIt  ? intEff_SubjetBased_35kHz_massSel_vec[fileIt]   : 0.),
+                (intEff_SubjetBased_35kHz_noMassSel_vec.size()>fileIt? intEff_SubjetBased_35kHz_noMassSel_vec[fileIt] : 0.));
+
+            // The gFEX (Resim) leading LRJ E_T-only turn-on, added once per sample type — this
+            // is what separates this canvas from the one above. It goes on mass-inclusive AND
+            // split the same way as everything else here, with distinct markers rather than the
+            // plot's open/filled pairing, since the inclusive gFEX curve owns the filled diamond.
             bool gFexMassSplitAlreadyDrawn = false;
             for(const auto& m : drawnGFexResimModes_massSplit) if(m == mode) gFexMassSplitAlreadyDrawn = true;
             if(!gFexMassSplitAlreadyDrawn && sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt){
                 drawnGFexResimModes_massSplit.push_back(mode);
-                TH1F* hGfxMS = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
-                hGfxMS->SetLineColor(colorGFEX); hGfxMS->SetMarkerColor(colorGFEX);
-                hGfxMS->SetMarkerStyle(33); hGfxMS->SetMarkerSize(1.2); // filled diamond = gFEX (Resim)
-                hGfxMS->SetAxisRange(0.0, 1.1, "Y");
-                hGfxMS->Draw("P SAME");
-                leg_massSplit_SubjetBased_35kHz_gFEX->AddEntry(hGfxMS,
-                    Form("gFEX LRJ E_{T} > %.0f GeV only, %s",
-                         (thr_gFEX_Sim_40kHz_vec.size()>fileIt ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0),
-                         legLabelSig_SampleInfoOnly.c_str()), "lp");
-
-                // gFEX split the same way as every other series on this canvas. Distinct
-                // markers rather than the plot's open/filled pairing, because the
-                // mass-inclusive gFEX curve above already owns the filled diamond.
                 const double thrGfxMS = (thr_gFEX_Sim_40kHz_vec.size() > fileIt)
                                       ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0;
+                TurnOnCurve gAll;
+                gAll.h = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
+                gAll.color = colorGFEX; gAll.marker = 33;   // filled diamond
+                gAll.label = Form("gFEX LRJ E_{T} > %.0f GeV only, %s",
+                                  thrGfxMS, legLabelSig_SampleInfoOnly.c_str());
+                massSplit_SubjetBased_35kHz_gFEX_Curves.push_back(gAll);
+
                 if(sig_eff_gFEX_Sim_40kHz_MassSel_vec.size() > fileIt &&
                    sig_eff_gFEX_Sim_40kHz_MassSel_vec[fileIt]){
-                    TH1F* hGfxMassSel = sig_eff_gFEX_Sim_40kHz_MassSel_vec[fileIt];
-                    hGfxMassSel->SetLineColor(colorGFEX); hGfxMassSel->SetMarkerColor(colorGFEX);
-                    hGfxMassSel->SetMarkerStyle(27); hGfxMassSel->SetMarkerSize(1.2); // open diamond
-                    hGfxMassSel->SetAxisRange(0.0, 1.1, "Y");
-                    hGfxMassSel->Draw("P SAME");
-                    leg_massSplit_SubjetBased_35kHz_gFEX->AddEntry(hGfxMassSel,
-                        Form("[m #geq %.0f GeV] gFEX LRJ E_{T} > %.0f GeV",
-                             offlineLRJMassSel_threshold, thrGfxMS), "lp");
+                    TurnOnCurve gHi;
+                    gHi.h = sig_eff_gFEX_Sim_40kHz_MassSel_vec[fileIt];
+                    gHi.color = colorGFEX; gHi.marker = 27; // open diamond
+                    gHi.label = Form("[m #geq %.0f GeV] gFEX LRJ E_{T} > %.0f GeV",
+                                     offlineLRJMassSel_threshold, thrGfxMS);
+                    massSplit_SubjetBased_35kHz_gFEX_Curves.push_back(gHi);
                 }
                 if(sig_eff_gFEX_Sim_40kHz_NoMassSel_vec.size() > fileIt &&
                    sig_eff_gFEX_Sim_40kHz_NoMassSel_vec[fileIt]){
-                    TH1F* hGfxNoMassSel = sig_eff_gFEX_Sim_40kHz_NoMassSel_vec[fileIt];
-                    hGfxNoMassSel->SetLineColor(colorGFEX); hGfxNoMassSel->SetMarkerColor(colorGFEX);
-                    hGfxNoMassSel->SetMarkerStyle(34); hGfxNoMassSel->SetMarkerSize(1.0); // filled cross
-                    hGfxNoMassSel->SetAxisRange(0.0, 1.1, "Y");
-                    hGfxNoMassSel->Draw("P SAME");
-                    leg_massSplit_SubjetBased_35kHz_gFEX->AddEntry(hGfxNoMassSel,
-                        Form("[m < %.0f GeV] gFEX LRJ E_{T} > %.0f GeV",
-                             offlineLRJMassSel_threshold, thrGfxMS), "lp");
+                    TurnOnCurve gLo;
+                    gLo.h = sig_eff_gFEX_Sim_40kHz_NoMassSel_vec[fileIt];
+                    gLo.color = colorGFEX; gLo.marker = 34; // filled cross
+                    gLo.label = Form("[m < %.0f GeV] gFEX LRJ E_{T} > %.0f GeV",
+                                     offlineLRJMassSel_threshold, thrGfxMS);
+                    massSplit_SubjetBased_35kHz_gFEX_Curves.push_back(gLo);
                 }
             }
-            if(fileIt == (backgroundFiles.size() - 1)){
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_massSplit_SubjetBased_35kHz_gFEX->Draw();
-                cMassSplit_SubjetBased_35kHz_gFEX.cd(); DrawATLASLabel(); cMassSplit_SubjetBased_35kHz_gFEX.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_SubjetBased_40kHz_gFEXoverlay_overlay.pdf");
-            }
+            drawMassSplit(massSplit_SubjetBased_35kHz_gFEX_Curves,
+                          "sig_eff_massSplit_SubjetBased_40kHz_gFEXoverlay_overlay",
+                          Form("5-cat subjet-based E_{T} thresholds @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold));
         }
 
         // ET-only 40 kHz
         if(sig_eff_ETonly_40kHz_MassSel_vec.size() > fileIt &&
            sig_eff_ETonly_40kHz_NoMassSel_vec.size() > fileIt){
-            cMassSplit_ETonly_40kHz.cd();
-            setupMassSplitHist(sig_eff_ETonly_40kHz_MassSel_vec[fileIt],  24);
-            setupMassSplitHist(sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt], 20);
-            leg_massSplit_ETonly_40kHz->AddEntry(sig_eff_ETonly_40kHz_MassSel_vec[fileIt],
-                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
-                     offlineLRJMassSel_threshold,
-                     (intEff_ETonly_40kHz_all_vec.size()>fileIt    ? intEff_ETonly_40kHz_all_vec[fileIt]    : 0.),
-                     (intEff_ETonly_40kHz_massSel_vec.size()>fileIt  ? intEff_ETonly_40kHz_massSel_vec[fileIt]  : 0.),
-                     (intEff_ETonly_40kHz_noMassSel_vec.size()>fileIt ? intEff_ETonly_40kHz_noMassSel_vec[fileIt] : 0.),
-                     msLegConfig.c_str()), "lp");
-            leg_massSplit_ETonly_40kHz->AddEntry(sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt],
-                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
-            if(fileIt == 0){
-                sig_eff_ETonly_40kHz_MassSel_vec[fileIt]->Draw("P");
-                sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
-            } else {
-                sig_eff_ETonly_40kHz_MassSel_vec[fileIt]->Draw("P SAME");
-                sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
-            }
-            if(fileIt == (backgroundFiles.size() - 1)){
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_massSplit_ETonly_40kHz->Draw();
-                cMassSplit_ETonly_40kHz.cd(); DrawATLASLabel(); cMassSplit_ETonly_40kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETonly_40kHz_overlay.pdf");
-            }
+            addMassSplitPair(massSplit_ETonly_40kHz_Curves,
+                sig_eff_ETonly_40kHz_MassSel_vec[fileIt],
+                sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt],
+                (intEff_ETonly_40kHz_all_vec.size()>fileIt      ? intEff_ETonly_40kHz_all_vec[fileIt]       : 0.),
+                (intEff_ETonly_40kHz_massSel_vec.size()>fileIt  ? intEff_ETonly_40kHz_massSel_vec[fileIt]   : 0.),
+                (intEff_ETonly_40kHz_noMassSel_vec.size()>fileIt? intEff_ETonly_40kHz_noMassSel_vec[fileIt] : 0.));
+            drawMassSplit(massSplit_ETonly_40kHz_Curves, "sig_eff_massSplit_ETonly_40kHz_overlay",
+                Form("Lead. LRJ E_{T}-only threshold @ 40 kHz (m_{thr} = %.0f GeV)", offlineLRJMassSel_threshold));
         }
 
         // ET+mass 40 kHz
         if(sig_eff_ETmass_40kHz_MassSel_vec.size() > fileIt &&
            sig_eff_ETmass_40kHz_NoMassSel_vec.size() > fileIt){
-            cMassSplit_ETmass_40kHz.cd();
-            setupMassSplitHist(sig_eff_ETmass_40kHz_MassSel_vec[fileIt],  24);
-            setupMassSplitHist(sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt], 20);
-            leg_massSplit_ETmass_40kHz->AddEntry(sig_eff_ETmass_40kHz_MassSel_vec[fileIt],
-                Form("[m #geq %.0f GeV, #varepsilon_{all}=%.3f, #varepsilon_{#geq}=%.3f, #varepsilon_{<}=%.3f] %s",
-                     offlineLRJMassSel_threshold,
-                     (intEff_ETmass_40kHz_all_vec.size()>fileIt    ? intEff_ETmass_40kHz_all_vec[fileIt]    : 0.),
-                     (intEff_ETmass_40kHz_massSel_vec.size()>fileIt  ? intEff_ETmass_40kHz_massSel_vec[fileIt]  : 0.),
-                     (intEff_ETmass_40kHz_noMassSel_vec.size()>fileIt ? intEff_ETmass_40kHz_noMassSel_vec[fileIt] : 0.),
-                     msLegConfig.c_str()), "lp");
-            leg_massSplit_ETmass_40kHz->AddEntry(sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt],
-                Form("[m < %.0f GeV] %s", offlineLRJMassSel_threshold, msLegConfig.c_str()), "lp");
-            if(fileIt == 0){
-                sig_eff_ETmass_40kHz_MassSel_vec[fileIt]->Draw("P");
-                sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
-            } else {
-                sig_eff_ETmass_40kHz_MassSel_vec[fileIt]->Draw("P SAME");
-                sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt]->Draw("P SAME");
-            }
-            if(fileIt == (backgroundFiles.size() - 1)){
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_massSplit_ETmass_40kHz->Draw();
-                cMassSplit_ETmass_40kHz.cd(); DrawATLASLabel(); cMassSplit_ETmass_40kHz.SaveAs(overlayOutputFileDir + "sig_eff_massSplit_ETmass_40kHz_overlay.pdf");
-            }
+            addMassSplitPair(massSplit_ETmass_40kHz_Curves,
+                sig_eff_ETmass_40kHz_MassSel_vec[fileIt],
+                sig_eff_ETmass_40kHz_NoMassSel_vec[fileIt],
+                (intEff_ETmass_40kHz_all_vec.size()>fileIt      ? intEff_ETmass_40kHz_all_vec[fileIt]       : 0.),
+                (intEff_ETmass_40kHz_massSel_vec.size()>fileIt  ? intEff_ETmass_40kHz_massSel_vec[fileIt]   : 0.),
+                (intEff_ETmass_40kHz_noMassSel_vec.size()>fileIt? intEff_ETmass_40kHz_noMassSel_vec[fileIt] : 0.));
+            drawMassSplit(massSplit_ETmass_40kHz_Curves, "sig_eff_massSplit_ETmass_40kHz_overlay",
+                Form("Trigger: E_{T} > %.0f GeV + const. mass > %.0f GeV @ 40 kHz",
+                     thr_ET_mass_40kHz_vec.empty() ? -1.0 : thr_ET_mass_40kHz_vec[0],
+                     thr_mass_min_40kHz_vec.empty() ? -1.0 : thr_mass_min_40kHz_vec[0]));
         }
 
         // Subjet-based vs ET-only comparison (no mass split) @ 40 kHz
         if(sig_eff_offlineLRJ35kHz_SubjetBased_vec.size() > fileIt &&
            sig_eff_ETonly_40kHz_vec.size() > fileIt){
-            cCompare_SubjetVsET_40kHz.cd();
-            setupMassSplitHist(sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt], 26); // open triangle = subjet-based
-            setupMassSplitHist(sig_eff_ETonly_40kHz_vec[fileIt],               20); // closed circle = ET-only
             // Config label: IO type dropped, seed type kept, merge cut shown as d_{search}
             std::string cmpLegConfig = Form("Seed: %s, %s", seedLabel.c_str(), dSearchLabel.c_str());
             double thrETonly_p = (thr_ET_only_40kHz_vec.size() > fileIt ? thr_ET_only_40kHz_vec[fileIt] : -1.0);
-            leg_compare_SubjetVsET_40kHz->AddEntry(sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt],
-                Form("Subjet-based, %s [#varepsilon_{int}=%.3f], %s",
+            {
+                TurnOnCurve tcSub, tcEt;
+                tcSub.h = sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt];
+                tcSub.color = color; tcSub.marker = 26;   // open triangle  = subjet-based
+                tcSub.label = Form("Subjet-based, %s [#varepsilon_{int}=%.3f], %s",
                      legLabelSig_SampleInfoOnly.c_str(),
                      (intEff_SubjetBased_35kHz_all_vec.size()>fileIt ? intEff_SubjetBased_35kHz_all_vec[fileIt] : 0.),
-                     cmpLegConfig.c_str()), "lp");
-            leg_compare_SubjetVsET_40kHz->AddEntry(sig_eff_ETonly_40kHz_vec[fileIt],
-                Form("Lead. LRJ E_{T} > %.0f GeV only, %s [#varepsilon_{int}=%.3f], %s",
+                     cmpLegConfig.c_str());
+                tcEt.h = sig_eff_ETonly_40kHz_vec[fileIt];
+                tcEt.color = color; tcEt.marker = 20;     // filled circle  = E_T-only
+                tcEt.label = Form("Lead. LRJ E_{T} > %.0f GeV only, %s [#varepsilon_{int}=%.3f], %s",
                      thrETonly_p,
                      legLabelSig_SampleInfoOnly.c_str(),
                      (intEff_ETonly_40kHz_all_vec.size()>fileIt ? intEff_ETonly_40kHz_all_vec[fileIt] : 0.),
-                     cmpLegConfig.c_str()), "lp");
-            if(fileIt == 0){
-                // Overlay gFEX (Resim) LRJ E_T-only turn-on once per sample type
-                if(sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt){
-                    drawnGFexResimModes_compare.push_back(mode);
-                    TH1F* hGfx = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
-                    hGfx->SetLineColor(colorGFEX); hGfx->SetMarkerColor(colorGFEX);
-                    hGfx->SetMarkerStyle(33); hGfx->SetMarkerSize(1.2); // filled diamond = gFEX (Resim)
-                    hGfx->SetAxisRange(0.0, 1.1, "Y");
-                    hGfx->Draw("P SAME");
-                    leg_compare_SubjetVsET_40kHz->AddEntry(hGfx,
-                        Form("gFEX LRJ E_{T} > %.0f GeV only, %s",
-                            (thr_gFEX_Sim_40kHz_vec.size()>fileIt ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0),
-                            legLabelSig_SampleInfoOnly.c_str()), "lp");
-                }
-                sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->Draw("P");
-                // Cut display range at 700 GeV (bin contents untouched)
-                sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->GetXaxis()->SetRangeUser(
-                sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->GetXaxis()->GetXmin(), 700.0);
-                sig_eff_ETonly_40kHz_vec[fileIt]->Draw("P SAME");
-            } else {
-                sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt]->Draw("P SAME");
-                sig_eff_ETonly_40kHz_vec[fileIt]->Draw("P SAME");
+                     cmpLegConfig.c_str());
+                compareSubjetVsET40kHzCurves.push_back(tcSub);
+                compareSubjetVsET40kHzCurves.push_back(tcEt);
             }
-            
+            // gFEX (Resim) LRJ E_T-only turn-on, once per sample type
+            if(fileIt == 0 && sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt){
+                drawnGFexResimModes_compare.push_back(mode);
+                TurnOnCurve tcGfx;
+                tcGfx.h = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
+                tcGfx.color = colorGFEX; tcGfx.marker = 33;   // filled diamond = gFEX (Resim)
+                tcGfx.label = Form("gFEX LRJ E_{T} > %.0f GeV only, %s",
+                            (thr_gFEX_Sim_40kHz_vec.size()>fileIt ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0),
+                            legLabelSig_SampleInfoOnly.c_str());
+                compareSubjetVsET40kHzCurves.push_back(tcGfx);
+            }
+
             if(fileIt == (backgroundFiles.size() - 1)){
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                leg_compare_SubjetVsET_40kHz->Draw();
-                cCompare_SubjetVsET_40kHz.cd(); DrawATLASLabel(); cCompare_SubjetVsET_40kHz.SaveAs(overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_overlay.pdf");
+                TurnOnOpts cmpOpts;
+                cmpOpts.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+                cmpOpts.legendHeader = "Subjet-based vs lead. LRJ E_{T}-only thresholds @ 40 kHz";
+                cmpOpts.spectrum     = sig_h_leading_offlineLRJ_Et;
+                DrawTurnOnWithRatio(compareSubjetVsET40kHzCurves, cmpOpts,
+                                    overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_overlay.pdf");
+            }
+        }
+
+        // Config-first legend copy of the canvas above. Same curves, same markers, same gFEX
+        // reference; only the legend text differs (selection first, then the input-object
+        // configuration, then the process without its production-mode bracket).
+        if(sig_eff_offlineLRJ35kHz_SubjetBased_vec.size() > fileIt &&
+           sig_eff_ETonly_40kHz_vec.size() > fileIt){
+            const double thrETonly_cfg = (thr_ET_only_40kHz_vec.size() > fileIt
+                                          ? thr_ET_only_40kHz_vec[fileIt] : -1.0);
+            TurnOnCurve tcSubCfg, tcEtCfg;
+            tcSubCfg.h = sig_eff_offlineLRJ35kHz_SubjetBased_vec[fileIt];
+            tcSubCfg.color = color; tcSubCfg.marker = 26;   // open triangle  = subjet-based
+            tcSubCfg.label = Form("Subjet-based [#varepsilon_{int}=%.3f], %s, %s",
+                     (intEff_SubjetBased_35kHz_all_vec.size()>fileIt ? intEff_SubjetBased_35kHz_all_vec[fileIt] : 0.),
+                     configFirstLegLabel.c_str(),
+                     procLabelNoProdMode.c_str());
+            tcEtCfg.h = sig_eff_ETonly_40kHz_vec[fileIt];
+            tcEtCfg.color = color; tcEtCfg.marker = 20;     // filled circle  = E_T-only
+            tcEtCfg.label = Form("Lead. LRJ E_{T} > %.0f GeV [#varepsilon_{int}=%.3f], %s, %s",
+                     thrETonly_cfg,
+                     (intEff_ETonly_40kHz_all_vec.size()>fileIt ? intEff_ETonly_40kHz_all_vec[fileIt] : 0.),
+                     configFirstLegLabel.c_str(),
+                     procLabelNoProdMode.c_str());
+            compareSubjetVsET40kHzConfigLegCurves.push_back(tcSubCfg);
+            compareSubjetVsET40kHzConfigLegCurves.push_back(tcEtCfg);
+
+            // gFEX (Resim) reference, once per process exactly as on the original.
+            {
+                bool gFexCfgDrawn = false;
+                for(const auto& m : drawnGFexResimModes_configLegCompare) if(m == mode) gFexCfgDrawn = true;
+                if(!gFexCfgDrawn && sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt &&
+                   sig_eff_gFEX_Sim_40kHz_vec[fileIt]){
+                    drawnGFexResimModes_configLegCompare.push_back(mode);
+                    TurnOnCurve tcGfxCfg;
+                    tcGfxCfg.h = sig_eff_gFEX_Sim_40kHz_vec[fileIt];
+                    tcGfxCfg.color = colorGFEX; tcGfxCfg.marker = 33;
+                    tcGfxCfg.label = Form("gFEX LRJ E_{T} > %.0f GeV, %s",
+                             (thr_gFEX_Sim_40kHz_vec.size()>fileIt ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0),
+                             procLabelNoProdMode.c_str());
+                    compareSubjetVsET40kHzConfigLegCurves.push_back(tcGfxCfg);
+                }
+            }
+
+            if(fileIt == (backgroundFiles.size() - 1)){
+                TurnOnOpts cfgOpts;
+                cfgOpts.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+                cfgOpts.legendHeader = "Subjet-based vs lead. LRJ E_{T}-only thresholds @ 40 kHz";
+                cfgOpts.spectrum     = sig_h_leading_offlineLRJ_Et;
+                DrawTurnOnWithRatio(compareSubjetVsET40kHzConfigLegCurves, cfgOpts,
+                    overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_overlay_configLegend.pdf");
             }
         }
 
@@ -24328,109 +24827,77 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                     seedSuffixLeadTO   = Form(", Seed: %s", seedDisabledTO.c_str());
                 }
 
-                cCompare_SubjetVsET_40kHz_seedComparison.cd();
-
                 TH1F* hLeadTO   = sig_eff_ETonly_40kHz_vec[idxDisabledTO];
                 TH1F* hSubjetTO = sig_eff_offlineLRJ35kHz_SubjetBased_vec[idxEnabledTO];
-
-                hLeadTO->SetLineColor(colLead);     hLeadTO->SetMarkerColor(colLead);
-                hLeadTO->SetMarkerStyle(21);        hLeadTO->SetMarkerSize(0.8); // filled square
-                hLeadTO->SetAxisRange(0.0, 1.1, "Y");
-                hSubjetTO->SetLineColor(colSubjet); hSubjetTO->SetMarkerColor(colSubjet);
-                hSubjetTO->SetMarkerStyle(26);      hSubjetTO->SetMarkerSize(0.8); // open triangle
-                hSubjetTO->SetAxisRange(0.0, 1.1, "Y");
-
-                hSubjetTO->Draw("P");
-                // Cut display range at 700 GeV (bin contents untouched).
-                hSubjetTO->GetXaxis()->SetRangeUser(hSubjetTO->GetXaxis()->GetXmin(), 700.0);
-                hLeadTO->Draw("P SAME");
-
                 // gFEX overlay (d_{search}-independent; take from the enabled file).
-                TH1F* hGfxTO = nullptr;
-                if(sig_eff_gFEX_Sim_40kHz_vec.size() > (size_t)idxEnabledTO &&
-                   sig_eff_gFEX_Sim_40kHz_vec[idxEnabledTO]){
-                    hGfxTO = sig_eff_gFEX_Sim_40kHz_vec[idxEnabledTO];
-                    hGfxTO->SetLineColor(colGfx); hGfxTO->SetMarkerColor(colGfx);
-                    hGfxTO->SetMarkerStyle(33);   hGfxTO->SetMarkerSize(1.2); // filled diamond
-                    hGfxTO->SetAxisRange(0.0, 1.1, "Y");
-                    hGfxTO->Draw("P SAME");
-                }
+                TH1F* hGfxTO = (sig_eff_gFEX_Sim_40kHz_vec.size() > (size_t)idxEnabledTO)
+                             ? sig_eff_gFEX_Sim_40kHz_vec[idxEnabledTO] : nullptr;
 
-                // Offline leading LRJ E_T distribution drawn in the background.
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                // Re-draw the turn-on markers so they sit on top of the distribution.
-                hSubjetTO->Draw("P SAME");
-                hLeadTO->Draw("P SAME");
-                if(hGfxTO) hGfxTO->Draw("P SAME");
-
-                legSeedCompare_TurnOn->Clear();
-                legSeedCompare_TurnOn->SetHeader(headerTO.c_str(), "C"); // re-set: Clear() drops it
-                legSeedCompare_TurnOn->AddEntry(hSubjetTO,
-                    Form("Seed Opt., Subjet-based E_{T} cut%s", seedSuffixSubjetTO.c_str()), "lp");
-                legSeedCompare_TurnOn->AddEntry(hLeadTO,
-                    Form("Seeded cone only, Lead. LRJ E_{T} cut%s", seedSuffixLeadTO.c_str()), "lp");
-                if(hGfxTO) legSeedCompare_TurnOn->AddEntry(hGfxTO, "gFEX Lead. LRJ E_{T} cut", "lp");
-                legSeedCompare_TurnOn->Draw();
-
-                cCompare_SubjetVsET_40kHz_seedComparison.cd();
-                DrawATLASLabel();
                 // Single physics process: shown to the right of the ATLAS labels.
                 std::string procLabelTO = legLabelSig_SampleInfoOnly;
                 { size_t hp = procLabelTO.find("[had]");
                   if(hp != std::string::npos) procLabelTO.replace(hp, 5, "[hadronically decaying]"); }
-                TLatex procTexTO; procTexTO.SetNDC(); procTexTO.SetTextFont(42);
-                procTexTO.SetTextColor(kBlack); procTexTO.SetTextSize(0.04);
-                procTexTO.DrawLatex(0.62, 0.945, procLabelTO.c_str());
 
-                cCompare_SubjetVsET_40kHz_seedComparison.SaveAs(overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_seedComparison_overlay.pdf");
-
-                // --- Copy of the plot above, with per-curve integrated-efficiency printouts
-                //     (total, lead. offline LRJ mass >= threshold, < threshold) placed at the
-                //     top right just below the process label, colour-matched to each curve.
-                cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts.cd();
-                hSubjetTO->Draw("P");
-                hSubjetTO->GetXaxis()->SetRangeUser(hSubjetTO->GetXaxis()->GetXmin(), 700.0);
-                hLeadTO->Draw("P SAME");
-                if(hGfxTO) hGfxTO->Draw("P SAME");
-                sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                hSubjetTO->Draw("P SAME");
-                hLeadTO->Draw("P SAME");
-                if(hGfxTO) hGfxTO->Draw("P SAME");
-                legSeedCompare_TurnOn->Draw();
-                DrawATLASLabel();
-                procTexTO.DrawLatex(0.62, 0.945, procLabelTO.c_str());
-
-                // Safe accessor for per-file integrated efficiencies.
-                auto ieAt = [](const std::vector<double>& v, int idx) -> double {
-                    return (idx >= 0 && (size_t)idx < v.size()) ? v[idx] : 0.0;
-                };
-                TLatex ieTex; ieTex.SetNDC(); ieTex.SetTextFont(42); ieTex.SetTextSize(0.026);
-                const double xIE = 0.585, yIE = 0.895, dyIE = 0.040;
-                ieTex.SetTextColor(kBlack);
-                ieTex.DrawLatex(xIE, yIE,
-                    Form("#varepsilon_{int}: all, m #geq %.0f, m < %.0f GeV", offlineLRJMassSel_threshold, offlineLRJMassSel_threshold));
-                ieTex.SetTextColor(colSubjet);
-                ieTex.DrawLatex(xIE, yIE - dyIE,
-                    Form("Subjet-based E_{T}: %.3f, %.3f, %.3f",
-                         ieAt(intEff_SubjetBased_35kHz_all_vec,      idxEnabledTO),
-                         ieAt(intEff_SubjetBased_35kHz_massSel_vec,  idxEnabledTO),
-                         ieAt(intEff_SubjetBased_35kHz_noMassSel_vec,idxEnabledTO)));
-                ieTex.SetTextColor(colLead);
-                ieTex.DrawLatex(xIE, yIE - 2*dyIE,
-                    Form("Lead. LRJ E_{T}: %.3f, %.3f, %.3f",
-                         ieAt(intEff_ETonly_40kHz_all_vec,      idxDisabledTO),
-                         ieAt(intEff_ETonly_40kHz_massSel_vec,  idxDisabledTO),
-                         ieAt(intEff_ETonly_40kHz_noMassSel_vec,idxDisabledTO)));
-                if(hGfxTO){
-                    ieTex.SetTextColor(colGfx);
-                    ieTex.DrawLatex(xIE, yIE - 3*dyIE,
-                        Form("gFEX Lead. LRJ E_{T}: %.3f, %.3f, %.3f",
-                             ieAt(intEff_gFEX_ETonly_40kHz_all_vec,      idxEnabledTO),
-                             ieAt(intEff_gFEX_ETonly_40kHz_massSel_vec,  idxEnabledTO),
-                             ieAt(intEff_gFEX_ETonly_40kHz_noMassSel_vec,idxEnabledTO)));
+                std::vector<TurnOnCurve> seedCompareTOCurves;
+                {
+                    TurnOnCurve s, l;
+                    s.h = hSubjetTO; s.color = colSubjet; s.marker = 26;  // open triangle
+                    s.label = Form("Seed Opt., Subjet-based E_{T} cut%s", seedSuffixSubjetTO.c_str());
+                    l.h = hLeadTO;   l.color = colLead;   l.marker = 21;  // filled square
+                    l.label = Form("Seeded cone only, Lead. LRJ E_{T} cut%s", seedSuffixLeadTO.c_str());
+                    seedCompareTOCurves.push_back(s);
+                    seedCompareTOCurves.push_back(l);
+                    if(hGfxTO){
+                        TurnOnCurve g;
+                        g.h = hGfxTO; g.color = colGfx; g.marker = 33;    // filled diamond
+                        g.label = "gFEX Lead. LRJ E_{T} cut";
+                        seedCompareTOCurves.push_back(g);
+                    }
                 }
 
-                cCompare_SubjetVsET_40kHz_seedComparison_effPrintouts.SaveAs(overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_seedComparison_effPrintouts_overlay.pdf");
+                TurnOnOpts seedTOOpts;
+                seedTOOpts.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+                seedTOOpts.legendHeader = headerTO;
+                seedTOOpts.processLabel = procLabelTO;
+                seedTOOpts.spectrum     = sig_h_leading_offlineLRJ_Et;
+                DrawTurnOnWithRatio(seedCompareTOCurves, seedTOOpts,
+                    overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_seedComparison_overlay.pdf");
+
+                // --- Copy of the plot above carrying per-curve integrated efficiencies
+                //     (total, lead. offline LRJ mass >= threshold, < threshold). These used to
+                //     be colour-matched TLatex lines in the top-right corner; with the legend
+                //     now occupying that corner they ride on the legend entries themselves,
+                //     which is where their colour coding comes from for free.
+                {
+                    // Safe accessor for per-file integrated efficiencies.
+                    auto ieAt = [](const std::vector<double>& v, int idx) -> double {
+                        return (idx >= 0 && (size_t)idx < v.size()) ? v[idx] : 0.0;
+                    };
+                    std::vector<TurnOnCurve> seedCompareTOEffCurves = seedCompareTOCurves;
+                    seedCompareTOEffCurves[0].label += Form(" [#varepsilon_{int} = %.3f, %.3f, %.3f]",
+                         ieAt(intEff_SubjetBased_35kHz_all_vec,      idxEnabledTO),
+                         ieAt(intEff_SubjetBased_35kHz_massSel_vec,  idxEnabledTO),
+                         ieAt(intEff_SubjetBased_35kHz_noMassSel_vec,idxEnabledTO));
+                    seedCompareTOEffCurves[1].label += Form(" [#varepsilon_{int} = %.3f, %.3f, %.3f]",
+                         ieAt(intEff_ETonly_40kHz_all_vec,      idxDisabledTO),
+                         ieAt(intEff_ETonly_40kHz_massSel_vec,  idxDisabledTO),
+                         ieAt(intEff_ETonly_40kHz_noMassSel_vec,idxDisabledTO));
+                    if(seedCompareTOEffCurves.size() > 2)
+                        seedCompareTOEffCurves[2].label += Form(" [#varepsilon_{int} = %.3f, %.3f, %.3f]",
+                             ieAt(intEff_gFEX_ETonly_40kHz_all_vec,      idxEnabledTO),
+                             ieAt(intEff_gFEX_ETonly_40kHz_massSel_vec,  idxEnabledTO),
+                             ieAt(intEff_gFEX_ETonly_40kHz_noMassSel_vec,idxEnabledTO));
+
+                    TurnOnOpts effOpts = seedTOOpts;
+                    // Says what the three numbers in each entry are, once, instead of per row.
+                    effOpts.legendHeader = headerTO
+                        + Form("   [#varepsilon_{int}: all, m #geq %.0f GeV, m < %.0f GeV]",
+                               offlineLRJMassSel_threshold, offlineLRJMassSel_threshold);
+                    // One entry per row: these labels are far too wide to sit two abreast.
+                    effOpts.legendCols = 1;
+                    DrawTurnOnWithRatio(seedCompareTOEffCurves, effOpts,
+                        overlayOutputFileDir + "sig_eff_compare_SubjetVsET_40kHz_seedComparison_effPrintouts_overlay.pdf");
+                }
 
                 // --- Category-split twins of the plot above -------------------------------
                 // Same three approaches, same files, same 40 kHz thresholds — each drawn twice,
@@ -24441,8 +24908,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 // Curves keep the colour they have on the inclusive plot, so an approach is
                 // recognisable across all three canvases; the category is carried by the marker
                 // (open = passing, filled = failing) and appended to the legend label.
-                auto drawSeedCompareSplit = [&](TCanvas& canv, TLegend* leg,
-                                                TH1F* hSubjHi, TH1F* hSubjLo,
+                auto drawSeedCompareSplit = [&](TH1F* hSubjHi, TH1F* hSubjLo,
                                                 TH1F* hLeadHi, TH1F* hLeadLo,
                                                 TH1F* hGfxHi,  TH1F* hGfxLo,
                                                 const std::string& hiLabel,
@@ -24455,59 +24921,33 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                   << ": missing one of the split turn-ons — skipped\n";
                         return;
                     }
-                    canv.cd();
-                    leg->Clear();
-                    leg->SetHeader(headerTO.c_str(), "C");
-
-                    // Clone: these same histograms are drawn on other overlays and the axis
-                    // ranges/styles live on the object.
-                    auto styleClone = [&](TH1F* h, Color_t col, Style_t mk, double mkSize){
-                        TH1F* c = (TH1F*)h->Clone(Form("%s_%s_%u", outName, h->GetName(), fileIt));
-                        c->SetDirectory(nullptr);
-                        c->SetLineColor(col); c->SetMarkerColor(col); c->SetLineWidth(2);
-                        c->SetMarkerStyle(mk); c->SetMarkerSize(mkSize);
-                        c->SetAxisRange(0.0, 1.1, "Y");
-                        return c;
+                    // Open marker = passes the category, filled = fails it. Same wording as the
+                    // inclusive plot, with the category appended.
+                    std::vector<TurnOnCurve> split;
+                    auto addSplit = [&](TH1F* h, Color_t col, Style_t mk, const char* fmt,
+                                        const std::string& suffix, const std::string& cat){
+                        if(!h) return;
+                        TurnOnCurve c;
+                        c.h = h; c.color = col; c.marker = mk;
+                        c.label = Form(fmt, suffix.c_str(), cat.c_str());
+                        split.push_back(c);
                     };
-                    // Open marker = passes the category, filled = fails it.
-                    TH1F* cSubjHi = styleClone(hSubjHi, colSubjet, 26, 0.8); // open triangle
-                    TH1F* cSubjLo = styleClone(hSubjLo, colSubjet, 22, 0.8); // filled triangle
-                    TH1F* cLeadHi = styleClone(hLeadHi, colLead,   25, 0.8); // open square
-                    TH1F* cLeadLo = styleClone(hLeadLo, colLead,   21, 0.8); // filled square
-                    TH1F* cGfxHi  = hGfxHi ? styleClone(hGfxHi, colGfx, 27, 1.2) : nullptr; // open diamond
-                    TH1F* cGfxLo  = hGfxLo ? styleClone(hGfxLo, colGfx, 33, 1.2) : nullptr; // filled diamond
+                    const char* fmtSubj = "Seed Opt., Subjet-based E_{T} cut%s (%s)";
+                    const char* fmtLead = "Seeded cone only, Lead. LRJ E_{T} cut%s (%s)";
+                    const char* fmtGfx  = "gFEX Lead. LRJ E_{T} cut%s(%s)";
+                    addSplit(hSubjHi, colSubjet, 26, fmtSubj, seedSuffixSubjetTO, hiLabel); // open triangle
+                    addSplit(hSubjLo, colSubjet, 22, fmtSubj, seedSuffixSubjetTO, loLabel); // filled triangle
+                    addSplit(hLeadHi, colLead,   25, fmtLead, seedSuffixLeadTO,   hiLabel); // open square
+                    addSplit(hLeadLo, colLead,   21, fmtLead, seedSuffixLeadTO,   loLabel); // filled square
+                    addSplit(hGfxHi,  colGfx,    27, fmtGfx,  " ",                hiLabel); // open diamond
+                    addSplit(hGfxLo,  colGfx,    33, fmtGfx,  " ",                loLabel); // filled diamond
 
-                    cSubjHi->Draw("P");
-                    cSubjHi->GetXaxis()->SetRangeUser(cSubjHi->GetXaxis()->GetXmin(), 700.0);
-                    cSubjLo->Draw("P SAME");
-                    cLeadHi->Draw("P SAME"); cLeadLo->Draw("P SAME");
-                    if(cGfxHi) cGfxHi->Draw("P SAME");
-                    if(cGfxLo) cGfxLo->Draw("P SAME");
-
-                    // Offline E_T distribution behind, then the markers again on top of it.
-                    sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                    cSubjHi->Draw("P SAME"); cSubjLo->Draw("P SAME");
-                    cLeadHi->Draw("P SAME"); cLeadLo->Draw("P SAME");
-                    if(cGfxHi) cGfxHi->Draw("P SAME");
-                    if(cGfxLo) cGfxLo->Draw("P SAME");
-
-                    // Same wording as the inclusive plot, with the category appended.
-                    leg->AddEntry(cSubjHi, Form("Seed Opt., Subjet-based E_{T} cut%s (%s)",
-                                                seedSuffixSubjetTO.c_str(), hiLabel.c_str()), "lp");
-                    leg->AddEntry(cSubjLo, Form("Seed Opt., Subjet-based E_{T} cut%s (%s)",
-                                                seedSuffixSubjetTO.c_str(), loLabel.c_str()), "lp");
-                    leg->AddEntry(cLeadHi, Form("Seeded cone only, Lead. LRJ E_{T} cut%s (%s)",
-                                                seedSuffixLeadTO.c_str(), hiLabel.c_str()), "lp");
-                    leg->AddEntry(cLeadLo, Form("Seeded cone only, Lead. LRJ E_{T} cut%s (%s)",
-                                                seedSuffixLeadTO.c_str(), loLabel.c_str()), "lp");
-                    if(cGfxHi) leg->AddEntry(cGfxHi, Form("gFEX Lead. LRJ E_{T} cut (%s)", hiLabel.c_str()), "lp");
-                    if(cGfxLo) leg->AddEntry(cGfxLo, Form("gFEX Lead. LRJ E_{T} cut (%s)", loLabel.c_str()), "lp");
-                    leg->Draw();
-
-                    canv.cd();
-                    DrawATLASLabel();
-                    procTexTO.DrawLatex(0.62, 0.945, procLabelTO.c_str());
-                    canv.SaveAs(overlayOutputFileDir + outName + ".pdf");
+                    TurnOnOpts splitOpts;
+                    splitOpts.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+                    splitOpts.legendHeader = headerTO;
+                    splitOpts.processLabel = procLabelTO;
+                    splitOpts.spectrum     = sig_h_leading_offlineLRJ_Et;
+                    DrawTurnOnWithRatio(split, splitOpts, overlayOutputFileDir + outName + ".pdf");
                 };
 
                 // Offline truth-subjet count of the leading LRJ (>= 2 vs <= 1). The count is the
@@ -24517,7 +24957,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 auto atOrNull = [](const std::vector<TH1F*>& v, int idx) -> TH1F* {
                     return (idx >= 0 && (size_t)idx < v.size()) ? v[idx] : nullptr;
                 };
-                drawSeedCompareSplit(cSeedCompare_TurnOn_SubjetSplit, legSeedCompare_TurnOn_SubjetSplit,
+                drawSeedCompareSplit(
                     atOrNull(sig_eff_offlineLRJ35kHz_SubjetBased_SubjGe2_vec, idxEnabledTO),
                     atOrNull(sig_eff_offlineLRJ35kHz_SubjetBased_SubjLt2_vec, idxEnabledTO),
                     atOrNull(sig_eff_ETonly_40kHz_SubjGe2_vec, idxDisabledTO),
@@ -24528,7 +24968,7 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                     "sig_eff_compare_SubjetVsET_40kHz_seedComparison_subjetSplit_overlay");
 
                 // Offline leading LRJ mass, against the same threshold the mass-split overlays use.
-                drawSeedCompareSplit(cSeedCompare_TurnOn_MassSplit, legSeedCompare_TurnOn_MassSplit,
+                drawSeedCompareSplit(
                     atOrNull(sig_eff_offlineLRJ35kHz_SubjetBased_MassSel_vec,   idxEnabledTO),
                     atOrNull(sig_eff_offlineLRJ35kHz_SubjetBased_NoMassSel_vec, idxEnabledTO),
                     atOrNull(sig_eff_ETonly_40kHz_MassSel_vec,   idxDisabledTO),
@@ -24874,6 +25314,82 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             c9_Log.cd(); DrawATLASLabel(); c9_Log.SaveAs(overlayOutputFileDir + "subjetBased_ET_Scan_RatesVsEff.pdf");
         }
 
+        // Config-first legend copy of the canvas above: identical curves, 40 kHz lines and
+        // gFEX reference, relabelled. Cloned rather than redrawn — these graphs are already on
+        // c7_Log/c9_Log, and a graph's frame histogram is shared across every pad it is drawn
+        // on, so setting this canvas's axis ranges would silently retitle those.
+        {
+            cSubjetVsET_RatesVsEff_ConfigLeg.cd();
+
+            TGraph* gSubjetCfg = (TGraph*)subjetBased_ET_Scan_RatesVsEff_vec[fileIt]->Clone(
+                Form("ratesConfigLeg_subjet_%u", fileIt));
+            TGraph* gLeadCfg = (TGraph*)lead_ET_Scan_RatesVsEff_vec[fileIt]->Clone(
+                Form("ratesConfigLeg_lead_%u", fileIt));
+
+            legSubjetVsET_RatesVsEff_ConfigLeg->AddEntry(gSubjetCfg,
+                Form("Subjet-based E_{T} cut, %s, %s",
+                     configFirstLegLabel.c_str(), procLabelNoProdMode.c_str()), "p");
+            legSubjetVsET_RatesVsEff_ConfigLeg->AddEntry(gLeadCfg,
+                Form("Lead. LRJ E_{T} cut, %s, %s",
+                     configFirstLegLabel.c_str(), procLabelNoProdMode.c_str()), "p");
+
+            if(!subjetVsET_RatesVsEff_ConfigLeg_AxesDrawn){
+                gSubjetCfg->Draw("AP");
+                gLeadCfg->Draw("P SAME");
+                gPad->Update();                       // frame histogram only exists after a paint
+                if(TH1* frameCfg = gSubjetCfg->GetHistogram()){
+                    frameCfg->SetMinimum(50.0);       // log axis needs a positive floor
+                    frameCfg->SetMaximum(1.0e5);
+                    frameCfg->GetXaxis()->SetLimits(0.0, 1.0);
+                }
+                gPad->Modified();
+                gPad->Update();
+                subjetVsET_RatesVsEff_ConfigLeg_AxesDrawn = true;
+            } else {
+                gSubjetCfg->Draw("P SAME");
+                gLeadCfg->Draw("P SAME");
+            }
+
+            // gFEX (Resim) E_T-only scan, once per process, as on the original.
+            {
+                bool gFexCfgDrawn = false;
+                for(const auto& m : drawnGFexResimModes_configLegRateEff) if(m == mode) gFexCfgDrawn = true;
+                if(!gFexCfgDrawn && gFEX_Sim_ET_Scan_RatesVsEff_vec.size() > fileIt &&
+                   gFEX_Sim_ET_Scan_RatesVsEff_vec[fileIt]){
+                    drawnGFexResimModes_configLegRateEff.push_back(mode);
+                    TGraph* gGfxCfg = (TGraph*)gFEX_Sim_ET_Scan_RatesVsEff_vec[fileIt]->Clone(
+                        Form("ratesConfigLeg_gFEX_%u", fileIt));
+                    gGfxCfg->SetLineColor(colorGFEX); gGfxCfg->SetMarkerColor(colorGFEX);
+                    gGfxCfg->SetMarkerStyle(33); gGfxCfg->SetMarkerSize(1.0);
+                    gGfxCfg->Draw("P SAME");
+                    legSubjetVsET_RatesVsEff_ConfigLeg->AddEntry(gGfxCfg,
+                        Form("gFEX LRJ E_{T} cut, %s", procLabelNoProdMode.c_str()), "p");
+                }
+            }
+
+            // Per-file marker of the best efficiency reachable at 40 kHz, subjet-based.
+            {
+                auto best40kCfg = FindBestPointBelowRate(gSubjetCfg, 4e4);
+                TLine* vline40kCfg = new TLine(best40kCfg.first, 50.0, best40kCfg.first, 4e4);
+                vline40kCfg->SetLineColor(color);
+                vline40kCfg->SetLineStyle(2);
+                vline40kCfg->SetLineWidth(2);
+                vline40kCfg->Draw("SAME");
+            }
+
+            if(fileIt == (backgroundFiles.size() - 1)){
+                TLine* hline40kCfg = new TLine(gPad->GetUxmin(), 4e4, gPad->GetUxmax(), 4e4);
+                hline40kCfg->SetLineColor(kGray + 2);
+                hline40kCfg->SetLineStyle(2);
+                hline40kCfg->SetLineWidth(2);
+                hline40kCfg->Draw("SAME");
+                legSubjetVsET_RatesVsEff_ConfigLeg->Draw();
+                cSubjetVsET_RatesVsEff_ConfigLeg.cd(); DrawATLASLabel();
+                cSubjetVsET_RatesVsEff_ConfigLeg.SaveAs(
+                    overlayOutputFileDir + "subjetBased_ET_Scan_RatesVsEff_configLegend.pdf");
+            }
+        }
+
         // === Re-clustering comparison, E_T-only legs at 40 kHz ===============
         // BasicV2 emits no substructure at all (all four substructure fields are 0-bit in its
         // generated constants, so SubjetMultiplicity is 0 for every jet), which makes the
@@ -24884,10 +25400,34 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // re-clustered into the large-R jet. Input object type is the honest discriminator
         // here — it happens to track v2/v3 in this comparison, but it is what the label says.
         {
-            const std::string reclusterLabel =
-                (inputObjectType == "ConeJets") ? "Re-clustering Jets"
-              : (inputObjectType == "Towers")   ? "Re-clustering Towers"
+            // When the overlay mixes input-object COUNTS, the count is what distinguishes
+            // the curves, so it goes in the noun: "128 Towers" rather than "Towers" twice.
+            // When every file uses the same count it is constant across the legend and
+            // would only eat width, so it is left out.
+            // overlayMixesNIOs is the same flag that drives the "IOs = N" legend suffix
+            // elsewhere; nInputObjectsAlgorithmConfiguration is this file's count, parsed
+            // from _IOs_<N>_ in the tagger name.
+            const std::string reclusterNoun =
+                (inputObjectType == "ConeJets") ? "Jets"
+              : (inputObjectType == "Towers")   ? "Towers"
                                                 : inputObjectType;
+            // "Re-clustering" is dropped from the noun: every curve on these canvases is a
+            // re-clustered large-R jet, so the word was constant across the legend and only
+            // ate the width now spent on the two things that DO differ — the input-tower E_T
+            // cut and the pileup suppression, both parsed out of the tagger filename.
+            std::string reclusterLabel =
+                (overlayMixesNIOs && nInputObjectsAlgorithmConfiguration > 0)
+                    ? Form("%u %s", nInputObjectsAlgorithmConfiguration, reclusterNoun.c_str())
+                    : ((inputObjectType == "ConeJets" || inputObjectType == "Towers")
+                           ? reclusterNoun
+                           : inputObjectType);
+            // T0 is printed as "> 0 GeV" rather than "no cut": the comparison these canvases
+            // exist for is T0 against T2, and the two read as one scale that way. Omitted
+            // entirely for names predating the _T<n> tag, where the value is unknown.
+            if (fileInfo.inputTowerEtThreshold >= 0.0)
+                reclusterLabel += Form(", E_{T, tower} > %.0f GeV", fileInfo.inputTowerEtThreshold);
+            if (!fileInfo.puSuppression.empty())
+                reclusterLabel += ", " + fileInfo.puSuppression;
 
             // ---- (a) rate vs efficiency, E_T-only legs only ----------------
             // Colours come from the same colourblind-friendly Petroff palette the rest of the
@@ -24903,8 +25443,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             gLeadEt->SetMarkerColor(color);
             gLeadEt->SetMarkerStyle(21);   // filled square = lead LRJ E_T cut
             gLeadEt->SetMarkerSize(0.6);
+            // On a mixed-pileup overlay the pileup is the whole point of the comparison, so
+            // it goes in the entry itself — the ATLAS info line can only say "140, 200".
+            // puSuffixRecluster is empty for single-pileup runs, leaving those legends as
+            // they were.
+            const std::string puSuffixRecluster = overlayMixesPileup
+                ? Form(", #LTPU#GT = %d", PileupFromPath(
+                      backgroundFiles[fileIt].first + " " + backgroundFiles[fileIt].second))
+                : std::string();
             legReclusterEtOnly->AddEntry(gLeadEt,
-                Form("Lead. LRJ E_{T} cut, %s", reclusterLabel.c_str()), "p");
+                Form("%s, E_{T, LRJ} cut%s", reclusterLabel.c_str(),
+                     puSuffixRecluster.c_str()), "p");
 
             if (fileIt == 0) {
                 gLeadEt->Draw("AP");
@@ -24920,22 +25469,38 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                 gLeadEt->Draw("P SAME");
             }
 
-            // gFEX (Resim) reference, once per production mode as on the subjet-based canvas.
+            // gFEX (Resim) reference, once per production mode — where PILEUP counts as part
+            // of the mode. The gFEX curve depends on the process AND the pileup (but not on
+            // the re-clustering configuration), so keying the "already drawn" check on the
+            // process alone drew a single gFEX curve for a PU140+PU200 overlay and silently
+            // dropped the other pileup's reference.
             {
+                const std::string gfexModeKey =
+                    mode + "_PU" + std::to_string(PileupFromPath(
+                        backgroundFiles[fileIt].first + " " + backgroundFiles[fileIt].second));
                 bool gFexDrawnHere = false;
-                for (const auto& m : drawnGFexResimModes_reclusterEtOnly) if (m == mode) gFexDrawnHere = true;
+                for (const auto& m : drawnGFexResimModes_reclusterEtOnly) if (m == gfexModeKey) gFexDrawnHere = true;
                 if (!gFexDrawnHere && gFEX_Sim_ET_Scan_RatesVsEff_vec.size() > fileIt
                     && gFEX_Sim_ET_Scan_RatesVsEff_vec[fileIt]) {
-                    drawnGFexResimModes_reclusterEtOnly.push_back(mode);
+                    drawnGFexResimModes_reclusterEtOnly.push_back(gfexModeKey);
                     TGraph* gGfx = (TGraph*)gFEX_Sim_ET_Scan_RatesVsEff_vec[fileIt]->Clone(
                         Form("gFEXSimEtOnly_recluster_%u", fileIt));
                     gGfx->SetLineColor(colorGFEX);
                     gGfx->SetMarkerColor(colorGFEX);
-                    gGfx->SetMarkerStyle(33);   // filled diamond = gFEX (Resim)
+                    // Every gFEX curve is drawn in the same colour, so on a mixed-pileup
+                    // overlay the marker is the only thing separating them: open diamond
+                    // for PU140, filled for PU200 (the open/filled-by-category convention
+                    // the split turn-ons already use).
+                    gGfx->SetMarkerStyle(
+                        (overlayMixesPileup &&
+                         IsPU140Path(backgroundFiles[fileIt].first + " " + backgroundFiles[fileIt].second))
+                        ? 27 : 33);
                     gGfx->SetMarkerSize(1.0);
                     gGfx->Draw("P SAME");
                     // Process is named once, top right, rather than repeated inside this entry.
-                    legReclusterEtOnly->AddEntry(gGfx, "gFEX LRJ E_{T} cut", "p");
+                    // The pileup is not, when there is more than one of them on the canvas.
+                    legReclusterEtOnly->AddEntry(gGfx,
+                        Form("gFEX, E_{T, LRJ} cut%s", puSuffixRecluster.c_str()), "p");
                 }
             }
 
@@ -24963,80 +25528,98 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
             // ---- (b) E_T-only turn-on at each file's 40 kHz threshold -------
             if (sig_eff_ETonly_40kHz_vec.size() > fileIt && sig_eff_ETonly_40kHz_vec[fileIt]) {
-                cReclusterTurnOn40k.cd();
-                // Cloned for the same reason as the graph above: this histogram is also drawn
-                // on the SubjetVsET comparison canvas, and axis ranges live on the object.
-                TH1F* hTurnOn = (TH1F*)sig_eff_ETonly_40kHz_vec[fileIt]->Clone(
-                    Form("turnOn40k_recluster_%u", fileIt));
-                hTurnOn->SetDirectory(nullptr);
-                hTurnOn->SetLineColor(color);
-                hTurnOn->SetMarkerColor(color);
-                hTurnOn->SetMarkerStyle(20);
-                hTurnOn->SetMarkerSize(0.7);
-                hTurnOn->SetLineWidth(2);
+                // No cloning or styling here any more: the template clones every curve it is
+                // handed (callers' histograms are drawn on other canvases too) and applies the
+                // colour and marker from the TurnOnCurve entry.
+                TH1F* hTurnOn = sig_eff_ETonly_40kHz_vec[fileIt];
 
                 // Quote the threshold the 40 kHz working point actually sits at: the curves are
                 // only comparable once you can see they are taken at different cuts.
                 const double thr40 = (thr_ET_only_40kHz_vec.size() > fileIt)
                                    ? thr_ET_only_40kHz_vec[fileIt] : -1.0;
-                legReclusterTurnOn40k->AddEntry(hTurnOn,
-                    thr40 > 0.0
-                        ? Form("%s, E_{T} > %.0f GeV", reclusterLabel.c_str(), thr40)
-                        : Form("%s", reclusterLabel.c_str()), "lp");
-
-                if (!reclusterTurnOnAxesDrawn) {
-                    hTurnOn->Draw("P");
-                    hTurnOn->GetYaxis()->SetRangeUser(0.0, 1.1);
-                    hTurnOn->GetXaxis()->SetRangeUser(hTurnOn->GetXaxis()->GetXmin(), 700.0);
-                    reclusterTurnOnAxesDrawn = true;
-                } else {
-                    hTurnOn->Draw("P SAME");
+                // Integrated efficiency over the whole offline E_T spectrum (numerator and
+                // denominator integrals of this file's turn-on), closing each entry. The two
+                // split versions of this canvas already quote a per-category epsilon; this is
+                // the mass- and subjet-inclusive one they add up to.
+                const double intEff40 = (intEff_ETonly_40kHz_all_vec.size() > fileIt)
+                                      ? intEff_ETonly_40kHz_all_vec[fileIt] : 0.0;
+                {
+                    TurnOnCurve tc;
+                    tc.h      = hTurnOn;
+                    tc.color  = color;
+                    tc.marker = 20;
+                    tc.label  = thr40 > 0.0
+                        ? Form("%s, E_{T, LRJ} > %.0f GeV%s, #varepsilon_{int}=%.3f",
+                               reclusterLabel.c_str(), thr40,
+                               puSuffixRecluster.c_str(), intEff40)
+                        : Form("%s%s, #varepsilon_{int}=%.3f", reclusterLabel.c_str(),
+                               puSuffixRecluster.c_str(), intEff40);
+                    reclusterTurnOn40kCurves.push_back(tc);
                 }
 
                 if (fileIt == (backgroundFiles.size() - 1)) {
                     // gFEX (Resim) large-R jet turn-on at its own 40 kHz threshold, drawn and
                     // added to the legend last so it sits below the per-file entries. It is a
-                    // per-process reference, so it goes on once per production mode.
-                    bool gFexTurnOnDrawn = false;
-                    for (const auto& m : drawnGFexResimModes_reclusterTurnOn) if (m == mode) gFexTurnOnDrawn = true;
-                    if (!gFexTurnOnDrawn && sig_eff_gFEX_Sim_40kHz_vec.size() > fileIt
-                        && sig_eff_gFEX_Sim_40kHz_vec[fileIt]) {
-                        drawnGFexResimModes_reclusterTurnOn.push_back(mode);
-                        TH1F* hGfxTurnOn = (TH1F*)sig_eff_gFEX_Sim_40kHz_vec[fileIt]->Clone(
-                            Form("turnOn40k_recluster_gFEX_%u", fileIt));
-                        hGfxTurnOn->SetDirectory(nullptr);
-                        hGfxTurnOn->SetLineColor(colorGFEX);
-                        hGfxTurnOn->SetMarkerColor(colorGFEX);
-                        hGfxTurnOn->SetMarkerStyle(33);   // filled diamond, as on the rate-vs-eff canvas
-                        hGfxTurnOn->SetMarkerSize(1.0);
-                        hGfxTurnOn->SetLineWidth(2);
-                        hGfxTurnOn->Draw("P SAME");
+                    // per-process reference, so it goes on once per production mode — where
+                    // PILEUP counts as part of the mode, since the gFEX curve depends on it.
+                    //
+                    // This runs only at the LAST file, so it has to sweep every file itself:
+                    // taking gFEX from `fileIt` alone drew exactly one curve, from whichever
+                    // pair happened to be last, and a PU140+PU200 overlay silently lost the
+                    // other pileup's reference entirely.
+                    for (unsigned int gf = 0; gf < backgroundFiles.size(); ++gf) {
+                        if (sig_eff_gFEX_Sim_40kHz_vec.size() <= gf || !sig_eff_gFEX_Sim_40kHz_vec[gf]) continue;
+                        const bool gfIs140 =
+                            IsPU140Path(backgroundFiles[gf].first + " " + backgroundFiles[gf].second);
+                        const std::string gfModeKey =
+                            getProductionMode(signalFiles[gf].second) + (gfIs140 ? "_PU140" : "_PU200");
+                        bool gFexTurnOnDrawn = false;
+                        for (const auto& m : drawnGFexResimModes_reclusterTurnOn)
+                            if (m == gfModeKey) gFexTurnOnDrawn = true;
+                        if (gFexTurnOnDrawn) continue;
+                        drawnGFexResimModes_reclusterTurnOn.push_back(gfModeKey);
 
-                        const double thrGfx40 = (thr_gFEX_Sim_40kHz_vec.size() > fileIt)
-                                              ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0;
-                        legReclusterTurnOn40k->AddEntry(hGfxTurnOn,
-                            thrGfx40 > 0.0
-                                ? Form("gFEX LRJ, E_{T} > %.0f GeV", thrGfx40)
-                                : "gFEX LRJ", "lp");
+                        const double thrGfx40 = (thr_gFEX_Sim_40kHz_vec.size() > gf)
+                                              ? thr_gFEX_Sim_40kHz_vec[gf] : -1.0;
+                        const std::string gfPuSuffix = overlayMixesPileup
+                            ? Form(", #LTPU#GT = %d", gfIs140 ? 140 : 200) : std::string();
+                        // Indexed by gf, not fileIt: this sweep runs only on the last file but
+                        // draws one gFEX curve per production mode, so the efficiency has to
+                        // come from the same file the curve does.
+                        const double intEffGfx40 = (intEff_gFEX_ETonly_40kHz_all_vec.size() > gf)
+                                                 ? intEff_gFEX_ETonly_40kHz_all_vec[gf] : 0.0;
+                        TurnOnCurve tcGfx;
+                        tcGfx.h     = sig_eff_gFEX_Sim_40kHz_vec[gf];
+                        tcGfx.color = colorGFEX;
+                        // Open diamond for PU140, filled for PU200 — same convention as the
+                        // rate-vs-eff canvas, and the only thing separating two black curves.
+                        tcGfx.marker = (overlayMixesPileup && gfIs140) ? 27 : 33;
+                        tcGfx.label  = thrGfx40 > 0.0
+                                ? Form("gFEX, E_{T, LRJ} > %.0f GeV%s, #varepsilon_{int}=%.3f",
+                                       thrGfx40, gfPuSuffix.c_str(), intEffGfx40)
+                                : Form("gFEX LRJ%s, #varepsilon_{int}=%.3f",
+                                       gfPuSuffix.c_str(), intEffGfx40);
+                        reclusterTurnOn40kCurves.push_back(tcGfx);
                     }
 
-                    // Offline leading LRJ E_T spectrum behind the curves, for the same reason
-                    // the seed-comparison turn-on carries it: the efficiency plateau is only
-                    // meaningful next to where the signal actually sits in E_T.
-                    sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-
-                    legReclusterTurnOn40k->Draw();
-                    cReclusterTurnOn40k.cd(); DrawATLASLabel();
-                    reclusterProcTex.DrawLatex(0.62, 0.945, legLabelSig_SampleInfoOnly.c_str());
-                    cReclusterTurnOn40k.SaveAs(overlayOutputFileDir + "recluster_ETonly_TurnOn_40kHz.pdf");
+                    // One call draws the lot: main pad, top multi-column legend, and the ratio
+                    // panel against the gFEX entry (picked from the labels by the template).
+                    // The offline leading LRJ E_T spectrum rides along as the grey reference —
+                    // the plateau is only meaningful next to where the signal sits in E_T.
+                    TurnOnOpts reclusterOpts;
+                    reclusterOpts.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+                    reclusterOpts.legendHeader = reclusterTurnOn40kHeader;
+                    reclusterOpts.processLabel = legLabelSig_SampleInfoOnly;
+                    reclusterOpts.spectrum     = sig_h_leading_offlineLRJ_Et;
+                    DrawTurnOnWithRatio(reclusterTurnOn40kCurves, reclusterOpts,
+                                        overlayOutputFileDir + "recluster_ETonly_TurnOn_40kHz.pdf");
                 }
             }
 
             // ---- (c) the same turn-on, split two ways ----------------------
-            // Shared by both splits: style a pair, add both to a legend, draw them, and once
-            // the last file is in, put gFEX, the offline E_T spectrum and the labels on.
-            auto drawSplitPair = [&](TCanvas& canv, TLegend* leg,
-                                     bool& axesDrawn,
+            // Shared by both splits: append a category pair to that canvas's curve list, and
+            // once the last file is in, add gFEX and hand the lot to the turn-on template.
+            auto drawSplitPair = [&](std::vector<TurnOnCurve>& acc,
                                      std::vector<std::string>& gfexModesDrawn,
                                      TH1F* hHi, TH1F* hLo,
                                      TH1F* hGfxHi, TH1F* hGfxLo,
@@ -25045,43 +25628,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                                      bool quoteIntEff,
                                      const char* outName){
                 if(!hHi || !hLo) return;
-                canv.cd();
-
-                // Clone: these histograms are also drawn on the existing 40 kHz overlays, and
-                // axis ranges live on the object.
-                TH1F* cHi = (TH1F*)hHi->Clone(Form("%s_hi_%u", outName, fileIt));
-                TH1F* cLo = (TH1F*)hLo->Clone(Form("%s_lo_%u", outName, fileIt));
-                cHi->SetDirectory(nullptr); cLo->SetDirectory(nullptr);
-                for(TH1F* h : {cHi, cLo}){
-                    h->SetLineColor(color); h->SetMarkerColor(color);
-                    h->SetMarkerSize(0.8);  h->SetLineWidth(2);
-                }
-                cHi->SetMarkerStyle(24);   // open circle   = the "higher" category
-                cLo->SetMarkerStyle(20);   // filled circle = the "lower" category
 
                 const double thr40 = (thr_ET_only_40kHz_vec.size() > fileIt)
                                    ? thr_ET_only_40kHz_vec[fileIt] : -1.0;
-                leg->AddEntry(cHi, quoteIntEff
-                    ? Form("[%s, #varepsilon=%.3f] %s, E_{T} > %.0f GeV",
+                TurnOnCurve tcHi, tcLo;
+                tcHi.h = hHi; tcHi.color = color; tcHi.marker = 24; // open circle   = "higher"
+                tcLo.h = hLo; tcLo.color = color; tcLo.marker = 20; // filled circle = "lower"
+                tcHi.label = quoteIntEff
+                    ? Form("[%s, #varepsilon=%.3f] %s, E_{T, LRJ} > %.0f GeV",
                            hiLabel.c_str(), effHi, reclusterLabel.c_str(), thr40)
-                    : Form("[%s] %s, E_{T} > %.0f GeV",
-                           hiLabel.c_str(), reclusterLabel.c_str(), thr40), "lp");
-                leg->AddEntry(cLo, quoteIntEff
-                    ? Form("[%s, #varepsilon=%.3f] %s, E_{T} > %.0f GeV",
+                    : Form("[%s] %s, E_{T, LRJ} > %.0f GeV",
+                           hiLabel.c_str(), reclusterLabel.c_str(), thr40);
+                tcLo.label = quoteIntEff
+                    ? Form("[%s, #varepsilon=%.3f] %s, E_{T, LRJ} > %.0f GeV",
                            loLabel.c_str(), effLo, reclusterLabel.c_str(), thr40)
-                    : Form("[%s] %s, E_{T} > %.0f GeV",
-                           loLabel.c_str(), reclusterLabel.c_str(), thr40), "lp");
-
-                if(!axesDrawn){
-                    cHi->Draw("P");
-                    cHi->GetYaxis()->SetRangeUser(0.0, 1.1);
-                    cHi->GetXaxis()->SetRangeUser(cHi->GetXaxis()->GetXmin(), 700.0);
-                    cLo->Draw("P SAME");
-                    axesDrawn = true;
-                } else {
-                    cHi->Draw("P SAME");
-                    cLo->Draw("P SAME");
-                }
+                    : Form("[%s] %s, E_{T, LRJ} > %.0f GeV",
+                           loLabel.c_str(), reclusterLabel.c_str(), thr40);
+                acc.push_back(tcHi);
+                acc.push_back(tcLo);
 
                 if(fileIt == (backgroundFiles.size() - 1)){
                     // gFEX last, as on the inclusive turn-on.
@@ -25089,28 +25653,28 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
                     for(const auto& m : gfexModesDrawn) if(m == mode) gfexDrawn = true;
                     if(!gfexDrawn && hGfxHi && hGfxLo){
                         gfexModesDrawn.push_back(mode);
-                        TH1F* gHi = (TH1F*)hGfxHi->Clone(Form("%s_gfexhi_%u", outName, fileIt));
-                        TH1F* gLo = (TH1F*)hGfxLo->Clone(Form("%s_gfexlo_%u", outName, fileIt));
-                        gHi->SetDirectory(nullptr); gLo->SetDirectory(nullptr);
-                        for(TH1F* h : {gHi, gLo}){
-                            h->SetLineColor(colorGFEX); h->SetMarkerColor(colorGFEX);
-                            h->SetLineWidth(2);
-                        }
-                        gHi->SetMarkerStyle(27); gHi->SetMarkerSize(1.2); // open diamond
-                        gLo->SetMarkerStyle(33); gLo->SetMarkerSize(1.2); // filled diamond
-                        gHi->Draw("P SAME"); gLo->Draw("P SAME");
                         const double thrGfx = (thr_gFEX_Sim_40kHz_vec.size() > fileIt)
                                             ? thr_gFEX_Sim_40kHz_vec[fileIt] : -1.0;
-                        leg->AddEntry(gHi, Form("[%s] gFEX LRJ, E_{T} > %.0f GeV",
-                                                hiLabel.c_str(), thrGfx), "lp");
-                        leg->AddEntry(gLo, Form("[%s] gFEX LRJ, E_{T} > %.0f GeV",
-                                                loLabel.c_str(), thrGfx), "lp");
+                        TurnOnCurve gHi, gLo;
+                        gHi.h = hGfxHi; gHi.color = colorGFEX; gHi.marker = 27; // open diamond
+                        gLo.h = hGfxLo; gLo.color = colorGFEX; gLo.marker = 33; // filled diamond
+                        gHi.label = Form("[%s] gFEX, E_{T, LRJ} > %.0f GeV",
+                                         hiLabel.c_str(), thrGfx);
+                        gLo.label = Form("[%s] gFEX, E_{T, LRJ} > %.0f GeV",
+                                         loLabel.c_str(), thrGfx);
+                        acc.push_back(gHi);
+                        acc.push_back(gLo);
                     }
-                    sig_h_leading_offlineLRJ_Et->Draw("HIST SAME");
-                    leg->Draw();
-                    canv.cd(); DrawATLASLabel();
-                    reclusterProcTex.DrawLatex(0.62, 0.945, legLabelSig_SampleInfoOnly.c_str());
-                    canv.SaveAs(overlayOutputFileDir + outName + ".pdf");
+                    // Two entries per file makes these the widest legends of the set, so they
+                    // get the third column; the template picks the gFEX "higher" category as
+                    // the ratio denominator (first label containing "gFEX").
+                    TurnOnOpts splitOpts;
+                    splitOpts.xTitle       = "Offline Leading LRJ E_{T} [GeV]";
+                    splitOpts.legendHeader = reclusterTurnOn40kHeader;
+                    splitOpts.processLabel = legLabelSig_SampleInfoOnly;
+                    splitOpts.spectrum     = sig_h_leading_offlineLRJ_Et;
+                    DrawTurnOnWithRatio(acc, splitOpts,
+                                        overlayOutputFileDir + outName + ".pdf");
                 }
             };
 
@@ -25118,8 +25682,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             const std::string mLo = Form("m < %.0f GeV",    offlineLRJMassSel_threshold);
             if(sig_eff_ETonly_40kHz_MassSel_vec.size() > fileIt &&
                sig_eff_ETonly_40kHz_NoMassSel_vec.size() > fileIt){
-                drawSplitPair(cReclusterTurnOn40k_MassSplit, legReclusterTurnOn40k_MassSplit,
-                              reclusterMassSplitAxesDrawn, drawnGFexResimModes_reclusterMassSplit,
+                drawSplitPair(reclusterTurnOn40kMassSplitCurves,
+                              drawnGFexResimModes_reclusterMassSplit,
                               sig_eff_ETonly_40kHz_MassSel_vec[fileIt],
                               sig_eff_ETonly_40kHz_NoMassSel_vec[fileIt],
                               (sig_eff_gFEX_Sim_40kHz_MassSel_vec.size()   > fileIt ? sig_eff_gFEX_Sim_40kHz_MassSel_vec[fileIt]   : nullptr),
@@ -25132,8 +25696,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
 
             if(sig_eff_ETonly_40kHz_SubjGe2_vec.size() > fileIt &&
                sig_eff_ETonly_40kHz_SubjLt2_vec.size() > fileIt){
-                drawSplitPair(cReclusterTurnOn40k_SubjetSplit, legReclusterTurnOn40k_SubjetSplit,
-                              reclusterSubjetSplitAxesDrawn, drawnGFexResimModes_reclusterSubjetSplit,
+                drawSplitPair(reclusterTurnOn40kSubjetSplitCurves,
+                              drawnGFexResimModes_reclusterSubjetSplit,
                               sig_eff_ETonly_40kHz_SubjGe2_vec[fileIt],
                               sig_eff_ETonly_40kHz_SubjLt2_vec[fileIt],
                               (sig_eff_gFEX_Sim_40kHz_SubjGe2_vec.size() > fileIt ? sig_eff_gFEX_Sim_40kHz_SubjGe2_vec[fileIt] : nullptr),
@@ -25669,7 +26233,7 @@ if (overlayThreeFiles){
 
 
 
-void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
+void largeRJetRun(bool overlayThreeFiles = false){
     if (kDebugTrapRootErrors) SetErrorHandler(DebugRootErrorHandler);
     if (kDebugUnbufferedOutput) {
         // Both layers matter: ROOT and the C parts of the macro write through stdout,
@@ -25861,7 +26425,28 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
     // Declared explicitly so different physics processes can be paired correctly.
     // Edit these manually when changing signal samples or algorithm configurations.
     std::vector<std::pair<std::string,std::string>> signalFiles = {
-        // ggF HH->4b v4 ntuples specifically for seeding comparisons. 
+        // --- 2 GeV input-tower cut comparison, IOs_256 / rMerge 0.001 / v3 -------------------
+        // Same ntuple, same algorithm configuration, the two tagger productions side by side:
+        // the only difference is whether the 2 GeV cut was applied to the input towers. Naming
+        // the directories explicitly (rather than going through lrj_tagger_dir_) is what lets
+        // both appear in one run. IOs_256 is the interesting object count here: with the cut
+        // applied it was a no-op (objectsProcessed was overwritten by the surviving-tower
+        // count), so the "before" arm is effectively the 128-tower result, while the "after"
+        // arm genuinely reads 256 towers. Verified present in BOTH productions for
+        // {HHbbbb, ttbar_allhad, jj_JZ} x {r16129, r16130}.
+        //
+        // *** MONO STAGE ONLY *** — the compute/plot split cannot run this comparison. The
+        // state file is keyed on the tagger BASENAME (LRJStateRegistry::mergedPath), and the
+        // two productions share basenames byte-for-byte, so both arms resolve to one state
+        // file: the background would be identical for both while only the signal differed.
+        // Run this through largeRJetAnalysisAndRates.C, or give stateDir a per-production
+        // subdirectory first.
+        /*{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          lrj_tagger_dir_ + "mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_256_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_T2_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
+        { "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
+          lrj_tagger_dir_ + "mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_0.001_IOs_256_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_T0_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },*/
+
+        // ggF HH->4b v4 ntuples specifically for seeding comparisons.
         /*{ "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ggF_HHbbbb_v4/mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_DAOD_NTUPLE_GEP.root",
           lrj_tagger_dir_ + "mc21_14TeV_HHbbbb_HLLHC_e8564_s4422_r16130_rMerge_2_IOs_128_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets_EtaSK_T2_subjetEt25GeV_ewm0_mep1_mec20GeV_v3.root" },
 
@@ -26025,6 +26610,159 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
     };
 
     TString overlayOutputFileDir = "overlayMultipleFiles/largeRJetHistograms_Plots_v5_SeededConeOnly_ggF/";
+    // Generated pair list (see lrj_file_pairs_path_): when set, it REPLACES the hardcoded
+    // lists above and may override overlayOutputFileDir. Both split drivers set it, so
+    // studies are configured once, in condor/submit_largeRJetCompute.py's parameter grid,
+    // instead of by editing sample strings here.
+    if (!lrj_file_pairs_path_.empty()) {
+        std::vector<std::string> pairDesc;
+        if (!lrjLoadFilePairs(lrj_file_pairs_path_, signalFiles, backgroundFiles, overlayOutputFileDir, &pairDesc)) {
+            std::cerr << "[pairs] aborting: bad or missing pair-list file\n";
+            gSystem->Exit(1);
+        }
+        // Plot-stage subset selection (see lrj_plot_select_). Applied here, before anything
+        // indexes the lists, so the surviving pairs are renumbered 0..N-1 and the
+        // size() == fileIt + 1 invariant the per-pair vectors rely on still holds.
+        if (!lrj_plot_select_.empty()) {
+            std::vector<std::pair<std::string,std::string>> ks, kb;
+            std::vector<std::string> kd;
+            for (size_t i = 0; i < signalFiles.size(); ++i) {
+                const std::string hay = (i < pairDesc.size() ? pairDesc[i] : std::string())
+                                      + " " + signalFiles[i].second + " " + backgroundFiles[i].second;
+                // Entries are AND-ed; alternatives WITHIN one entry are OR-ed on '|'.
+                // { "ggF", "rMerge_0.001|rMerge_2" } = "ggF, at either d_search". Listing
+                // the two rMerge values as SEPARATE entries matches nothing, since no file
+                // is at both d_search values at once.
+                bool keep = true;
+                for (const auto& want : lrj_plot_select_) {
+                    bool anyAlt = false;
+                    size_t b = 0;
+                    while (true) {
+                        const size_t e = want.find('|', b);
+                        const std::string alt = (e == std::string::npos) ? want.substr(b)
+                                                                         : want.substr(b, e - b);
+                        if (!alt.empty() && hay.find(alt) != std::string::npos) { anyAlt = true; break; }
+                        if (e == std::string::npos) break;
+                        b = e + 1;
+                    }
+                    if (!anyAlt) { keep = false; break; }
+                }
+                if (keep) { ks.push_back(signalFiles[i]); kb.push_back(backgroundFiles[i]);
+                            kd.push_back(i < pairDesc.size() ? pairDesc[i] : std::string()); }
+            }
+            if (ks.empty()) {
+                std::cerr << "[pairs] FATAL: lrj_plot_select_ matched none of the "
+                          << signalFiles.size() << " pair(s) in " << lrj_file_pairs_path_ << "\n";
+                gSystem->Exit(1);
+            }
+            signalFiles = ks; backgroundFiles = kb; pairDesc = kd;
+            std::cout << "[pairs] selection kept " << signalFiles.size() << " pair(s):\n";
+            for (size_t i = 0; i < signalFiles.size(); ++i)
+                std::cout << "[pairs]   -> pair " << i << ":"
+                          << (i < pairDesc.size() ? pairDesc[i] : std::string()) << "\n";
+        }
+        // Plot-stage ORDER (see lrj_plot_order_). Applied after the selection and before
+        // anything indexes the lists, so the reordered pairs are still numbered 0..N-1 and
+        // the size() == fileIt + 1 invariant holds. Reordering here rather than at any
+        // drawing site is what makes it apply to every plot at once.
+        if (!lrj_plot_order_.empty() && signalFiles.size() > 1) {
+            const size_t n = signalFiles.size();
+            std::vector<size_t> idx(n);
+            for (size_t i = 0; i < n; ++i) idx[i] = i;
+            auto rankOf = [&](size_t i) {
+                const std::string hay = (i < pairDesc.size() ? pairDesc[i] : std::string())
+                                      + " " + signalFiles[i].second + " " + backgroundFiles[i].second;
+                for (size_t r = 0; r < lrj_plot_order_.size(); ++r)
+                    if (hay.find(lrj_plot_order_[r]) != std::string::npos) return r;
+                return lrj_plot_order_.size();   // no match -> last
+            };
+            std::vector<size_t> rank(n);
+            for (size_t i = 0; i < n; ++i) rank[i] = rankOf(i);
+            // When the run mixes pileups, pairs that differ ONLY in pileup are placed next
+            // to each other, so a PU140/PU200 comparison reads as adjacent pairs rather
+            // than as one whole pileup followed by the other. The secondary key is the
+            // tagger basename with the r-tag normalised away, i.e. "same configuration".
+            // Applied only for mixed runs: on a single-pileup run it would re-sort within
+            // a rank for no reason.
+            bool mixed140_200 = false;
+            {
+                bool a140 = false, a200 = false;
+                for (size_t i = 0; i < n; ++i)
+                    (IsPU140Path(backgroundFiles[i].second) ? a140 : a200) = true;
+                mixed140_200 = a140 && a200;
+            }
+            std::vector<std::string> cfgKey(n);
+            if (mixed140_200) {
+                for (size_t i = 0; i < n; ++i) {
+                    std::string k = backgroundFiles[i].second;
+                    for (const char* rt : { "r16129", "r16130" })
+                        for (size_t p = k.find(rt); p != std::string::npos; p = k.find(rt, p))
+                            k.replace(p, 6, "rPU");
+                    cfgKey[i] = k;
+                }
+            }
+            // stable_sort: pairs sharing a key keep their pair-list order, so PU140 (which
+            // the --pu both list writes first) precedes PU200 within each configuration.
+            std::stable_sort(idx.begin(), idx.end(), [&](size_t a, size_t b){
+                if (rank[a] != rank[b]) return rank[a] < rank[b];
+                if (mixed140_200)       return cfgKey[a] < cfgKey[b];
+                return false;
+            });
+            std::vector<std::pair<std::string,std::string>> os(n), ob(n);
+            std::vector<std::string> od(n);
+            for (size_t i = 0; i < n; ++i) {
+                os[i] = signalFiles[idx[i]];
+                ob[i] = backgroundFiles[idx[i]];
+                od[i] = (idx[i] < pairDesc.size() ? pairDesc[idx[i]] : std::string());
+            }
+            signalFiles = os; backgroundFiles = ob; pairDesc = od;
+            std::cout << "[pairs] reordered by lrj_plot_order_:\n";
+            for (size_t i = 0; i < n; ++i)
+                std::cout << "[pairs]   -> pair " << i << ":" << pairDesc[i] << "\n";
+        }
+        // Overlay output directory override (kPlotOverlayDir in largeRJetPlot.C). A bare
+        // NAME — no '/' — is expanded to overlayMultipleFiles/<name>/, so a study can be
+        // called what it is instead of inheriting the pair list's timestamp label. A value
+        // containing '/' is taken as a path verbatim. A trailing '/' is added either way,
+        // since everything downstream concatenates file names onto this directly.
+        if (!lrj_plot_overlay_dir_.empty()) {
+            std::string d = lrj_plot_overlay_dir_;
+            if (d.find('/') == std::string::npos) d = "overlayMultipleFiles/" + d;
+            if (d.back() != '/') d += '/';
+            overlayOutputFileDir = d.c_str();
+            std::cout << "[pairs] overlay output directory overridden: " << d << "\n";
+        }
+    }
+    // A compute job asked for a pair the list does not contain means the job and the pair
+    // list disagree — which silently produced 309 no-op "successful" jobs on 2026-08-21,
+    // when a second submission overwrote the shared pair list under the queued jobs. Fail
+    // loudly instead: a compute job that writes no state must never look like a success.
+    if (lrj_only_pair_index_ >= 0 && (size_t)lrj_only_pair_index_ >= backgroundFiles.size()) {
+        std::cerr << "[pairs] FATAL: requested pair index " << lrj_only_pair_index_
+                  << " but the pair list holds only " << backgroundFiles.size()
+                  << " pair(s)"
+                  << (lrj_file_pairs_path_.empty() ? "" : " (" + lrj_file_pairs_path_ + ")")
+                  << " — job and pair list disagree\n";
+        gSystem->Exit(1);
+    }
+    // Select this compute job's pair by TRIMMING the lists to it, exactly as
+    // kDebugOnlyFileIndex does below — never by skipping iterations of the pair loop.
+    // 94 per-pair vectors inside analyze_files are push_back'd once per iteration but read
+    // back as vec[fileIt], so they rely on size() == fileIt + 1. Skipping iterations
+    // breaks that invariant and every one of those reads becomes out-of-bounds UB: on
+    // 2026-08-21 it silently produced garbage paths (algorithmConfigurations[fileIt] is
+    // the first such read) and killed 10 of 17 configurations with bad_alloc, while the
+    // other 7 "succeeded" on UB that happened not to fault. Trimming keeps fileIt == 0
+    // and the invariant intact. State-file names carry no pair index, so nothing about
+    // the output changes.
+    if (lrj_only_pair_index_ >= 0) {
+        const size_t keep = (size_t)lrj_only_pair_index_;
+        std::cout << "[pairs] compute job selects pair " << keep << " of "
+                  << backgroundFiles.size() << ": "
+                  << gSystem->BaseName(backgroundFiles[keep].second.c_str()) << "\n";
+        signalFiles     = { signalFiles[keep] };
+        backgroundFiles = { backgroundFiles[keep] };
+    }
     gSystem->mkdir(overlayOutputFileDir);
     if (!kDebugNoRedirectOutput) {
         gSystem->RedirectOutput("debug_newsamples_atlaslabel_v5_ggF_SeededConeOnly.log", "w");
@@ -26060,5 +26798,8 @@ void largeRJetAnalysisAndRates(bool overlayThreeFiles = false){
     std::cout << "[TIMER] total: "
             << std::chrono::duration<double>(clock::now() - t0).count()
             << " s\n";
-    gSystem->Exit(0);
+    // No gSystem->Exit here: the drivers own process exit, and the plot driver may
+    // want to run after compute in the same process during debugging.
 }
+
+#endif // LARGERJET_ANALYSIS_CORE_H

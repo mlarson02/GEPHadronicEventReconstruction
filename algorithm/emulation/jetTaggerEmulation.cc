@@ -23,15 +23,51 @@
 #include <filesystem>
 #include "emulationHelperFunctions.h"
 
+// E_T cut [GeV] on the input towers fed to the LRJ algorithm — now a RUNTIME parameter
+// (jetTaggerEmulation's inputTowerEtThreshold, submitted per job), not a compile-time switch,
+// so a single submission can produce both the cut and the uncut production. 0 = feed every
+// tower. This constant is only the default for direct callers that do not pass one.
+//
+// WHAT CHANGED, and why it matters for comparing against existing files: the cut sites live in
+// the "gepCellsTowers" branch of the input selection below, and they did NOT agree with each
+// other. The SK and NoSK branches cut on E_T > 2.0 GeV directly, while the EtaSK branch cut on
+// the DIGITIZED value > 16, which was 2 GeV under the old energy encoding but is 4 GeV under
+// the current one (et_bit_length_ 13 over 0-2048 GeV = 4 digi/GeV). Both were written out as
+// _T2_. The threshold is now digitized from the same GeV value at every site, so _T2_ means
+// 2 GeV everywhere -- which means an EtaSK _T2_ file produced from here on is NOT bit-for-bit
+// comparable with the EtaSK _T2_ files already on disk, those having had an effective 4 GeV
+// cut. Nothing at _T0_ is affected: the gate is off entirely when the threshold is 0.
+constexpr double default_input_tower_et_cut_gev_ = 0.0;
+
+// Where the emulated large-R jet ntuples are written. A NEW directory as of the tower-cut fix
+// above: the previous production (outputNTuplesDev_gjTowerSamples) encodes the same
+// configurations under the same filenames but applied a 4 GeV cut on the EtaSK arm where the
+// name says 2 GeV, so the two cannot be mixed in one study and must not overwrite each other.
+// Switch this and submit_largeRJetCompute.py's TAGGER_DIRS/STATE_DIR together — state files are
+// keyed on the tagger BASENAME alone, which is identical between the two productions.
+const std::string output_ntuple_dir_ =
+    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples_towerEtCutFixed/";
+
 // Function for processing provided number of loops with JetTagger algorithm,
 // then writing output large radius jets to a new TTree & text files
 void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::string outputTextFilePath, std::string inputObjectType, std::string seedObjectType,
         bool useSKObjects, bool enableEtWeightedMidpoint, bool minEtSeedPosOptimization,
         double minEtSeedPosOptimizationCut, double subjetEtThreshold, // Both in GeV --> converted to digitized 125 MeV units later
-        bool useEtaSKObjects = false
+        bool useEtaSKObjects = false,
+        double inputTowerEtThreshold = default_input_tower_et_cut_gev_ // [GeV]; 0 = no cut
     ){
         std::cout << "inputobjecttype: " << inputObjectType << "\n";
         std::cout << "useSKObjects: " << useSKObjects << "\n";
+    // Input-tower E_T cut, derived once: whether to cut at all, and the threshold in the same
+    // digitized units the EtaSK tower values carry. Both are used in the gepCellsTowers branch
+    // of the input selection below.
+    const bool applyInputTowerEtCut = (inputTowerEtThreshold > 0.0);
+    const unsigned int inputTowerEtCutDigi =
+        digitize(inputTowerEtThreshold, et_bit_length_,
+                 static_cast<double>(et_min_), static_cast<double>(et_max_));
+    std::cout << "inputTowerEtThreshold [GeV]: " << inputTowerEtThreshold
+              << " (applied: " << applyInputTowerEtCut
+              << ", digitized: " << inputTowerEtCutDigi << ")\n";
     struct outputJet {
         // Main values
         unsigned int et;
@@ -592,29 +628,39 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             if(useEtaSKObjects){
                 unsigned int n = 0;
                 if (maxObjectsConsidered_ > gepCellsTowersEtaSKEtValues->size()) objectsProcessed = gepCellsTowersEtaSKEtValues->size();
-                {
-                     
+                if(applyInputTowerEtCut){
+
                      for(unsigned int j = 0; j < objectsProcessed; j++){
-                        std::cout << "looping through tower index: " << j << "\n";
-                        std::cout << "tower et [mev]: " << gepCellsTowersEtaSKEtValues->at(j) << "\n";
-                        std::cout << "tower et [digi]: " << digitize(gepCellsTowersEtaSKEtValues->at(j), et_bit_length_,
-                              static_cast<double>(et_min_), static_cast<double>(et_max_)) << "\n";
+                        // Per-tower printouts commented out: three lines per tower over
+                        // ~128 towers x ~700k events is enough stdout to fill /home when a
+                        // condor job's log lands there. Uncomment to debug the tower cut.
+                        //std::cout << "looping through tower index: " << j << "\n";
+                        //std::cout << "tower et [mev]: " << gepCellsTowersEtaSKEtValues->at(j) << "\n";
+                        //std::cout << "tower et [digi]: " << digitize(gepCellsTowersEtaSKEtValues->at(j), et_bit_length_,
+                        //      static_cast<double>(et_min_), static_cast<double>(et_max_)) << "\n";
+                        // Compared against the threshold digitized the SAME way, not a bare 16:
+                        // that literal was 2 GeV under the old energy encoding and silently
+                        // became 4 GeV under the current one, while the SK/NoSK branches below
+                        // kept cutting at a true 2 GeV. See default_input_tower_et_cut_gev_.
                         if(digitize(gepCellsTowersEtaSKEtValues->at(j), et_bit_length_,
-                              static_cast<double>(et_min_), static_cast<double>(et_max_)) > 16){
-                            std::cout << "selecting tower index: " << j << "\n";
+                              static_cast<double>(et_min_), static_cast<double>(et_max_))
+                           > inputTowerEtCutDigi){
+                            //std::cout << "selecting tower index: " << j << "\n";
                             n++;
-                        } 
+                        }
                      }
+                     objectsProcessed = n;
                 }
-                objectsProcessed = n;
             }
             else if(useSKObjects){
                 if (maxObjectsConsidered_ > gepCellsTowersSKEtValues->size()) objectsProcessed = gepCellsTowersSKEtValues->size();
-                { unsigned int n = 0; while (n < objectsProcessed && gepCellsTowersSKEtValues->at(n) > 2.0) ++n; objectsProcessed = n; }
+                if(applyInputTowerEtCut)
+                { unsigned int n = 0; while (n < objectsProcessed && gepCellsTowersSKEtValues->at(n) > inputTowerEtThreshold) ++n; objectsProcessed = n; }
             }
             else{
                 if (maxObjectsConsidered_ > gepCellsTowersEtValues->size()) objectsProcessed = gepCellsTowersEtValues->size();
-                { unsigned int n = 0; while (n < objectsProcessed && gepCellsTowersEtValues->at(n) > 2.0) ++n; objectsProcessed = n; }
+                if(applyInputTowerEtCut)
+                { unsigned int n = 0; while (n < objectsProcessed && gepCellsTowersEtValues->at(n) > inputTowerEtThreshold) ++n; objectsProcessed = n; }
             }
         }
         else if(inputObjectType == "gepWTAConeCellsTowersJets"){
@@ -1260,12 +1306,14 @@ void jetTaggerEmulation(double rMergeCut, // Distance in r-phi plane to look for
                         int fileIndex = -1, // When >= 0, appended as _fileN to output name to avoid collisions across parallel jobs
                         bool useEtaSKObjects = false, // Whether to use EtaSK PU-suppressed objects (gepCellsTowers and WTAConeJets only)
                         bool trigGepPerfValidation = false, // Validate against Athena TrigGepPerf: read HERNTupler validation output, write fixed output
-                        unsigned int pileup = 200 // Pileup scenario of the input sample; tags the output name (r16130 = PU200, r16129 = PU140)
+                        unsigned int pileup = 200, // Pileup scenario of the input sample; tags the output name (r16130 = PU200, r16129 = PU140)
+                        double inputTowerEtThreshold = default_input_tower_et_cut_gev_ // E_T cut [GeV] on the input towers; 0 = feed every tower. Tagged _T<n> in the output name.
                         ){
     if(signalBool) std::cout << "Processing signal of: " << signalString  << "\n";
     // Construct input and output ntuple, LUT paths based on configuration type
     auto infile = explicitInputPath.empty() ? makeInputFileName(signalBool, signalString, "/home/larsonma/GEPHadronicEventReconstruction/data/inputNTuples/", pileup) : explicitInputPath;
-    auto outntuplefile = makeOutputFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, subjetEtThreshold, enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut, "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/", useEtaSKObjects, pileup);
+    auto outntuplefile = makeOutputFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, subjetEtThreshold, enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut, output_ntuple_dir_, useEtaSKObjects, pileup,
+                                          inputTowerEtThreshold);
     if (fileIndex >= 0) {
         size_t pos = outntuplefile.rfind(".root");
         if (pos != std::string::npos)
@@ -1289,6 +1337,6 @@ void jetTaggerEmulation(double rMergeCut, // Distance in r-phi plane to look for
     std::cout << "calling event loop: " << "\n";
     eventLoop(infile, outntuplefile, outtextfile, inputObjectType, seedObjectType, useSKObjects,
         enableEtWeightedMidpoint, minEtSeedPosOptimization,
-        minEtSeedPosOptimizationCut, subjetEtThreshold, useEtaSKObjects);
+        minEtSeedPosOptimizationCut, subjetEtThreshold, useEtaSKObjects, inputTowerEtThreshold);
     //gSystem->Exit(0);
 }

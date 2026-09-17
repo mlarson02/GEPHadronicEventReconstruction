@@ -29,24 +29,58 @@ WRAPPER = Path(__file__).parent / "run_jet_tagger_emulation_job.sh"
 # Parameter grid — edit these to match jetTaggerConfigLocal.sh
 # ---------------------------------------------------------------------------
 ALGO_VERSIONS  = [3]
-R_MERGE_CUTS   = [2]
+R_MERGE_CUTS   = [2.0]
 R_SQUARED_CUTS = [1.21]
-N_IOS          = [128]
+# --- PU140 EtaSK backfill (2026-08-25) ------------------------------------------------
+# PU140 (r16129) has only the _SK_ configs; every PU200 EtaSK config is missing at PU140,
+# so a like-for-like PU140-vs-PU200 EtaSK overlay is impossible until these are produced.
+# The rest of the grid below ALREADY matches the PU200 EtaSK encoding (v3, rMerge 0.001+2,
+# R2 1.21, IO gepCellsTowers, Seed gepWTAConeCellsTowersJets, EtaSK, ewm0, mep1,
+# subjetEt25/mec20) — the one mismatch is the input-object count: the existing files are
+# all IOs_128, this was set to 256. Submit with  --pu 140  to write the r16129 outputs.
+# To also backfill the FEX-seeded EtaSK configs, add "gFEXSRJ" / "jFEXSRJ" to SEED_OBJECTS
+# below (note their PU200 counterparts use a subjetEt scan, so match SUBJET_ET_SCAN_BY_SEED).
+# 256 = the new standard working point — ACTIVE. No IOs_256 output exists at either
+#       pileup yet, so this is a fresh production rather than a backfill.
+# 128 = the PU140 EtaSK backfill described above (matches every config on disk today);
+#       swap it back in when you want the like-for-like PU140-vs-PU200 EtaSK overlay.
+#N_IOS          = [128]
+N_IOS          = [256]
 N_SEEDS        = [2]
 SIGNALS        = [True, False]
-SIGNAL_STRINGS = ["ggF_hh_bbbb", "VBF_hh_bbbb", "Zprime_ttbar_allhad_flatpT", "ttbar_allhad"]   # only used when signal=True
+SIGNAL_STRINGS = ["ggF_hh_bbbb", "ttbar_allhad"]   # only used when signal=True
 INPUT_OBJECTS  = ["gepCellsTowers"]
+#INPUT_OBJECTS  = ["gepWTAConeCellsTowersJets"]
 SEED_OBJECTS   = ["gepWTAConeCellsTowersJets", "jFEXSRJ", "gFEXSRJ"]
 #SEED_OBJECTS   = ["jFEXSRJ"]
 #SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
-PU_SUPPRESSION = [True]
-ETA_SK_OBJECTS = [True]   # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
+# --- SK / NoSK at T0 (no 2 GeV input-tower cut), 2026-08-28 -----------------------------
+# The T0 production so far is EtaSK ONLY, so a 1-1 EtaSK vs SK vs NoSK comparison is not
+# possible without these. EtaSK already exists at both IO counts, so it is deliberately NOT
+# regenerated: etask=False with pusup True/False yields exactly the two missing settings,
+#   pusup=True  -> SK      (SoftKiller PU suppression)
+#   pusup=False -> NoSK    (no PU suppression; never produced for LRJ before)
+# Set ETA_SK_OBJECTS = [True, False] to rebuild all three in one go -- safe now that the
+# degenerate (pusup=False, etask=True) corner is skipped in enumerate_jobs.
+# --- Input-tower E_T cut [GeV] --------------------------------------------------------
+# Was a compile-time constant (apply_input_tower_et_cut_) in jetTaggerEmulation.cc, so the
+# cut and uncut productions could only be made one after the other by editing the source.
+# It is a per-job parameter now, tagged _T<n> in the output name, so both can come out of a
+# single submission: [0.0, 2.0] gives the _T0_ and _T2_ arms of the input-object study.
+# NOTE _T2_ changed meaning: the EtaSK branch used to cut on a digitized literal that was
+# 2 GeV under the old energy encoding and 4 GeV under the current one, while SK/NoSK cut at
+# a true 2 GeV. The threshold is digitized consistently now, so new _T2_ EtaSK output is NOT
+# comparable with the _T2_ EtaSK files already on disk. _T0_ is unaffected either way.
+INPUT_TOWER_ET_CUTS = [0.0]
+
+PU_SUPPRESSION = [True, False]
+ETA_SK_OBJECTS = [True, False]  # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
 ET_WEIGHTED_MIDPOINTS      = [False]
 MIN_ET_SEED_POS_OPT        = [True]
 
 SUBJET_ET_BY_SEED = {
     "gFEXSRJ":                   25,
-    "jFEXSRJ":                   35,
+    "jFEXSRJ":                   40,
     "gepWTAConeCellsTowersJets":  25,
 }
 
@@ -63,7 +97,7 @@ MIN_ET_SEED_POS_OPT_CUT_BY_SEED = {
 # (subjet E_T - cut) offset fixed -- currently 5 GeV for every seed, so scanning
 # jFEX over 25/30/35/40 GeV pairs with mec 20/25/30/35 GeV.
 SUBJET_ET_SCAN_BY_SEED = {
-    "jFEXSRJ":                   [25, 30, 35, 40],
+    #"jFEXSRJ":                   [30, 35, 40, 45],
     #"gFEXSRJ":                   [25, 30, 35, 40],
     #"gepWTAConeCellsTowersJets": [25, 30, 35, 40],
 }
@@ -227,12 +261,12 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
         "",
         # pileup is fixed for the whole submission, so it goes in the header rather
         # than the per-job ItemData.
-        f"arguments = $(RMRG) $(R2) $(NIOS) $(NSEEDS) $(ALGOV) $(SIG) $(SIGSTR) $(PUSUP) $(INOBJ) $(SEEDOBJ) $(SJETT) $(ETWM) $(MINETO) $(MINETC) $(INFILE) $(FIDX) $(ETASK) {PILEUP}",
+        f"arguments = $(RMRG) $(R2) $(NIOS) $(NSEEDS) $(ALGOV) $(SIG) $(SIGSTR) $(PUSUP) $(INOBJ) $(SEEDOBJ) $(SJETT) $(ETWM) $(MINETO) $(MINETC) $(INFILE) $(FIDX) $(ETASK) {PILEUP} $(TOWERET)",
         "log       = $(LOG)",
         "output    = $(OUT)",
         "error     = $(ERR)",
         "",
-        f"queue RMRG, R2, NIOS, NSEEDS, ALGOV, SIG, SIGSTR, PUSUP, INOBJ, SEEDOBJ, SJETT, ETWM, MINETO, MINETC, INFILE, FIDX, ETASK, LOG, OUT, ERR from {itemdata_path}",
+        f"queue RMRG, R2, NIOS, NSEEDS, ALGOV, SIG, SIGSTR, PUSUP, INOBJ, SEEDOBJ, SJETT, ETWM, MINETO, MINETC, INFILE, FIDX, ETASK, TOWERET, LOG, OUT, ERR from {itemdata_path}",
     ]
 
     data_lines = []
@@ -241,7 +275,7 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
             f"{j['rmrg']}, {j['r2']}, {j['nios']}, {j['nseeds']}, {j['algov']}, "
             f"{j['signal']}, {j['sigstr']}, {j['pusup']}, {j['inobj']}, {j['seedobj']}, "
             f"{j['sjett']}, {j['etwm']}, {j['mineto']}, {j['minetc']}, "
-            f"{j['infile']}, {j['fidx']}, {j['etask']}, "
+            f"{j['infile']}, {j['fidx']}, {j['etask']}, {j['towercut']}, "
             f"{j['log']}, {j['stdout']}, {j['stderr']}"
         )
 
@@ -262,13 +296,21 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                     sig_list = SIGNAL_STRINGS if signal else ["BACKGROUND"]
                     for sigstr in sig_list:
                         for pusup in PU_SUPPRESSION:
-                            for etask in ETA_SK_OBJECTS:
+                            for etask, towercut in itertools.product(ETA_SK_OBJECTS, INPUT_TOWER_ET_CUTS):
                                 # EtaSK selects the PU-suppressed *input objects* (towers), so it
                                 # only constrains inobj. The seed collection is independent:
                                 # jetTaggerEmulation.cc branches on seedObjectType first, and the
                                 # FEX seeds come from their own resim trees, so EtaSK towers can
                                 # be seeded by jFEX/gFEX SRJ just as well as by WTA cone jets.
-                                if etask and inobj not in ("gepCellsTowers",):
+                                if etask and inobj not in ("gepCellsTowers", "gepWTAConeCellsTowersJets"):
+                                    continue
+                                # The tag below is EtaSK whenever etask is set, whatever pusup
+                                # is, so (pusup=False, etask=True) would write the SAME output
+                                # filename as (pusup=True, etask=True) -- two jobs racing on one
+                                # file. Skip the degenerate corner so PU_SUPPRESSION and
+                                # ETA_SK_OBJECTS can both be [True, False] and yield exactly the
+                                # three distinct settings: EtaSK, SK, NoSK.
+                                if etask and not pusup:
                                     continue
                                 if etask:
                                     pu_tag = "EtaSK"
@@ -281,6 +323,7 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                                             f"_{'sig' if signal else 'bkg'}"
                                             f"_{sigstr if signal else 'bkg'}"
                                             f"_{pu_tag}"
+                                            f"_T{int(towercut)}"
                                             f"_sjet{sjett}"
                                             f"_etwm{int(etwm)}_mep{int(mineto)}"
                                             f"_mec{minetc:.4g}")
@@ -311,6 +354,7 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                                         "infile":  infile_path,
                                         "fidx":    fidx,
                                         "etask":   bool_str(etask),
+                                        "towercut": fmt_r2(towercut),
                                         "log_dir": log_dir,
                                         "log":     os.path.join(log_dir, f"{safe}.log"),
                                         "stdout":  os.path.join(log_dir, f"{safe}.out"),
@@ -371,6 +415,11 @@ def main():
 
     jobs = enumerate_jobs(log_dir, args.label)
     print(f"Total jobs (algorithm configs × input files): {len(jobs)}")
+
+    if not jobs:
+        print("[error] No jobs generated. Every (input object, seed object, ...) combination "
+              "was filtered out — check that ETA_SK_OBJECTS is compatible with INPUT_OBJECTS.")
+        sys.exit(1)
 
     if args.max_jobs > 0:
         jobs = jobs[:args.max_jobs]

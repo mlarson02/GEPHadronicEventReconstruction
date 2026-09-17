@@ -26,7 +26,9 @@
 void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
                bool useSKObjects, double jetEtThreshold, double towerEtThreshold, bool doJetTowerOverlapRemoval,
                bool useEtaSKObjects = false,
-               double towerScaleFactor = 1.0, double jetScaleFactor = 1.0) {
+               double towerScaleFactor = 1.0, double jetScaleFactor = 1.0,
+               bool useGEPJwoJ = false,
+               GEPJwoJParams jwojParams = makeUniformGEPJwoJParams(10.0, 1.0, 1.0)) {
     // NOTE: towerScaleFactor / jetScaleFactor are scalar weights applied when
     // combining tower and jet MET into the total MET. They are intended as a
     // placeholder for what will eventually be eta-dependent, calibrated scale
@@ -110,6 +112,14 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
     double out_totalMETX  = 0.0;
     double out_totalMETY  = 0.0;
 
+    // GEP JwoJ MET outputs. Written only when useGEPJwoJ; see the algorithm block in the
+    // event loop below. The hard and soft terms are written out UNCOEFFICIENTED, so the
+    // coefficients can be re-derived downstream without re-running the emulation.
+    double out_jwojMET       = 0.0, out_jwojMETX     = 0.0, out_jwojMETY     = 0.0;
+    double out_jwojHardMET   = 0.0, out_jwojHardMETX = 0.0, out_jwojHardMETY = 0.0;
+    double out_jwojSoftMET   = 0.0, out_jwojSoftMETX = 0.0, out_jwojSoftMETY = 0.0;
+    double out_jwojSumHardET = 0.0, out_jwojSumSoftET = 0.0, out_jwojSumET    = 0.0;
+
     outputFile->cd();
     // Event/run number passthrough tree (one entry per event, for ordering-alignment validation)
     TTree* emulEventInfoTree = new TTree("emulEventInfoTree", "Run/event number passthrough from HERNTupler input for ordering validation");
@@ -129,6 +139,24 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
     metTree->Branch("TotalMETY",  &out_totalMETY);
     metTree->Branch("SumET",      &out_SumET);
     metTree->Branch("TotalMET",   &out_totalMET);
+
+    // GEP JwoJ branches, created ONLY in JwoJ mode. Absent rather than present-and-zero on a
+    // standard run, so a consumer can tell the two apart from the tree alone -- which is what
+    // metAnalysisAndRates.C's hasGEPJwoJ check relies on, alongside the filename tag.
+    if (useGEPJwoJ) {
+        metTree->Branch("GEPJwoJMET",       &out_jwojMET);
+        metTree->Branch("GEPJwoJMETX",      &out_jwojMETX);
+        metTree->Branch("GEPJwoJMETY",      &out_jwojMETY);
+        metTree->Branch("GEPJwoJHardMET",   &out_jwojHardMET);
+        metTree->Branch("GEPJwoJHardMETX",  &out_jwojHardMETX);
+        metTree->Branch("GEPJwoJHardMETY",  &out_jwojHardMETY);
+        metTree->Branch("GEPJwoJSoftMET",   &out_jwojSoftMET);
+        metTree->Branch("GEPJwoJSoftMETX",  &out_jwojSoftMETX);
+        metTree->Branch("GEPJwoJSoftMETY",  &out_jwojSoftMETY);
+        metTree->Branch("GEPJwoJSumHardET", &out_jwojSumHardET);
+        metTree->Branch("GEPJwoJSumSoftET", &out_jwojSumSoftET);
+        metTree->Branch("GEPJwoJSumET",     &out_jwojSumET);
+    }
 
     // === gepCellsTowersTree ===
     gepCellsTowersTree->SetBranchAddress("Et",  &gepCellsTowersEtValues);
@@ -363,6 +391,116 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
         out_SumJetET   = undigitize_et(jetSumEt_bitset);
         out_SumET      = undigitize_et(totalSumET_bitset);
 
+        // -------------------------------------------------------
+        // ---              GEP JwoJ MET algorithm:            ---
+        // -------------------------------------------------------
+        // The same towers, the same tower E_T threshold and the same pileup-suppression
+        // choice as the tower loop above, but split into a hard and a soft term at the
+        // per-eta-bin threshold in jwojParams instead of being summed as one. The hard term
+        // stands in for the jet term of the algorithm above -- it is the high-E_T part of the
+        // event, reached without ever building a jet, which is what "jets without jets" means.
+        //
+        // Its OWN loop rather than an extra branch inside the tower loop above, because that
+        // loop applies the jet/tower overlap removal: on an OR config it would silently delete
+        // exactly the high-E_T towers this term is built from, and this algorithm has no jets
+        // to remove against in the first place.
+        if (useGEPJwoJ) {
+            out_jwojMET       = 0.0; out_jwojMETX      = 0.0; out_jwojMETY     = 0.0;
+            out_jwojHardMET   = 0.0; out_jwojHardMETX  = 0.0; out_jwojHardMETY = 0.0;
+            out_jwojSoftMET   = 0.0; out_jwojSoftMETX  = 0.0; out_jwojSoftMETY = 0.0;
+            out_jwojSumHardET = 0.0; out_jwojSumSoftET = 0.0; out_jwojSumET    = 0.0;
+
+            const unsigned int nJwoJBins = jwojParams.nBins();
+            // Accumulated per eta bin rather than as two running totals, so that a
+            // per-eta-bin coefficient table can be applied at the recombination below. With
+            // the single-bin default this is two totals with an extra index on them.
+            std::vector<int> hardETxByBin(nJwoJBins, 0), hardETyByBin(nJwoJBins, 0);
+            std::vector<int> softETxByBin(nJwoJBins, 0), softETyByBin(nJwoJBins, 0);
+            unsigned int jwojHardSumEt = 0, jwojSoftSumEt = 0;
+
+            for (unsigned int iTower = 0; iTower < towersProcessed; iTower++) {
+                if (towerEtVec->at(iTower) <= towerEtThreshold) continue;
+                unsigned int towerEt  = digitize(towerEtVec->at(iTower),  et_bit_length_,  static_cast<double>(et_min_),  static_cast<double>(et_max_));
+                unsigned int towerPhi = digitize_phi(towerPhiVec->at(iTower));
+                unsigned int towerEta = digitize(towerEtaVec->at(iTower), eta_bit_length_, eta_min_, eta_max_);
+
+                const unsigned int iBin = jwojParams.binForEtaCode(towerEta);
+
+                int towerCosPhi = sinLUT_[wrapPhiUnsigned(towerPhi + half_pi_digitized_in_phi_)];
+                int towerSinPhi = sinLUT_[towerPhi];
+
+                int towerETx = (static_cast<int>(towerEt) * towerCosPhi) / (1 << (sin_bit_length_ - 1));
+                int towerETy = (static_cast<int>(towerEt) * towerSinPhi) / (1 << (sin_bit_length_ - 1));
+
+                // Compared against the UNDIGITIZED E_T, the same way the tower E_T threshold
+                // above is, so a tower sitting between the two cuts means the same thing to
+                // both of them. Strictly above, matching every other threshold in this file.
+                if (towerEtVec->at(iTower) > jwojParams.hardEtThreshold[iBin]) {
+                    hardETxByBin[iBin] += towerETx;
+                    hardETyByBin[iBin] += towerETy;
+                    jwojHardSumEt += towerEt;
+                } else {
+                    softETxByBin[iBin] += towerETx;
+                    softETyByBin[iBin] += towerETy;
+                    jwojSoftSumEt += towerEt;
+                }
+            }
+
+            // Term MET is the negative of the vector E_T sum, as everywhere else in this file.
+            // The two terms are accumulated across eta bins uncoefficiented -- that is what
+            // gets written out -- while the recombination applies the coefficients bin by bin.
+            // With one bin this is exactly the scalar form the total MET above uses:
+            //   lround(jetScaleFactor * hardMET + towerScaleFactor * softMET)
+            int jwojHardMETx = 0, jwojHardMETy = 0;
+            int jwojSoftMETx = 0, jwojSoftMETy = 0;
+            double jwojMETxAcc = 0.0, jwojMETyAcc = 0.0;
+            for (unsigned int iBin = 0; iBin < nJwoJBins; iBin++) {
+                jwojHardMETx += -hardETxByBin[iBin];
+                jwojHardMETy += -hardETyByBin[iBin];
+                jwojSoftMETx += -softETxByBin[iBin];
+                jwojSoftMETy += -softETyByBin[iBin];
+                jwojMETxAcc  += jwojParams.hardCoeff[iBin] * static_cast<double>(-hardETxByBin[iBin])
+                              + jwojParams.softCoeff[iBin] * static_cast<double>(-softETxByBin[iBin]);
+                jwojMETyAcc  += jwojParams.hardCoeff[iBin] * static_cast<double>(-hardETyByBin[iBin])
+                              + jwojParams.softCoeff[iBin] * static_cast<double>(-softETyByBin[iBin]);
+            }
+            int jwojMETx = static_cast<int>(std::lround(jwojMETxAcc));
+            int jwojMETy = static_cast<int>(std::lround(jwojMETyAcc));
+
+            unsigned int jwojHardMET = static_cast<unsigned int>(std::sqrt(static_cast<double>(jwojHardMETx) * jwojHardMETx + static_cast<double>(jwojHardMETy) * jwojHardMETy));
+            unsigned int jwojSoftMET = static_cast<unsigned int>(std::sqrt(static_cast<double>(jwojSoftMETx) * jwojSoftMETx + static_cast<double>(jwojSoftMETy) * jwojSoftMETy));
+            unsigned int jwojMET     = static_cast<unsigned int>(std::sqrt(static_cast<double>(jwojMETx)     * jwojMETx     + static_cast<double>(jwojMETy)     * jwojMETy));
+            unsigned int jwojSumEt   = jwojHardSumEt + jwojSoftSumEt;
+
+            // Packed through the same sign-magnitude / bitset path as the outputs above, so a
+            // JwoJ value and a total MET value are the same kind of number on disk.
+            std::bitset<signed_et_bit_length_> jwojMETx_bitset    (pack_signed_et(jwojMETx));
+            std::bitset<signed_et_bit_length_> jwojMETy_bitset    (pack_signed_et(jwojMETy));
+            std::bitset<signed_et_bit_length_> jwojHardMETx_bitset(pack_signed_et(jwojHardMETx));
+            std::bitset<signed_et_bit_length_> jwojHardMETy_bitset(pack_signed_et(jwojHardMETy));
+            std::bitset<signed_et_bit_length_> jwojSoftMETx_bitset(pack_signed_et(jwojSoftMETx));
+            std::bitset<signed_et_bit_length_> jwojSoftMETy_bitset(pack_signed_et(jwojSoftMETy));
+            std::bitset<et_bit_length_> jwojMET_bitset      (jwojMET       & maskN(et_bit_length_));
+            std::bitset<et_bit_length_> jwojHardMET_bitset  (jwojHardMET   & maskN(et_bit_length_));
+            std::bitset<et_bit_length_> jwojSoftMET_bitset  (jwojSoftMET   & maskN(et_bit_length_));
+            std::bitset<et_bit_length_> jwojHardSumEt_bitset(jwojHardSumEt & maskN(et_bit_length_));
+            std::bitset<et_bit_length_> jwojSoftSumEt_bitset(jwojSoftSumEt & maskN(et_bit_length_));
+            std::bitset<et_bit_length_> jwojSumEt_bitset    (jwojSumEt     & maskN(et_bit_length_));
+
+            out_jwojMETX      = undigitize_signed_et(jwojMETx_bitset);
+            out_jwojMETY      = undigitize_signed_et(jwojMETy_bitset);
+            out_jwojHardMETX  = undigitize_signed_et(jwojHardMETx_bitset);
+            out_jwojHardMETY  = undigitize_signed_et(jwojHardMETy_bitset);
+            out_jwojSoftMETX  = undigitize_signed_et(jwojSoftMETx_bitset);
+            out_jwojSoftMETY  = undigitize_signed_et(jwojSoftMETy_bitset);
+            out_jwojMET       = undigitize_et(jwojMET_bitset);
+            out_jwojHardMET   = undigitize_et(jwojHardMET_bitset);
+            out_jwojSoftMET   = undigitize_et(jwojSoftMET_bitset);
+            out_jwojSumHardET = undigitize_et(jwojHardSumEt_bitset);
+            out_jwojSumSoftET = undigitize_et(jwojSoftSumEt_bitset);
+            out_jwojSumET     = undigitize_et(jwojSumEt_bitset);
+        }
+
         metTree->Fill();
         emulEventInfoTree->Fill();
     } // Event loop
@@ -390,13 +528,26 @@ void metEmulation(bool signalBool,                 // true = signal sample, fals
                   int fileIndex = -1,                        // When >= 0, appended as _fileN to output name to avoid collisions across parallel jobs
                   double towerScaleFactor = 1.0,             // Scalar weight applied to tower MET in the totalMET sum (future: eta-binned, calibrated)
                   double jetScaleFactor = 1.0,               // Scalar weight applied to jet MET in the totalMET sum (future: eta-binned, calibrated)
-                  unsigned int pileup = 200                  // Pileup scenario of the input sample; tags the output name (r16130 = PU200, r16129 = PU140)
+                  unsigned int pileup = 200,                 // Pileup scenario of the input sample; tags the output name (r16130 = PU200, r16129 = PU140)
+                  bool useGEPJwoJ = false,                   // true = also write the GEP JwoJ MET branches (see the algorithm block in eventLoop)
+                  double jwojHardEtThreshold = 10.0          // Tower E_T [GeV] above which a tower joins the GEP JwoJ hard term
                   ) {
 
     if (signalBool) std::cout << "Processing signal: " << signalString << "\n";
 
+    // GEP JwoJ coefficients are the EXISTING two: in JwoJ mode the towers below the hard
+    // threshold are the soft term and the ones above it stand in for the jets, so
+    // towerScaleFactor keeps its meaning as the soft weight and jetScaleFactor as the hard
+    // weight. Nothing new goes in the filename for them -- the _twrSF / _jetSF tags already
+    // carry them -- which is why only the hard-term threshold gets a tag of its own.
+    const GEPJwoJParams jwojParams = makeUniformGEPJwoJParams(jwojHardEtThreshold, jetScaleFactor, towerScaleFactor);
+    if (useGEPJwoJ)
+        std::cout << "GEP JwoJ MET enabled: hard-term E_T threshold " << jwojHardEtThreshold
+                  << " GeV, hard coefficient " << jetScaleFactor
+                  << ", soft coefficient " << towerScaleFactor << "\n";
+
     auto infile  = explicitInputPath.empty() ? makeInputFileName(signalBool, signalString, "/data/larsonma/GEPHadronicEventReconstruction/ntuples/", pileup) : explicitInputPath;
-    auto outfile = makeOutputMETFileName(maxTowersConsidered_, signalBool, signalString, useSKObjects, jetEtThreshold, towerEtThreshold, doJetTowerOverlapRemoval, "/data/larsonma/GEPMET/outputNTuplesDev_METv2/", useEtaSKObjects, towerScaleFactor, jetScaleFactor, pileup);
+    auto outfile = makeOutputMETFileName(maxTowersConsidered_, signalBool, signalString, useSKObjects, jetEtThreshold, towerEtThreshold, doJetTowerOverlapRemoval, "/data/larsonma/GEPMET/outputNTuplesDev_METv3/", useEtaSKObjects, towerScaleFactor, jetScaleFactor, pileup, useGEPJwoJ, jwojHardEtThreshold);
     if (fileIndex >= 0) {
         size_t pos = outfile.rfind(".root");
         if (pos != std::string::npos)
@@ -408,7 +559,7 @@ void metEmulation(bool signalBool,                 // true = signal sample, fals
 
     gSystem->RedirectOutput("debuglog_MET.log", "w");
     std::cout << "Calling event loop\n";
-    eventLoop(infile, outfile, useSKObjects, jetEtThreshold, towerEtThreshold, doJetTowerOverlapRemoval, useEtaSKObjects, towerScaleFactor, jetScaleFactor);
+    eventLoop(infile, outfile, useSKObjects, jetEtThreshold, towerEtThreshold, doJetTowerOverlapRemoval, useEtaSKObjects, towerScaleFactor, jetScaleFactor, useGEPJwoJ, jwojParams);
 }
 
 

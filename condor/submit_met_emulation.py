@@ -28,18 +28,59 @@ WRAPPER = Path(__file__).parent / "run_met_emulation_job.sh"
 # ---------------------------------------------------------------------------
 # Parameter grid — edit these to match metEmulationConfigLocal.sh
 # ---------------------------------------------------------------------------
-SIGNALS        = [True, False]
-SIGNAL_STRINGS = ["ZvvHbb", "ttbar_semilep", "ttbar_dilep", "Zmumu"]   # only used when signal=True
-PU_SUPPRESSION = [True, False]
-JET_ET_THRESHOLDS        = [15.0]
-DO_JET_TOWER_OR          = [False]
-TOWER_ET_THRESHOLDS      = [2.0]
-ETA_SK_OBJECTS           = [True, False]
+#SIGNALS        = [True, False]
+#SIGNAL_STRINGS = ["ZvvHbb", "ttbar_semilep", "ttbar_dilep", "Zmumu"]   # only used when signal=True
+#PU_SUPPRESSION = [True, False]
+#JET_ET_THRESHOLDS        = [0.0]
+#DO_JET_TOWER_OR          = [False]
+#TOWER_ET_THRESHOLDS      = [2.0]
+#ETA_SK_OBJECTS           = [True, False]
 # (towerScaleFactor, jetScaleFactor) pairs applied in the totalMET sum.
 # Default (1.0, 1.0); test pair (0.4, 1.0) to down-weight tower contribution.
 #SCALE_FACTOR_PAIRS       = [(1.0, 1.0), (1.0, 0.5), (0.2, 0.5), (0.4, 1.0)]
 #SCALE_FACTOR_PAIRS       = [(0.4, 1.0),(0.3, 1.0),(0.2, 1.0),(0.6, 1.0),(0.1, 1.0),(0.7, 1.0)]
-SCALE_FACTOR_PAIRS       = [(1.0, 1.0)]
+#SCALE_FACTOR_PAIRS       = [(1.0, 1.0)]
+
+# --- 08282026: tower coefficient 0.4 with NO jet or tower E_T threshold, OR and NoOR ----------
+# Isolates what the overlap removal and the down-weighted tower coefficient buy on their own,
+# with no jet/tower threshold confounding the comparison. The existing J0/T0 grid only covers
+# (NoOR, twrSF1) at both pileups and (OR, twrSF1) at PU200, so these two configurations are the
+# missing corners of the OR x coefficient square:
+#     jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1
+#     jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1
+# Zmumu is left out — the MET tables it feeds use the three truth-MET processes only. Add it back
+# to SIGNAL_STRINGS if the dimuon-p_T turn-ons are wanted at this configuration too.
+SIGNALS        = [True, False]        # True -> the signal processes below, False -> JZ dijet background
+#SIGNAL_STRINGS = ["ZvvHbb"]
+SIGNAL_STRINGS = ["ttbar_dilep"]
+#SIGNAL_STRINGS = ["Zmumu"]
+# EtaSK is selected by ETA_SK_OBJECTS=True; PU_SUPPRESSION must be True alongside it, since the
+# output tag is EtaSK either way and running both values would give two jobs writing the same
+# filename.
+PU_SUPPRESSION           = [True]
+ETA_SK_OBJECTS           = [True]     # EtaSK
+JET_ET_THRESHOLDS        = [0.0]      # no jet E_T threshold
+TOWER_ET_THRESHOLDS      = [2.0]      # no tower E_T threshold
+DO_JET_TOWER_OR          = [False]   # OR and the corresponding NoOR
+SCALE_FACTOR_PAIRS       = [(0.3, 1.0), (0.4, 1.0), (0.45, 1.0), (0.5, 1.0), (0.55, 1.0)]    # twrSF0p4_jetSF1
+
+# --- GEP JwoJ MET ----------------------------------------------------------------------------
+# The one switch that turns this submission into a GEP JwoJ production. When True every job
+# additionally writes the GEPJwoJ* branches (see the algorithm block in metEmulation.cc) and its
+# output filename gains a _GEPJwoJ_hardEt{X} tag, which is what metAnalysisAndRates.C keys its
+# GEP JwoJ path on. When False nothing at all changes: the same jobs, the same output names, the
+# same branches as before this option existed.
+#
+# The JwoJ hard and soft coefficients are NOT set here. In JwoJ mode the existing pair does the
+# job — jetScaleFactor is the hard coefficient and towerScaleFactor the soft one — so scan them
+# through SCALE_FACTOR_PAIRS above exactly as for the standard algorithm, and the _twrSF/_jetSF
+# tags keep carrying them. The hard-term E_T threshold is the only genuinely new parameter, so it
+# is the only one with its own grid and its own tag.
+USE_GEP_JWOJ                 = True
+# Tower E_T [GeV] above which a tower joins the hard term; everything else that survives the
+# tower E_T threshold is the soft term. Iterated ONLY when USE_GEP_JWOJ is True, so a standard
+# submission's job count is untouched no matter what is listed here.
+GEP_JWOJ_HARD_ET_THRESHOLDS  = [5.0, 7.5, 10.0, 12.5, 15.0, 20.0]
 
 # --- Produced 08192026: the single point missing from the Z->mumu OR comparison --------------
 # EtaSK / jetEt15 / towerEt2 / NoOR / twrSF0p5 / jetSF1, for the Zmumu signal and the dijet
@@ -204,12 +245,12 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
         "",
         # pileup is fixed for the whole submission, so it goes in the header rather
         # than the per-job ItemData.
-        f"arguments = $(SIG) $(PUSUP) $(SIGSTR) $(JETET) $(JTOR) $(TOWERET) $(ETASK) $(INFILE) $(FIDX) $(TWRSF) $(JETSF) {PILEUP}",
+        f"arguments = $(SIG) $(PUSUP) $(SIGSTR) $(JETET) $(JTOR) $(TOWERET) $(ETASK) $(INFILE) $(FIDX) $(TWRSF) $(JETSF) {PILEUP} $(JWOJ) $(JWOJHARDET)",
         "log       = $(LOG)",
         "output    = $(OUT)",
         "error     = $(ERR)",
         "",
-        f"queue SIG, PUSUP, SIGSTR, JETET, JTOR, TOWERET, ETASK, INFILE, FIDX, TWRSF, JETSF, LOG, OUT, ERR from {itemdata_path}",
+        f"queue SIG, PUSUP, SIGSTR, JETET, JTOR, TOWERET, ETASK, INFILE, FIDX, TWRSF, JETSF, JWOJ, JWOJHARDET, LOG, OUT, ERR from {itemdata_path}",
     ]
 
     data_lines = []
@@ -219,6 +260,7 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
             f"{j['jtor']}, {j['toweret']}, {j['etask']}, "
             f"{j['infile']}, {j['fidx']}, "
             f"{j['twrsf']}, {j['jetsf']}, "
+            f"{j['jwoj']}, {j['jwojhardet']}, "
             f"{j['log']}, {j['stdout']}, {j['stderr']}"
         )
 
@@ -227,9 +269,13 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
 
 def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
     jobs = []
-    for pusup, jetet, jtor, toweret, etask, sfpair in itertools.product(
+    # With GEP JwoJ off the grid carries a single placeholder hard-threshold value that never
+    # reaches a filename or a tag, so the job count and every output name are exactly what they
+    # were before the option existed.
+    jwoj_hard_ets = GEP_JWOJ_HARD_ET_THRESHOLDS if USE_GEP_JWOJ else [0.0]
+    for pusup, jetet, jtor, toweret, etask, sfpair, jwojhardet in itertools.product(
             PU_SUPPRESSION, JET_ET_THRESHOLDS, DO_JET_TOWER_OR,
-            TOWER_ET_THRESHOLDS, ETA_SK_OBJECTS, SCALE_FACTOR_PAIRS):
+            TOWER_ET_THRESHOLDS, ETA_SK_OBJECTS, SCALE_FACTOR_PAIRS, jwoj_hard_ets):
         twrsf, jetsf = sfpair
         for signal in SIGNALS:
             sig_list = SIGNAL_STRINGS if signal else ["BACKGROUND"]
@@ -241,6 +287,10 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                                  f"_{'OR' if jtor else 'NoOR'}"
                                  f"_twrSF{fmt_scale_factor_tag(twrsf)}"
                                  f"_jetSF{fmt_scale_factor_tag(jetsf)}")
+                # Mirrors the tag makeOutputMETFileName appends, so a log file name and the
+                # output ntuple it belongs to stay readable against each other.
+                if USE_GEP_JWOJ:
+                    algo_tag += f"_GEPJwoJ_hardEt{fmt_float(jwojhardet)}"
 
                 input_files = find_input_files(sigstr)
                 if not input_files:
@@ -278,6 +328,8 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                         "fidx_list": fidx_csv,    # full list for the wrapper's log
                         "twrsf":   fmt_float(twrsf),
                         "jetsf":   fmt_float(jetsf),
+                        "jwoj":       bool_str(USE_GEP_JWOJ),
+                        "jwojhardet": fmt_float(jwojhardet),
                         "log_dir": log_dir,
                         "log":     os.path.join(log_dir, f"{safe}.log"),
                         "stdout":  os.path.join(log_dir, f"{safe}.out"),
@@ -332,6 +384,17 @@ def main():
         print(f"[pileup] PU{args.pu}: reading inputs from {_NTUPLE_BASE_BY_PU[args.pu]}")
         print(f"[pileup] Outputs are tagged r16129 (PU140) instead of r16130 (PU200), "
               "so they sit alongside the PU200 ones without overwriting them.")
+
+    # Tag a GEP JwoJ submission so its logs / itemdata / sub file sit beside a standard
+    # submission's rather than overwriting them — the outputs already separate on the
+    # _GEPJwoJ_hardEt tag in the filename, so only the bookkeeping needs it.
+    if USE_GEP_JWOJ:
+        args.label += "_GEPJwoJ"
+        print(f"[GEP JwoJ] enabled: hard-term E_T thresholds {GEP_JWOJ_HARD_ET_THRESHOLDS} GeV")
+        print("[GEP JwoJ] hard coefficient = jetScaleFactor, soft coefficient = towerScaleFactor "
+              "(from SCALE_FACTOR_PAIRS)")
+        print("[GEP JwoJ] outputs gain a _GEPJwoJ_hardEt{X} tag and the GEPJwoJ* branches; the "
+              "standard jet/tower/total MET branches are still written alongside them.")
 
     log_dir = str(Path.home() / "condor_logs" / args.label)
     os.makedirs(log_dir, exist_ok=True)

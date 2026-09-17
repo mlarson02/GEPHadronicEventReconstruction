@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <cctype>
+#include <cstring>
 #include <algorithm>
 #include <map>
 #include "TFile.h"
@@ -111,7 +113,11 @@ void DrawATLASLabel(double x = 0.20, double /*y*/ = 0.88, const char* status = "
     p.DrawLatex(x + 0.13, yAtlas, status);
     TLatex e; e.SetNDC(); e.SetTextFont(42); e.SetTextColor(kBlack); e.SetTextSize(0.035);
     // #LT / #GT are TLatex's angle brackets; plain "<PU>" renders less-than/greater-than glyphs.
-    e.DrawLatex(x, yInfo, Form("#sqrt{s} = 14 TeV, #LTPU#GT = %d", gPileup));
+    // gPileup <= 0 means no single pileup applies to the plot, so the info line drops the PU
+    // quote rather than naming one of them — see SpanningPileupLabel, used by the rate-vs-mu
+    // plots, which put PU140 and PU200 on one axis.
+    e.DrawLatex(x, yInfo, gPileup > 0 ? Form("#sqrt{s} = 14 TeV, #LTPU#GT = %d", gPileup)
+                                      : Form("#sqrt{s} = 14 TeV"));
     // Process label at the top-right of the strip (right-aligned), to the right of "ATLAS <status>".
     if (!gProcLabel.empty()) {
         TLatex s; s.SetNDC(); s.SetTextFont(42); s.SetTextColor(kBlack); s.SetTextSize(0.042);
@@ -129,6 +135,15 @@ struct BkgProcLabel {
     std::string saved;
     BkgProcLabel() : saved(gProcLabel) { gProcLabel = kBkgProcLabel; }
     ~BkgProcLabel() { gProcLabel = saved; }
+};
+
+// A plot whose x axis IS pileup cannot quote a single #LTPU#GT on the info line. Setting
+// gPileup to a non-positive value for the duration of the draw makes DrawATLASLabel drop the
+// quote entirely, which is the honest thing to print when both scenarios are on the canvas.
+struct SpanningPileupLabel {
+    int saved;
+    SpanningPileupLabel() : saved(gPileup) { gPileup = -1; }
+    ~SpanningPileupLabel() { gPileup = saved; }
 };
 
 // The same trick for the multi-file overlays, which are handed the process name as a signalName
@@ -244,21 +259,42 @@ const double kTDRRateHz = 80e3;
 // vectors index into. Everything else (rate histograms, per-event values, labels) is looked up
 // through this order, so a new MET type only has to be added here and in the two arrays that
 // bind it to its histogram / branch variable inside analyze_files.
-const int   nMETTypes = 7;
+const int   nMETTypes = 8;
 const char* metTypeShort[nMETTypes] = {
-    "gFEX_JwoJ", "gFEX_NoiseCut", "gFEX_Rms", "jFEX", "JetMET", "TowerMET", "TotalMET"
+    "gFEX_JwoJ", "gFEX_NoiseCut", "gFEX_Rms", "jFEX", "JetMET", "TowerMET", "TotalMET", "GEPJwoJMET"
 };
 const char* metTypeLabel[nMETTypes] = {
-    "gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"
+    "gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET", "GEP JwoJ MET"
 };
 // The GEP entries of the table above, for the GEP-only overlays.
-const int nGEPMETTypes = 3;
-const int gepMETTypeIdx[nGEPMETTypes] = { 4, 5, 6 };   // Jet, Tower, Total
+const int nGEPMETTypes = 4;
+const int gepMETTypeIdx[nGEPMETTypes] = { 4, 5, 6, 7 };   // Jet, Tower, Total, JwoJ
 // Tower MET is meaningless once Overlap Removal is on, so this entry is dropped from the
 // overlays for OR configs (same convention as the GEP algorithm-comparison plots below).
 const int towerMETTypeIdx = 5;
 // jFEX, for the standalone jFEX turn-on plots.
 const int jfexMETTypeIdx = 3;
+// GEP JwoJ MET, which only exists in emulator outputs produced with the JwoJ algorithm
+// enabled (metEmulation.cc, useGEPJwoJ). Every overlay loop over the table above drops this
+// entry unless the file being processed actually carries it — see hasGEPJwoJ inside
+// analyze_files — so a run over standard emulator outputs produces exactly what it did
+// before this MET type existed.
+const int gepJwoJMETTypeIdx = 7;
+
+// --- GEP JwoJ: pairwise MET-vs-MET comparison ------------------------------------------------
+// The MET types entering the pairwise 2D comparison, as indices into the table above. Every
+// unordered pair of them gets a canvas: the TH2F of one against the other, a linear fit to the
+// profile, and the slope-1 line to read the fit against. nCmp2DTypes * (nCmp2DTypes - 1) / 2
+// canvases for signal and the same again for background.
+//
+// gFEX NoiseCut and Rms are deliberately left out: they are the same gFEX input treated two
+// other ways, and including them would triple the canvas count while adding little that gFEX
+// JwoJ does not already say about how a FEX algorithm compares with a GEP one.
+//
+// Produced only for files that carry GEP JwoJ MET — the block exists to put the new algorithm
+// against the others, and the pairs that do not involve it are already covered elsewhere.
+const int nCmp2DTypes = 6;
+const int cmp2DTypeIdx[nCmp2DTypes] = { 0, 3, 4, 5, 6, 7 };   // gFEX JwoJ, jFEX, GEP Jet/Tower/Total/JwoJ
 // The L1Calo entries: the three gFEX algorithms plus jFEX, for the L1Calo algorithm comparison.
 // Deliberately separate from the GEP comparison — that one exists to compare GEP algorithms
 // against each other, and a FEX curve does not belong on it.
@@ -268,6 +304,12 @@ const int l1caloMETTypeIdx[nL1CaloMETTypes] = { 0, 1, 2, 3 };   // gFEX JwoJ, No
 // GEP Total MET is the hard + soft term recombination, so its residual against truth is what
 // the per-term coefficients are judged on — the reason these plots exist. jFEX is not compared
 // against truth, so it has no residual plots.
+//
+// GEP JwoJ MET is deliberately NOT in this table. It gets the 2D TOB-vs-truth correlation in the
+// Calibration block like every other type, but not the residual and resolution profile overlays:
+// those are what the tower/jet coefficients of the STANDARD algorithm are tuned against, and the
+// JwoJ terms are recombined with their own coefficients. Add gepJwoJMETTypeIdx here, together
+// with a resSumETLabel entry and the four residual histograms, if that changes.
 const int nResMETTypes = 6;
 const int resMETTypeIdx[nResMETTypes] = { 0, 1, 2, 4, 5, 6 };   // gFEX JwoJ/NoiseCut/Rms, GEP Jet/Tower/Total
 // SumET each residual type is binned against: gFEX carries its own per-algorithm SumET, the
@@ -289,6 +331,137 @@ const char*  muRateNames[nMuRates] = { "40kHz", "60kHz", "80kHz" };
 const int    nNJetBins  = 20;
 const double nJetAxisMax = 20.0;
 const double kNJetMinEt  = 15.0;   // [GeV]
+
+// --- Background MET vs trigger-jet multiplicity ----------------------------------------------
+// The same profiles again, but binned in the jets the trigger itself reconstructs — the WTA-cone
+// GEP jets built from eta-SoftKiller-suppressed towers — instead of the truth jets above. Truth
+// jet multiplicity says what the event contained; this says what a MET selection could actually
+// cut on, so any pattern that survives the swap is one a jet-multiplicity term in the MET
+// selection could exploit to bring the rate down.
+//
+// No E_T cut here, unlike the truth version: every jet in the collection counts. The trigger
+// jets are already what the trigger would see, and the point of the plot is whether their
+// multiplicity as-delivered separates the rate.
+//
+// The GEP jet collection is capped at ten jets per event, so the axis runs over the integers
+// 0..10 with one bin each rather than the truth version's 0..20.
+//
+// Which pileup-suppression variant supplies the trigger jets follows the emulator config being
+// processed rather than being fixed here — the jets have to come from the same tower collection
+// the MET was built from, or the plot compares a MET to a jet count the trigger never had. The
+// variant is read off the emulator output filename, which always carries one of _NoSK_, _SK_ or
+// _EtaSK_ (see condor/submit_met_emulation.py). kTrigJetPUSupIdxDefault is the fallback for a
+// filename that carries none of them: an index into the puSupTreeTag / puSupLabel tables further
+// down (0 = No SK, 1 = SK, 2 = EtaSK).
+const bool   fillMETvsNTrigJets      = true;
+const int    nNTrigJetBins           = 11;     // integer counts 0 .. 10
+const double nTrigJetAxisMax         = 11.0;
+const int    kTrigJetPUSupIdxDefault = 2;      // EtaSK
+
+// --- Average background rate vs pileup (mu) --------------------------------------------------
+// Fixed MET thresholds the rate-vs-mu curves are evaluated at [GeV]. One canvas per threshold,
+// with every MET type from the table above (GEP + L1Calo) overlaid on it.
+const int    nRateVsMuThr = 3;
+const double rateVsMuThr[nRateVsMuThr]     = { 50.0, 75.0, 100.0 };
+const char*  rateVsMuThrName[nRateVsMuThr] = { "50GeV", "75GeV", "100GeV" };
+// mu axis, in bins of 4 interactions. The HL-LHC samples are generated on a flat mu profile —
+// 120-160 at PU140, 180-220 at PU200 — so one axis spanning both is exactly what a matched pair
+// of samples populates. The 160-180 gap between them stays empty: no sample lives there, and
+// empty bins are dropped from the graphs rather than drawn at zero.
+const int    nMuBins   = 25;    // 4 interactions per bin over [120, 220]
+const double muAxisMin = 120.0;
+const double muAxisMax = 220.0;
+// Which EventInfo pileup quantity to bin on. actualInteractionsPerCrossing is the in-time
+// pileup of the crossing itself; averageInteractionsPerCrossing is the mu it was generated at,
+// which is the one that comes out exactly flat over the ranges above. HERNTupler writes both.
+const bool rateVsMuUseAverageMu = false;
+
+// --- GEP input-object multiplicity (jets and towers) -----------------------------------------
+// How many jets and towers the MET emulator is handed per event, and how that count falls as an
+// E_T threshold is raised on them — the plot a jetEt / towerEt threshold choice is read off.
+//
+// Read from the HERNTupler INPUT ntuple, not the emulator output: the emulator writes only
+// event-level scalars (see metEmulation.cc), so the collections themselves only exist upstream.
+// That also means these distributions do NOT depend on the emulator configuration — every config
+// of a given process and pileup is run over the same input ntuple — so the multi-file overlays of
+// them separate only when the run mixes processes or pileups.
+//
+// All three pileup-suppression variants are read for every file, so one canvas shows what
+// SoftKiller and eta-SoftKiller remove relative to the unsuppressed collection.
+const int   nPUSup = 3;
+const char* puSupTreeTag[nPUSup] = { "",      "SK", "EtaSK" };   // infix in the input tree name
+const char* puSupLabel[nPUSup]   = { "No SK", "SK", "EtaSK" };
+const char* puSupShort[nPUSup]   = { "NoSK",  "SK", "EtaSK" };
+
+// An object counts towards the multiplicity only with E_T strictly above the threshold, which is
+// the emulator's own `if (Et <= threshold) continue`. At threshold 0 that drops the E_T = 0
+// entries SoftKiller leaves behind — HERNTupler keeps killed towers in place with their E_T
+// zeroed — so "total multiplicity" here means the surviving-object count, not the vector length.
+//
+// The multiplicity-vs-threshold curves are TProfiles of the per-event count above each threshold:
+// towers every 0.5 GeV out to 10, jets every 5 GeV out to 50. The curves are drawn as means with
+// no error bars — the uncertainty on the mean is far too small to see at these sample sizes, and
+// the event-to-event spread, while large, is not an uncertainty on what is plotted.
+const int    nTowerThrPts = 21;   const double towerThrStep = 0.5;   // 0, 0.5, ... 10 GeV
+const int    nJetThrPts   = 11;   const double jetThrStep   = 5.0;   // 0, 5,   ... 50 GeV
+const double towerThrMax  = 10.0;
+const double jetThrMax    = 50.0;
+
+// Top of the y axis on the multiplicity-vs-threshold canvases. Fixed rather than derived from the
+// curves: both peak at threshold 0, the far LEFT of the axis, while the legend sits top-right, so
+// the automatic legend clearance reserves headroom the canvas does not need and pushes the
+// interesting part of the curve into the bottom half.
+const double kTowerMultThrYMax = 5e4;
+const double kJetMultThrYMax   = 4.0;
+
+// --- Tower multiplicity percentile ------------------------------------------------------------
+// The mean tower count says what a typical crossing costs; it says nothing about the tail, which
+// is what a fixed-latency system actually has to survive. So the tower-vs-threshold canvas also
+// carries the count that this fraction of crossings falls below — the 99th percentile — for each
+// of its curves.
+//
+// A percentile needs the full per-event distribution at each threshold, which a TProfile does not
+// keep. That distribution is one histogram of the count per threshold; they are held here as the
+// y projections of a single 2D (threshold, count) histogram — same thing, one object to book,
+// fill and clone instead of twenty-one per variant per sample. One bin per tower over
+// [0, towerMultMax], so the quantile comes back exact rather than interpolated across a wide bin.
+// Jets are left out: their axis is capped at 4 and a 99th percentile would run off the top of it.
+const double kMultPercentile     = 0.99;
+const int    nTowerCountBins     = 6401;   // integer counts 0 .. 6400
+const double kTowerCountAxisMin  = -0.5, kTowerCountAxisMax = 6400.5;
+
+// Total-multiplicity axes. The two objects want different axes:
+//
+//   Towers: LOG-spaced bins on a log x axis over [30, 6400]. SoftKiller moves the surviving tower
+//     count by more than an order of magnitude — of order 100 at SK against up to 6400
+//     unsuppressed — and a linear axis cannot show both ends of that on one canvas. The axis runs
+//     to the full 6400-tower collection rather than to the emulator's maxTowersConsidered_ = 4096
+//     read cap, so the unsuppressed distribution is shown whole; it starts at 30 rather than at 1
+//     because nothing populates the decade and a half below that and a log axis would otherwise
+//     spend half the canvas on empty bins. Anything under 30 towers is clamped into the first bin.
+//   Jets: LINEAR, one bin per jet over 0 to maxJetsConsidered_ = 10 from the emulator constants —
+//     jets past the tenth are never processed, so the axis covers exactly what the algorithm
+//     sees, N = 0 keeps a bin of its own, and everything at or above the cap lands in the top
+//     one. The edges are half-integers so that each bin is CENTRED on its integer count: with
+//     bins [0,1), [1,2), ... a count of 3 would sit at 3.5 and the mean quoted in the legend
+//     would come out half a jet too high. Counts 0 through 10 inclusive is eleven bins.
+const int    nTowerMultBins  = 96;    const double towerMultMax = 6400.0;
+const double kTowerMultAxisMin = 30.0;   // first bin low edge on the log tower axis
+const int    nJetMultBins    = 11;
+const double jetMultAxisMin  = -0.5, jetMultAxisMax = 10.5;
+
+// Log-spaced bin edges over [lo, hi] for the tower multiplicity axis above.
+std::vector<double> makeLogBinEdges(int nBins, double lo, double hi) {
+    std::vector<double> edges(nBins + 1);
+    const double lStep = (std::log(hi) - std::log(lo)) / nBins;
+    for (int i = 0; i <= nBins; ++i) edges[i] = std::exp(std::log(lo) + i * lStep);
+    return edges;
+}
+
+// These are the full per-event tower vectors, three of them for signal and three for background,
+// which makes this the most expensive read in the file loop. Set false to drop every
+// multiplicity plot and get the runtime back.
+const bool fillObjectMultiplicity = false;
 
 // -----------------------------------------------------------------------
 // Normalize histogram to unit area
@@ -382,6 +555,77 @@ void drawComponentOverlay(TH1F* sig, TH1F* back, const std::string& title,
 }
 
 // -----------------------------------------------------------------------
+// Overlay N normalized MET-component distributions on one canvas, each quoting its own mean and
+// median — drawComponentOverlay's legend, but for a set of terms of one sample rather than for
+// signal against background. Used for the three GEP MET terms (Jet, Tower, Total) on a single
+// x or y component: mean says how far off zero a term sits, median how far off zero its bulk is.
+//
+// Both are taken BEFORE normalizeHist, matching drawComponentOverlay. Unit-area scaling leaves
+// either unchanged, so this is for consistency with that function rather than correctness.
+//
+// logy suits the x / y components, which fall off steeply either side of zero. The phi direction
+// is flat to within its fluctuations, and a log axis would draw that as a straight line with six
+// empty decades beneath it, so those canvases pass false and get a linear axis from zero.
+void drawComponentMultiDist(std::vector<TH1F*> hists, const std::vector<std::string>& labels,
+                            const std::string& title, const std::string& xLabel,
+                            const std::string& outputPath, bool logy = true,
+                            const std::string& units = "GeV",
+                            const std::string& signalName = "") {
+    if (hists.empty()) return;
+    ProcLabelOverride procLbl(signalName);   // process name goes top-right, not in the legend
+    std::vector<double> means, medians;
+    for (auto* h : hists) { means.push_back(h->GetMean()); medians.push_back(getMedian(h)); }
+    for (auto* h : hists) normalizeHist(h);
+
+    double ymax = 0;
+    for (auto* h : hists) ymax = std::max(ymax, h->GetMaximum());
+    if (ymax <= 0.0) {
+        std::cout << "  [MET components] every histogram empty — " << outputPath << " skipped\n";
+        return;
+    }
+
+    TCanvas c("c", title.c_str(), 700, 600);
+    gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
+    if (logy) gPad->SetLogy();
+
+    // The x / y distributions peak at zero, dead centre of the axis, and the phi ones are flat all
+    // the way across, so a legend in either top corner sits over a curve on every one of these
+    // canvases. It goes across the top instead, with the frame stretched so the tallest bin clears
+    // it — the same rule the multiplicity overlays use.
+    const double legTop = 0.84, legRowH = 0.042, legH = legRowH * hists.size();
+    TLegend leg(0.20, legTop - legH, 0.92, legTop);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.026); leg.SetMargin(0.10);
+
+    const double kFloorDecades = 6.0;
+    const double freeFrac = std::min(0.60, std::max(0.0, (0.86 - (legTop - legH)) / 0.72 + 0.04));
+    const double yFloor   = logy ? ymax * std::pow(10.0, -kFloorDecades) : 0.0;
+    const double yCeiling = logy ? yFloor * std::pow(10.0, kFloorDecades / (1.0 - freeFrac))
+                                 : ymax / (1.0 - freeFrac);
+
+    const int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
+    const int nMcols = 8;
+    for (unsigned int i = 0; i < hists.size(); i++) {
+        hists[i]->SetLineColor(mcols[i % nMcols]);
+        hists[i]->SetLineWidth(2);
+        hists[i]->SetLineStyle(1);
+        hists[i]->SetTitle(title.c_str());
+        hists[i]->GetXaxis()->SetTitle(xLabel.c_str());
+        hists[i]->GetYaxis()->SetTitle(units.empty()
+            ? Form("Fraction of Events / %.4g", hists[i]->GetBinWidth(1))
+            : Form("Fraction of Events / %.4g %s", hists[i]->GetBinWidth(1), units.c_str()));
+        hists[i]->SetMaximum(yCeiling);
+        hists[i]->SetMinimum(yFloor);
+        hists[i]->Draw(i == 0 ? "HIST" : "HIST SAME");
+        if (i < labels.size())
+            leg.AddEntry(hists[i], Form("%s (mean=%+.2f, med=%+.2f%s%s)",
+                                        labels[i].c_str(), means[i], medians[i],
+                                        units.empty() ? "" : " ", units.c_str()), "l");
+    }
+    leg.Draw();
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
+}
+
+// -----------------------------------------------------------------------
 // Overlay two algorithms (e.g. GEP vs gFEX) for signal and background on one canvas.
 // sig1/back1 drawn solid, sig2/back2 drawn dashed; red=algo1, blue=algo2.
 void drawAlgoComparison(TH1F* sig1, TH1F* back1, TH1F* sig2, TH1F* back2,
@@ -428,10 +672,16 @@ void drawAlgoComparison(TH1F* sig1, TH1F* back1, TH1F* sig2, TH1F* back2,
 
 // -----------------------------------------------------------------------
 // Overlay multiple signal (or background) histograms from different algorithm configs
+//
+// nLegCols / yMaxScale exist for callers whose entries are long enough, or whose spectra flat
+// enough, that one column of entries under 5x headroom leaves the curves running through the
+// legend — the GEP algorithm comparison, whose labels are "GEP Tower MET (bkg)" rather than a
+// short config tag. Both default to the original behaviour, so every other call is unaffected.
 void drawOverlayMulti(std::vector<TH1F*>& sigs, std::vector<TH1F*>& backs,
                       const std::vector<std::string>& labels,
                       const std::string& title, const std::string& xLabel,
-                      const std::string& outputPath, const std::string& signalName = "") {
+                      const std::string& outputPath, const std::string& signalName = "",
+                      int nLegCols = 1, double yMaxScale = 5.0) {
     if (sigs.empty() && backs.empty()) return;
     ProcLabelOverride procLbl(signalName);   // process name goes top-right, not in the legend
     for (auto* h : sigs)  normalizeHist(h);
@@ -440,7 +690,7 @@ void drawOverlayMulti(std::vector<TH1F*>& sigs, std::vector<TH1F*>& backs,
     double ymax = 0;
     for (auto* h : sigs)  ymax = std::max(ymax, h->GetMaximum());
     for (auto* h : backs) ymax = std::max(ymax, h->GetMaximum());
-    ymax *= 5.0;
+    ymax *= yMaxScale;
     TH1F* refH = !sigs.empty() ? sigs[0] : backs[0];
     std::string yTitle = Form("Fraction of Events / %.4g GeV", refH->GetBinWidth(1));
 
@@ -448,11 +698,16 @@ void drawOverlayMulti(std::vector<TH1F*>& sigs, std::vector<TH1F*>& backs,
     gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
     gPad->SetLogy();
 
-    // 2 entries (sig+bkg) per config
+    // 2 entries (sig+bkg) per config, split across nLegCols columns (rounded up). A second column
+    // halves the rows but needs the box roughly twice as wide, so the left edge moves out with it.
     int nConfigs = (int)std::max(sigs.size(), backs.size());
-    double legTop = 0.88, legH = 0.06 * (2 * nConfigs);
-    TLegend leg(0.38, legTop - legH, 0.88, legTop);
-    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
+    if (nLegCols < 1) nLegCols = 1;
+    const int nLegRows = (2 * nConfigs + nLegCols - 1) / nLegCols;
+    double legTop = 0.88, legH = 0.06 * nLegRows;
+    TLegend leg(nLegCols > 1 ? 0.20 : 0.38, legTop - legH, 0.92, legTop);
+    leg.SetBorderSize(0); leg.SetFillStyle(0);
+    leg.SetTextSize(nLegCols > 1 ? 0.026 : 0.030);
+    leg.SetNColumns(nLegCols);
 
     bool first = true;
     for (unsigned int i = 0; i < sigs.size(); i++) {
@@ -479,6 +734,73 @@ void drawOverlayMulti(std::vector<TH1F*>& sigs, std::vector<TH1F*>& backs,
         first = false;
         leg.AddEntry(backs[i], (labels[i] + " (bkg)").c_str(), "l");
     }
+    leg.Draw();
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
+}
+
+// -----------------------------------------------------------------------
+// Overlay N signal distributions against ONE shared background.
+//
+// drawOverlayMulti pairs a background with every signal, which is right when each entry has its
+// own. For a truth-level quantity it is not: Truth MET comes from the input ntuple and the same
+// QCD dijet sample backs every entry, so drawing it per file stacks N identical dashed curves on
+// the canvas and spends half the legend saying so. Here the signals get the palette and the single
+// background is drawn once, in black and dashed, as the common reference it is.
+//
+// The caller is responsible for the entries actually sharing a background — see the
+// sameBackgroundInput check at the call site.
+void drawSignalsVsSharedBackground(std::vector<TH1F*> sigs, const std::vector<std::string>& labels,
+                                   TH1F* back, const std::string& backLabel,
+                                   const std::string& title, const std::string& xLabel,
+                                   const std::string& outputPath,
+                                   const std::string& signalName = "") {
+    if (sigs.empty() || !back) return;
+    ProcLabelOverride procLbl(signalName);   // process name goes top-right, not in the legend
+    for (auto* h : sigs) normalizeHist(h);
+    normalizeHist(back);
+
+    double ymax = back->GetMaximum();
+    for (auto* h : sigs) ymax = std::max(ymax, h->GetMaximum());
+    if (ymax <= 0.0) {
+        std::cout << "  [shared-bkg overlay] every histogram empty — " << outputPath << " skipped\n";
+        return;
+    }
+
+    TCanvas c("c", title.c_str(), 700, 600);
+    gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
+    gPad->SetLogy();
+
+    // DrawATLASLabel raises the top margin to 0.14 after the legend is built, so the frame ends at
+    // NDC y = 0.86. One row per signal plus one for the background; the frame is then stretched so
+    // the tallest bin clears the box, and the floor is set relative to the peak rather than at a
+    // fixed 1e-8 that would spend a third of the canvas on empty decades.
+    const double legTop = 0.84, legRowH = 0.040, legH = legRowH * (sigs.size() + 1);
+    TLegend leg(0.50, legTop - legH, 0.95, legTop);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.026); leg.SetMargin(0.15);
+
+    const double kFloorDecades = 6.0;
+    const double yFloor   = ymax * std::pow(10.0, -kFloorDecades);
+    const double freeFrac = std::min(0.60, std::max(0.0, (0.86 - (legTop - legH)) / 0.72 + 0.04));
+    const double yCeiling = yFloor * std::pow(10.0, kFloorDecades / (1.0 - freeFrac));
+    const std::string yTitle = Form("Fraction of Events / %.4g GeV", sigs[0]->GetBinWidth(1));
+
+    auto style = [&](TH1F* h, Color_t col, Style_t ls) {
+        h->SetLineColor(col); h->SetLineWidth(2); h->SetLineStyle(ls);
+        h->SetTitle(title.c_str());
+        h->GetXaxis()->SetTitle(xLabel.c_str());
+        h->GetYaxis()->SetTitle(yTitle.c_str());
+        h->SetMaximum(yCeiling); h->SetMinimum(yFloor);
+    };
+
+    for (unsigned int i = 0; i < sigs.size(); i++) {
+        style(sigs[i], cols[i % nColors], 1);
+        sigs[i]->Draw(i == 0 ? "HIST" : "HIST SAME");
+        if (i < labels.size()) leg.AddEntry(sigs[i], labels[i].c_str(), "l");
+    }
+    style(back, kBlack, 2);
+    back->Draw("HIST SAME");
+    leg.AddEntry(back, backLabel.c_str(), "l");
+
     leg.Draw();
     c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
 }
@@ -635,6 +957,82 @@ void drawRateVsThresholdMulti(const std::vector<TH1F*>& backs_weighted,
 }
 
 // -----------------------------------------------------------------------
+// Average background rate vs pileup at a FIXED MET threshold, one curve per algorithm.
+//
+// The graphs are built by the matched-pileup block at the end of analyze_files: each point is
+// the crossing rate times the weighted fraction of background events in that mu bin passing the
+// threshold, so a matched PU140 / PU200 pair of the same emulator config lands on a single axis
+// — PU140 filling mu 120-160, PU200 filling 180-220 — with the unpopulated gap in between.
+//
+// Takes ownership of nothing: colours and marker styles are set here so the palette stays with
+// the drawing code, as in drawRateVsThresholdMulti, and the caller deletes the graphs.
+void drawRateVsMuOverlay(const std::vector<TGraphErrors*>& graphs,
+                         const std::vector<std::string>& labels,
+                         const std::string& title, const std::string& outputPath,
+                         const std::string& legHeader = "") {
+    if (graphs.empty()) return;
+    BkgProcLabel bkgProc;          // background-only plot: label as QCD dijet, not the signal
+    SpanningPileupLabel puLabel;   // both pileup scenarios are on this canvas — quote neither
+    TCanvas c("c", title.c_str(), 700, 600);
+    gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
+    gPad->SetLogy();
+
+    // DrawATLASLabel raises the top margin to 0.14 afterwards, so the frame ends at NDC y = 0.86;
+    // keep the legend below that or it spills over the top axis.
+    //
+    // Two columns: one column of seven algorithms was tall enough to reach down into the PU200
+    // points on the right. The header keeps a row to itself, so the height is the entries split
+    // across the columns (rounded up) plus one.
+    const int nLegCols = 2;
+    const int nLegRows = (int)((graphs.size() + nLegCols - 1) / nLegCols)
+                       + (legHeader.empty() ? 0 : 1);
+    const double legTop = 0.84, legH = 0.045 * nLegRows;
+    TLegend leg(0.40, legTop - legH, 0.97, legTop);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.026);
+    leg.SetNColumns(nLegCols);
+    if (!legHeader.empty()) leg.AddEntry((TObject*)nullptr, legHeader.c_str(), "");
+
+    const int     mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
+    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47 };
+    const int nMcols = 8, nStyles = 8;
+
+    // The frame belongs to the first graph drawn, so the y range has to be known before anything
+    // goes on the canvas — otherwise a later curve sitting higher or lower is silently clipped.
+    double yMinSeen = 0.0, yMaxSeen = 0.0;
+    for (const auto* g : graphs)
+        for (int p = 0; p < g->GetN(); ++p) {
+            const double y = g->GetY()[p];
+            if (y <= 0.0) continue;   // log axis
+            if (yMaxSeen == 0.0 || y > yMaxSeen) yMaxSeen = y;
+            if (yMinSeen == 0.0 || y < yMinSeen) yMinSeen = y;
+        }
+    if (yMaxSeen == 0.0) { std::cout << "  [rate vs mu] no positive rates — " << outputPath << " skipped\n"; return; }
+
+    for (unsigned int i = 0; i < graphs.size(); i++) {
+        TGraphErrors* g = graphs[i];
+        g->SetLineColor(mcols[i % nMcols]);   g->SetLineWidth(2);
+        g->SetMarkerColor(mcols[i % nMcols]); g->SetMarkerStyle(mkstyles[i % nStyles]); g->SetMarkerSize(0.8);
+        // "#LTPU#GT", not the Symbol-font mu: the kMu workaround that fixes "Z #rightarrow mumu"
+        // in a TLatex label does NOT survive as an axis title, where it renders as #propto. The
+        // rest of this macro's labels already quote pileup as "#LTPU#GT", so match them.
+        g->SetTitle((title + ";#LTPU#GT;Rate [Hz]").c_str());
+        g->Draw(i == 0 ? "AP" : "P SAME");
+        if (i == 0) {
+            g->GetXaxis()->SetLimits(muAxisMin, muAxisMax);
+            g->SetMinimum(yMinSeen * 0.3);
+            // Headroom for the legend, which sits in the top ~quarter of the frame: x5 left the
+            // tallest PU200 points running through the entries. On a log axis the factor buys
+            // decades, so this is roughly one extra decade over the range these rates span.
+            g->SetMaximum(yMaxSeen * 20.0);
+        }
+        leg.AddEntry(g, labels[i].c_str(), "lp");
+    }
+    leg.Draw();
+    gPad->Modified(); gPad->Update(); gPad->RedrawAxis();
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
+}
+
+// -----------------------------------------------------------------------
 // Per-JZ-slice rate-vs-threshold overlay drawn as points (markers, not HIST),
 // mirroring OverlayAndSave's 10-colour JZ palette + right-side JZ0..JZ9 legend.
 // Rate is the cumulative weighted integral above each threshold; yScale converts
@@ -734,12 +1132,344 @@ void drawMultiDist(std::vector<TH1F*> hists, const std::vector<std::string>& lab
 }
 
 // -----------------------------------------------------------------------
+// Overlay N normalized signal/background pairs of a unitless distribution (an object count),
+// signal solid and background dashed in a shared colour per pair — the same sig/bkg convention
+// drawOverlayMulti uses for the MET spectra. Not drawOverlayMulti itself because that one
+// hardcodes GeV into its y-axis title, which a multiplicity axis has no business carrying.
+// logx is for the log-binned tower axis; the jet axis is linear bins of one jet and stays linear.
+void drawMultiplicityOverlay(std::vector<TH1F*> sigs, std::vector<TH1F*> backs,
+                             const std::vector<std::string>& labels,
+                             const std::string& title, const std::string& xLabel,
+                             const std::string& outputPath, bool logx = false,
+                             const std::string& signalName = "") {
+    if (sigs.empty() && backs.empty()) return;
+    ProcLabelOverride procLbl(signalName);   // process name goes top-right, not in the legend
+    for (auto* h : sigs)  normalizeHist(h);
+    for (auto* h : backs) normalizeHist(h);
+
+    double ymax = 0;
+    for (auto* h : sigs)  ymax = std::max(ymax, h->GetMaximum());
+    for (auto* h : backs) ymax = std::max(ymax, h->GetMaximum());
+    if (ymax <= 0.0) {
+        std::cout << "  [multiplicity] every histogram empty — " << outputPath << " skipped\n";
+        return;
+    }
+    // A "per N objects" y title only means something where the bins are all the same width, so
+    // the log-binned tower axis drops it. Unit-area normalization on a shared binning still
+    // compares the shapes correctly either way, which is what these canvases are for.
+    TH1F* refH = !sigs.empty() ? sigs[0] : backs[0];
+    const std::string yTitle = logx ? "Fraction of Events"
+                                    : Form("Fraction of Events / %.4g", refH->GetBinWidth(1));
+
+    TCanvas c("c", title.c_str(), 700, 600);
+    gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
+    gPad->SetLogy();
+    if (logx) gPad->SetLogx();
+
+    // DrawATLASLabel raises the top margin to 0.14 after the legend is built, so the frame ends
+    // at NDC y = 0.86; keep the legend below that or the first entry sits on the top axis.
+    // Two entries per config, each carrying a mean, so the box is wide and — at six entries —
+    // tall enough that a fixed headroom factor is not enough to keep the curves out of it.
+    // The widest entry is a multi-file config label plus its mean ("J0_T0_EtaSK (bkg), <N> = 4212"),
+    // so the box is wide and its line-sample margin is cut back from ROOT's default 0.25 to leave
+    // that text room inside it rather than spilling off the right of the canvas.
+    const int nEntries = (int)std::max(sigs.size(), backs.size());
+    const double legTop = 0.84, legRowH = 0.038, legH = legRowH * 2 * nEntries;
+    TLegend leg(0.52, legTop - legH, 0.97, legTop);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.024); leg.SetMargin(0.15);
+
+    // Frame range derived from the legend rather than from a fixed multiple of the peak. The
+    // legend covers the top freeFrac of the frame, so the axis is stretched until the tallest bin
+    // sits below it: over kFloorDecades decades of visible range, the peak has to land at
+    // (1 - freeFrac) of the height, which fixes the top. Without this the No SK tower peak — which
+    // sits at the right of the axis, directly under the legend — runs straight through it.
+    //
+    // The floor is set relative to the peak too. A fixed 1e-8 spent a third of the canvas on
+    // decades no distribution reaches, which is exactly the space the taller legend needs back.
+    const double kFloorDecades = 6.0;
+    const double yFloor    = ymax * std::pow(10.0, -kFloorDecades);
+    // + 0.04 is a gap between the legend's bottom row and the tallest bin, so they clear rather
+    // than touch.
+    const double freeFrac  = std::min(0.60, std::max(0.0, (0.86 - (legTop - legH)) / 0.72 + 0.04));
+    const double yCeiling  = yFloor * std::pow(10.0, kFloorDecades / (1.0 - freeFrac));
+
+    // Mean read off the histogram, so the clamping into the end bins is folded in exactly as
+    // drawn: a distribution running off the top of its axis reports the mean of what is on the
+    // canvas, not of the underlying collection. Scaling to unit area leaves the mean unchanged,
+    // so it makes no difference that normalizeHist has already run. On the log-binned tower axis
+    // the bins are ~6% wide, so bin-centre weighting costs well under a percent.
+    auto meanLabel = [](TH1F* h) { return std::string(Form(", #LTN#GT = %.4g", h->GetMean())); };
+
+    const int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
+    const int nMcols = 8;
+    bool first = true;
+    auto drawSet = [&](std::vector<TH1F*>& hs, const char* suffix, Style_t lineStyle) {
+        for (unsigned int i = 0; i < hs.size(); i++) {
+            hs[i]->SetLineColor(mcols[i % nMcols]);
+            hs[i]->SetLineWidth(2);
+            hs[i]->SetLineStyle(lineStyle);
+            hs[i]->SetTitle(title.c_str());
+            hs[i]->GetXaxis()->SetTitle(xLabel.c_str());
+            hs[i]->GetYaxis()->SetTitle(yTitle.c_str());
+            hs[i]->SetMaximum(yCeiling);
+            hs[i]->SetMinimum(yFloor);
+            hs[i]->Draw(first ? "HIST" : "HIST SAME");
+            first = false;
+            if (i < labels.size())
+                leg.AddEntry(hs[i], (labels[i] + suffix + meanLabel(hs[i])).c_str(), "l");
+        }
+    };
+    drawSet(sigs,  " (sig)", 1);
+    drawSet(backs, " (bkg)", 2);
+    leg.Draw();
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
+}
+
+// -----------------------------------------------------------------------
+// Build a TGraphErrors of average object multiplicity vs E_T threshold from a TProfile whose bins
+// are centred on the threshold points and whose entries are the per-event counts above them.
+//
+// The point is the profile's weighted mean. Errors are deliberately left at zero: the uncertainty
+// on the mean is invisible at these sample sizes, and the event-to-event spread — which is large —
+// is a property of the distribution rather than an uncertainty on the plotted average, so drawing
+// it as a bar would misrepresent it. Empty bins are dropped rather than drawn at zero.
+TGraphErrors* makeMultVsThresholdGraph(TProfile* prof, Color_t col, Style_t markerStyle = 20) {
+    std::vector<double> thresholds, mults, xErrs, multErrs;
+    for (int iBin = 1; iBin <= prof->GetNbinsX(); iBin++) {
+        if (prof->GetBinEntries(iBin) <= 0) continue;
+        thresholds.push_back(prof->GetBinCenter(iBin));
+        mults.push_back(prof->GetBinContent(iBin));
+        xErrs.push_back(0.0);
+        multErrs.push_back(0.0);
+    }
+    TGraphErrors* g = new TGraphErrors((int)thresholds.size(), thresholds.data(), mults.data(),
+                                       xErrs.data(), multErrs.data());
+    g->SetLineColor(col);   g->SetLineWidth(2);
+    g->SetMarkerColor(col); g->SetMarkerStyle(markerStyle); g->SetMarkerSize(0.8);
+    return g;
+}
+
+// -----------------------------------------------------------------------
+// Build a TGraph of the given quantile of the object count vs E_T threshold, from the 2D
+// (threshold, count) histogram filled alongside the profile.
+//
+// Each x bin's y projection is the distribution of the per-event count at that threshold, and
+// GetQuantiles on it returns the count that `prob` of the (weighted) crossings fall below. Bins
+// with no entries are dropped rather than drawn at zero.
+TGraph* makeMultPercentileGraph(TH2* h2, double prob, Color_t col) {
+    std::vector<double> thresholds, values;
+    for (int iBin = 1; iBin <= h2->GetNbinsX(); iBin++) {
+        TH1D* py = h2->ProjectionY("_mult_py", iBin, iBin);
+        if (py->Integral() > 0.0) {
+            double q = 0.0, p = prob;
+            py->GetQuantiles(1, &q, &p);
+            thresholds.push_back(h2->GetXaxis()->GetBinCenter(iBin));
+            values.push_back(q);
+        }
+        delete py;
+    }
+    TGraph* g = new TGraph((int)thresholds.size(), thresholds.data(), values.data());
+    g->SetLineColor(col); g->SetLineWidth(2); g->SetMarkerColor(col);
+    return g;
+}
+
+// -----------------------------------------------------------------------
+// Average multiplicity vs E_T threshold, one signal/background pair per entry: the pair shares a
+// colour, signal solid with a filled marker and background dashed with the open version of it.
+//
+// logy is for the tower curves, which fall by orders of magnitude across the plotted range; the
+// jet curves span far less and read better linear, which also keeps a zero average on the canvas
+// instead of dropping it off a log axis.
+//
+// sigPctGraphs / backPctGraphs are optional percentile companions, one per entry and in the same
+// order: same colour as the mean they belong to, drawn dotted with no marker, and explained by a
+// single note row in the legend rather than by six more entries. Leave them empty to draw means
+// only, which is what the jet canvas does.
+//
+// Colours and marker styles are set here so the palette stays with the drawing code, as in
+// drawRateVsMuOverlay; the caller owns and deletes the graphs.
+void drawMultVsThresholdOverlay(const std::vector<TGraphErrors*>& sigGraphs,
+                                const std::vector<TGraphErrors*>& backGraphs,
+                                const std::vector<std::string>& labels,
+                                const std::string& title, const std::string& xLabel,
+                                const std::string& yLabel, const std::string& outputPath,
+                                double xMax, bool logy = true, double yMaxCap = -1.0,
+                                const std::string& signalName = "",
+                                const std::vector<TGraph*>& sigPctGraphs = {},
+                                const std::vector<TGraph*>& backPctGraphs = {},
+                                const std::string& pctNote = "") {
+    if (sigGraphs.empty() && backGraphs.empty()) return;
+    ProcLabelOverride procLbl(signalName);   // process name goes top-right, not in the legend
+    TCanvas c("c", title.c_str(), 700, 600);
+    gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
+    if (logy) gPad->SetLogy();
+
+    // The frame belongs to the first graph drawn, so the y range has to be known before anything
+    // is on the canvas — otherwise a later curve sitting higher or lower is silently clipped.
+    // On a log axis a non-positive point cannot be drawn at all, so it is left out of the range
+    // scan; on a linear one it is a legitimate value and counts.
+    double yMinSeen = 0.0, yMaxSeen = 0.0;
+    auto scanRange = [&](const std::vector<TGraphErrors*>& gs) {
+        for (const auto* g : gs)
+            for (int p = 0; p < g->GetN(); ++p) {
+                const double y = g->GetY()[p];
+                if (logy && y <= 0.0) continue;
+                if (yMaxSeen == 0.0 || y > yMaxSeen) yMaxSeen = y;
+                if (yMinSeen == 0.0 || y < yMinSeen) yMinSeen = y;
+            }
+    };
+    // The percentile curves sit above their means by construction, so they set the top of the
+    // frame wherever they are drawn.
+    auto scanPct = [&](const std::vector<TGraph*>& gs) {
+        for (const auto* g : gs)
+            for (int p = 0; p < g->GetN(); ++p) {
+                const double y = g->GetY()[p];
+                if (logy && y <= 0.0) continue;
+                if (yMaxSeen == 0.0 || y > yMaxSeen) yMaxSeen = y;
+            }
+    };
+    scanRange(sigGraphs); scanRange(backGraphs);
+    scanPct(sigPctGraphs); scanPct(backPctGraphs);
+    if (yMaxSeen == 0.0) {
+        std::cout << "  [multiplicity] nothing to draw — " << outputPath << " skipped\n";
+        return;
+    }
+    // DrawATLASLabel raises the top margin to 0.14 afterwards, so the frame ends at NDC y = 0.86;
+    // keep the legend below that or it spills over the top axis. One extra row when the percentile
+    // curves are on, for the note that explains what the dotted lines are.
+    const bool havePct = !sigPctGraphs.empty() || !backPctGraphs.empty();
+    const int nEntries = (int)std::max(sigGraphs.size(), backGraphs.size());
+    const double legTop = 0.84, legRowH = 0.038;
+    const double legH = legRowH * (2 * nEntries + (havePct ? 1 : 0));
+    TLegend leg(0.54, legTop - legH, 0.97, legTop);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.024); leg.SetMargin(0.18);
+    if (havePct && !pctNote.empty()) leg.AddEntry((TObject*)nullptr, pctNote.c_str(), "");
+
+    // Frame range derived from the legend rather than from a fixed headroom factor: the legend
+    // covers the top freeFrac of the frame, so the axis is stretched until the highest point
+    // lands at (1 - freeFrac) of the height and the curves stay clear of the entries. Six
+    // entries is a tall box, and these curves are highest at the left where the legend is not —
+    // but the tower curves stay high well into it, so the clearance has to be real. The + 0.04 is
+    // a gap between the legend's bottom row and the highest point, so they clear rather than touch.
+    const double freeFrac = std::min(0.60, std::max(0.0, (0.86 - (legTop - legH)) / 0.72 + 0.04));
+    double yLo, yHi;
+    if (logy) {
+        // Floor just under the smallest point, then the span scaled up by the same rule.
+        yLo = (yMinSeen > 0.0 ? yMinSeen : yMaxSeen * 1e-3) * 0.5;
+        const double decades = std::log10(yMaxSeen / yLo);
+        yHi = yLo * std::pow(10.0, decades / (1.0 - freeFrac));
+    } else {
+        yLo = 0.0;
+        yHi = yMaxSeen / (1.0 - freeFrac);
+    }
+    // An explicit cap overrides the computed top. These curves peak at threshold 0, the far left
+    // of the axis, while the legend sits top-right, so the automatic clearance is more headroom
+    // than the canvas actually needs and a caller who has looked at the plot can say so.
+    if (yMaxCap > 0.0) yHi = yMaxCap;
+
+    const int     mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
+    const Style_t mkFilled[] = { 20, 21, 22, 23, 29, 33, 34, 47 };
+    const Style_t mkOpen[]   = { 24, 25, 26, 32, 30, 27, 28, 46 };
+    const int nMcols = 8;
+
+    bool first = true;
+    auto drawSet = [&](const std::vector<TGraphErrors*>& gs, const char* suffix,
+                       Style_t lineStyle, const Style_t* markers) {
+        for (unsigned int i = 0; i < gs.size(); i++) {
+            TGraphErrors* g = gs[i];
+            // An empty graph carries no frame, so drawing it first would leave the canvas
+            // without axes and every later curve unscaled.
+            if (g->GetN() == 0) continue;
+            g->SetLineColor(mcols[i % nMcols]);   g->SetLineWidth(2);
+            g->SetLineStyle(lineStyle);
+            g->SetMarkerColor(mcols[i % nMcols]); g->SetMarkerStyle(markers[i % nMcols]);
+            g->SetMarkerSize(0.8);
+            g->SetTitle((title + ";" + xLabel + ";" + yLabel).c_str());
+            g->Draw(first ? "APL" : "PL SAME");
+            if (first) {
+                g->GetXaxis()->SetLimits(0.0, xMax);
+                g->SetMinimum(yLo);
+                g->SetMaximum(yHi);
+                first = false;
+            }
+            if (i < labels.size()) leg.AddEntry(g, (labels[i] + suffix).c_str(), "lp");
+        }
+    };
+    drawSet(sigGraphs,  " (sig)", 1, mkFilled);
+    drawSet(backGraphs, " (bkg)", 2, mkOpen);
+
+    // Percentile companions, drawn as a vertical dotted RISER from each mean point up to that
+    // threshold's percentile value — an error-bar-like "upper bar reaches the Nth percentile",
+    // rather than a separate connected curve. Read as a spread annotation on the point it grows
+    // out of, which a second full curve did not: at a glance it was six more independent curves,
+    // and which mean it belonged to was only recoverable from the colour.
+    // They carry no legend entries — the note row above stands for all of them.
+    auto drawPctSet = [&](const std::vector<TGraph*>& gs,
+                          const std::vector<TGraphErrors*>& meanGs) {
+        for (unsigned int i = 0; i < gs.size(); i++) {
+            TGraph* g = gs[i];
+            if (!g || g->GetN() == 0) continue;
+            if (i >= meanGs.size() || !meanGs[i]) continue;
+            const TGraphErrors* gm = meanGs[i];
+            for (int p = 0; p < g->GetN(); ++p) {
+                const double xPct = g->GetX()[p];
+                const double yPct = g->GetY()[p];
+                // The mean graph shares the percentile graph's threshold binning, so the
+                // matching point is found by x rather than assumed to be at the same index —
+                // an empty threshold bin dropped from one and not the other would otherwise
+                // pair a riser with the wrong mean.
+                double yMean = 0.0; bool found = false;
+                for (int q = 0; q < gm->GetN(); ++q) {
+                    if (std::fabs(gm->GetX()[q] - xPct) < 1e-6) { yMean = gm->GetY()[q]; found = true; break; }
+                }
+                if (!found) continue;
+                if (yPct <= yMean) continue;                 // nothing to draw
+                if (logy && (yMean <= 0.0 || yPct <= 0.0)) continue;   // not drawable on a log axis
+                // Clip to the frame so a riser never paints over the axis or the legend.
+                const double yTop = std::min(yPct, yHi);
+                if (yTop <= yMean) continue;
+                TLine* riser = new TLine(xPct, yMean, xPct, yTop);
+                riser->SetLineColor(mcols[i % nMcols]);
+                riser->SetLineStyle(3);   // dotted
+                riser->SetLineWidth(1);   // thinner than the mean curve: annotation, not data
+                riser->Draw("SAME");
+            }
+        }
+    };
+    drawPctSet(sigPctGraphs,  sigGraphs);
+    drawPctSet(backPctGraphs, backGraphs);
+
+    leg.Draw();
+    gPad->Modified(); gPad->Update(); gPad->RedrawAxis();
+    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
+}
+
+// -----------------------------------------------------------------------
 // Find the MET threshold that gives a target rate (Hz) from a weighted background histogram
+// Threshold at which the cumulative background rate first drops to the target.
+//
+// The rate histogram has 5 GeV bins below 200 GeV (coarser above), so the bin low edge alone
+// quantises the answer to the binning. Instead the crossing is located inside the bin by
+// treating the rate density as uniform across it, then rounded up to the next whole GeV: the
+// cumulative rate falls with threshold, so rounding up keeps the quoted threshold at or below
+// the target rate rather than just above it.
 double findThreshold(TH1F* back_hw, double targetRateHz) {
     int nBins = back_hw->GetNbinsX();
     for (int iBin = 1; iBin <= nBins; iBin++) {
         double rate = back_hw->Integral(iBin, nBins);
-        if (rate <= targetRateHz) return back_hw->GetBinLowEdge(iBin);
+        if (rate <= targetRateHz) {
+            const double lowEdge = back_hw->GetBinLowEdge(iBin);
+            if (iBin == 1) return lowEdge;   // already at target at the bottom of the range
+            // Crossing lies inside the previous bin, between its low edge and lowEdge.
+            const int    iPrev    = iBin - 1;
+            const double ratePrev = back_hw->Integral(iPrev, nBins);
+            const double content  = back_hw->GetBinContent(iPrev);
+            const double width    = back_hw->GetBinWidth(iPrev);
+            if (content <= 0.0 || ratePrev <= targetRateHz) return lowEdge;
+            const double xCross = back_hw->GetBinLowEdge(iPrev)
+                                + (ratePrev - targetRateHz) * width / content;
+            return std::min(std::ceil(xCross), lowEdge);
+        }
     }
     return back_hw->GetXaxis()->GetXmax(); // above range — threshold not reached
 }
@@ -749,12 +1479,17 @@ double findThreshold(TH1F* back_hw, double targetRateHz) {
 // overlaid on one canvas at a single rate point
 // xLabel defaults to the truth MET axis these curves were written for; the Z->mumu turn-ons
 // pass the dimuon p_{T} axis instead.
+// Every MET turn-on PDF goes through here, so the layout described on DrawTurnOnWithRatio
+// (ratio panel, y axis to 4, top multi-column legend, x axis to 400 GeV) lands on all of them
+// from this one body. The signature is unchanged so the ~58 call sites are untouched; legX1
+// and legY1 are now meaningless (the legend is placed by the template) and are kept, unnamed,
+// only so those calls still compile.
 void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& labels,
                        const std::string& title, const std::string& outputPath,
                        const std::vector<double>& thresholds = {},
                        const std::string& rateLabel = "",
                        TH1F* truthDist = nullptr,
-                       double legX1 = 0.45, double legY1 = 0.15,
+                       double /*legX1*/ = 0.45, double /*legY1*/ = 0.15,
                        const std::string& xLabel = "Truth MET_{NonInt} [GeV]") {
     if (effs.empty()) return;
     int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan};
@@ -762,46 +1497,61 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
     // (all seven MET types) reach index 6.
     const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33, 34 };
 
-    TCanvas c("c", title.c_str(), 700, 600);
-    gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
-
-    int nLegRows = (int)effs.size() + (!rateLabel.empty() ? 1 : 0);
-    double legH = 0.058 * nLegRows;
-    TLegend leg(legX1, legY1, legX1 + 0.33, legY1 + legH);
-    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.032);
-    if (!rateLabel.empty())
-        leg.AddEntry((TObject*)nullptr, rateLabel.c_str(), "");
-
+    std::vector<TurnOnCurve> curves;
     for (unsigned int i = 0; i < effs.size(); i++) {
-        effs[i]->SetLineColor(mcols[i % 7]);
-        effs[i]->SetMarkerColor(mcols[i % 7]);
-        effs[i]->SetMarkerStyle(mkstyles[i % 7]);
-        effs[i]->SetMarkerSize(0.8);
-        effs[i]->SetLineWidth(2);
-        effs[i]->SetTitle(title.c_str());
-        effs[i]->GetXaxis()->SetTitle(xLabel.c_str());
-        effs[i]->GetYaxis()->SetTitle("Signal Efficiency");
-        effs[i]->SetMaximum(1.10); effs[i]->SetMinimum(0.0);
-        effs[i]->Draw(i == 0 ? "EP" : "EP SAME");
+        if (!effs[i]) continue;
         std::string lbl = labels[i];
         if (!thresholds.empty() && i < (int)thresholds.size())
             lbl += Form(" (thr=%.1f GeV)", thresholds[i]);
-        leg.AddEntry(effs[i], lbl.c_str(), "lp");
+        TurnOnCurve tc;
+        tc.h = effs[i]; tc.label = lbl;
+        tc.color = mcols[i % 7]; tc.marker = mkstyles[i % 7];
+        curves.push_back(tc);
     }
 
-    // Draw normalized signal truth MET distribution as gray shaded histogram on top
-    if (truthDist) {
-        TH1F* hTruth = (TH1F*)truthDist->Clone("hTruthDist_turnOn");
-        hTruth->SetDirectory(0);
-        if (hTruth->Integral() > 0) hTruth->Scale(1.0 / hTruth->Integral());
-        hTruth->SetFillColorAlpha(kGray+1, 0.35);
-        hTruth->SetLineColor(kGray+2);
-        hTruth->SetLineWidth(1);
-        hTruth->Draw("HIST SAME");
-    }
-
-    leg.Draw();
-    c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
+    TurnOnOpts opts;
+    opts.xTitle       = xLabel;
+    opts.yTitle       = "Signal Efficiency";
+    opts.legendHeader = rateLabel;
+    // Rate point ("Rate = 80 kHz"), in the strip above the frame. Drawn larger than the
+    // template's default and right-aligned well inside the canvas rather than at its edge
+    // (0.99), where it used to overhang the plot and clip. headerX is the RIGHT edge of the
+    // text, so 0.90 leaves a tenth of the width clear to its right.
+    //
+    // The BASELINE depends on whether a process label is on the canvas, because that label is
+    // drawn by this macro's own DrawATLASLabel — right-aligned at (0.95, 0.945) — and the
+    // template has no way to know about it. Both are right-aligned in the same strip, so at this
+    // text size they collide unless the rate drops to the second line:
+    //
+    //   process label present -> 0.890, the line the #sqrt{s} / #LTPU#GT text occupies. That
+    //     text is left-anchored at x = 0.20 and ends well short of where this one starts, so the
+    //     two share the line without touching. Top of the glyphs lands near 0.92, clear of the
+    //     process label's 0.945 baseline; the baseline itself stays above the frame top (0.86).
+    //   no process label      -> 0.915, since the top line is then free and the rate reads
+    //     better higher up, away from the frame.
+    const bool haveProcLabelTurnOn = !gProcLabel.empty();
+    opts.headerTextSize = 0.045;
+    opts.headerX        = 0.90;
+    opts.headerY        = haveProcLabelTurnOn ? 0.890 : 0.915;
+    // Ratio axis reads "Ratio to first" rather than a bare "Ratio". refIndex is pinned to 0 to
+    // make that label true by construction: the template would otherwise auto-pick a "gFEX JwoJ"
+    // curve as the denominator wherever one is present. That is a no-op today — at every one of
+    // this macro's turn-on call sites the gFEX JwoJ curve, where there is one, is already the
+    // first — but it stops the label from quietly becoming wrong if a curve order is changed.
+    opts.refIndex     = 0;
+    opts.refShortName = "first";
+    opts.spectrum     = truthDist;   // scaled to peak inside the efficiency band by the template
+    // Turn-on bins are fine only out to 400 GeV (turnOnBinEdges: 20 GeV steps to 400, then 50),
+    // so the cap costs nothing but the coarse tail.
+    opts.xMax         = 400.0;
+    // The ratio denominator is the first curve drawn (opts.refIndex above), which is the
+    // deliberate baseline at every one of this macro's call sites: where an overlay carries a
+    // gFEX JwoJ curve it is already first, and the GEP-only and jFEX-only overlays have no gFEX
+    // curve to prefer.
+    // Ratio window opens at 0-3 and widens itself if the points need it, which they do wherever
+    // a curve turns on well after the reference.
+    (void)title;   // titles are suppressed by the ATLAS style; kept in the signature for callers
+    DrawTurnOnWithRatio(curves, opts, outputPath.c_str());
 }
 
 // -----------------------------------------------------------------------
@@ -937,6 +1687,137 @@ void drawProfileOverlay(const std::vector<TProfile*>& profs,
 }
 
 // -----------------------------------------------------------------------
+// Signal and background <MET> vs trigger-jet multiplicity on one canvas, with a signal/background
+// ratio panel underneath. One MET flavour per canvas.
+//
+// This is the view an N-jet dependent MET threshold is designed from. A threshold that rises with
+// jet multiplicity only buys something where the background's <MET> rises faster than the
+// signal's — i.e. where the ratio panel FALLS. A flat ratio says the two respond to jet
+// multiplicity the same way and that a jet-dependent term gains nothing over a flat cut, however
+// steeply both curves themselves rise.
+//
+// Unlike DrawRateCurvesWithRatio in analysisHelperFunctions.h, whose curves are rescalings of the
+// same events and therefore fully correlated, signal and background here are statistically
+// independent samples. The ratio error is a genuine combination of both, added in quadrature.
+//
+// Bins where either profile has no entries are dropped rather than drawn at zero: a profile's
+// mean is undefined there, and plotting it as 0 would read as "no MET" instead of "no events".
+void drawProfileSigBkgRatio(TProfile* profSig, TProfile* profBkg,
+                            const std::string& sigLabel, const std::string& bkgLabel,
+                            const std::string& xLabel, const std::string& yLabel,
+                            const std::string& legHeader,
+                            const std::string& outputPath,
+                            TH1* nJetDist = nullptr,
+                            double ratioMin = 0.0, double ratioMax = 2.5) {
+    if (!profSig || !profBkg) return;
+
+    const int colSig = kP10Red;
+    const int colBkg = kBlack;
+
+    TCanvas c("cSigBkgRatio", "", 700, 750);
+    TPad* padHi = new TPad("padHiSB", "", 0.0, 0.30, 1.0, 1.0);
+    TPad* padLo = new TPad("padLoSB", "", 0.0, 0.00, 1.0, 0.30);
+    // Both pads need the same left margin or the two x axes will not line up.
+    padHi->SetBottomMargin(0.02); padHi->SetLeftMargin(0.16); padHi->SetTicks(1, 1);
+    padLo->SetTopMargin(0.03);    padLo->SetLeftMargin(0.16); padLo->SetTicks(1, 1);
+    padLo->SetBottomMargin(0.34);
+    padHi->Draw(); padLo->Draw();
+
+    // ---- main pad
+    padHi->cd();
+    double yMax = 0.0;
+    for (TProfile* p : { profSig, profBkg })
+        for (int ib = 1; ib <= p->GetNbinsX(); ++ib)
+            if (p->GetBinEntries(ib) > 0)
+                yMax = std::max(yMax, p->GetBinContent(ib) + p->GetBinError(ib));
+    if (yMax <= 0.0) yMax = 1.0;
+    const double yFrameMax = yMax * 1.45;   // headroom for the legend
+
+    int iCurve = 0;
+    for (TProfile* p : { profBkg, profSig }) {
+        const int col = (iCurve == 0) ? colBkg : colSig;
+        p->SetLineColor(col); p->SetMarkerColor(col);
+        p->SetMarkerStyle(iCurve == 0 ? 20 : 21);
+        p->SetMarkerSize(0.9); p->SetLineWidth(2);
+        p->SetTitle("");
+        p->SetMinimum(0.0); p->SetMaximum(yFrameMax);
+        p->GetYaxis()->SetTitle(yLabel.c_str());
+        p->GetYaxis()->SetTitleSize(0.055); p->GetYaxis()->SetTitleOffset(1.25);
+        p->GetYaxis()->SetLabelSize(0.048);
+        p->GetXaxis()->SetLabelSize(0.0);   // x labels live on the ratio pad
+        p->Draw(iCurve == 0 ? "E1" : "E1 SAME");
+        ++iCurve;
+    }
+
+    // Jet-multiplicity distribution as a shaded shape, so it is obvious which bins carry the
+    // events. Scaled to the frame rather than given its own axis: in a two-pad layout a second
+    // axis crowds the ratio panel, and only the shape is being read here, not a value. Labelled
+    // "a.u." in the legend for that reason.
+    TH1* hDist = nullptr;
+    if (nJetDist && nJetDist->Integral() > 0) {
+        hDist = (TH1*)nJetDist->Clone("hDist_sigBkgRatio");
+        hDist->SetDirectory(0);
+        hDist->Scale(0.30 * yFrameMax / hDist->GetMaximum());
+        hDist->SetFillColorAlpha(kGray + 1, 0.30);
+        hDist->SetLineColor(kGray + 2);
+        hDist->SetLineWidth(1);
+        hDist->Draw("HIST SAME");
+    }
+
+    TLegend leg(0.20, 0.66, 0.62, 0.86);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.040);
+    if (!legHeader.empty()) leg.AddEntry((TObject*)nullptr, legHeader.c_str(), "");
+    leg.AddEntry(profSig, sigLabel.c_str(), "lp");
+    leg.AddEntry(profBkg, bkgLabel.c_str(), "lp");
+    if (hDist) leg.AddEntry(hDist, (bkgLabel + " N_{jets} (a.u.)").c_str(), "f");
+    leg.Draw();
+    DrawATLASLabel();
+
+    // ---- ratio pad
+    padLo->cd();
+    std::vector<double> x, r, ex, er;
+    for (int ib = 1; ib <= profSig->GetNbinsX(); ++ib) {
+        if (profSig->GetBinEntries(ib) <= 0 || profBkg->GetBinEntries(ib) <= 0) continue;
+        const double ys = profSig->GetBinContent(ib);
+        const double yb = profBkg->GetBinContent(ib);
+        if (yb == 0.0 || ys == 0.0) continue;
+        const double relS = profSig->GetBinError(ib) / ys;
+        const double relB = profBkg->GetBinError(ib) / yb;
+        x .push_back(profSig->GetXaxis()->GetBinCenter(ib));
+        r .push_back(ys / yb);
+        ex.push_back(0.0);
+        er.push_back((ys / yb) * std::sqrt(relS * relS + relB * relB));
+    }
+
+    const double xLo = profSig->GetXaxis()->GetXmin();
+    const double xHi = profSig->GetXaxis()->GetXmax();
+    if (!x.empty()) {
+        TGraphErrors* gr = new TGraphErrors((int)x.size(), x.data(), r.data(), ex.data(), er.data());
+        gr->SetLineColor(colSig); gr->SetMarkerColor(colSig);
+        gr->SetMarkerStyle(21); gr->SetMarkerSize(0.9); gr->SetLineWidth(2);
+        gr->SetTitle("");
+        gr->Draw("AP");
+        gr->GetYaxis()->SetTitle("Signal / Bkg");
+        gr->GetYaxis()->SetNdivisions(505);
+        gr->GetYaxis()->SetTitleSize(0.115); gr->GetYaxis()->SetTitleOffset(0.52);
+        gr->GetYaxis()->SetLabelSize(0.100);
+        gr->GetXaxis()->SetTitle(xLabel.c_str());
+        gr->GetXaxis()->SetTitleSize(0.120); gr->GetXaxis()->SetTitleOffset(1.20);
+        gr->GetXaxis()->SetLabelSize(0.100);
+        gr->SetMinimum(ratioMin); gr->SetMaximum(ratioMax);
+        gr->GetXaxis()->SetLimits(xLo, xHi);
+
+        TLine* unity = new TLine(xLo, 1.0, xHi, 1.0);
+        unity->SetLineStyle(2); unity->SetLineColor(kGray + 2);
+        unity->Draw("SAME");
+    }
+
+    c.cd();
+    c.SaveAs(outputPath.c_str());
+    delete hDist;
+}
+
+// -----------------------------------------------------------------------
 // Overlay N TProfile curves whose y is a residual — (Truth - TOB) MET, or that divided by truth
 // MET. Same points-with-error-bars style as drawProfileOverlay, but the y-range is taken around
 // the drawn points rather than anchored at zero (a residual is free to go negative), and a
@@ -1059,7 +1940,16 @@ void drawRateVsEffOverlay(std::vector<TGraph*> graphs,
     gPad->SetLogy(); gPad->SetLogx();
 
     int nLeg = (int)cut.size();
-    TLegend leg(0.2, 0.45, 0.43, 0.49 + 0.05 * nLeg);
+    // Top-left, growing DOWNWARD from a fixed top edge. It used to sit mid-left, growing upward
+    // from y = 0.45, which put it straight across the dashed 80 kHz TDR line drawn below — and
+    // the curves rise left-to-right on these log-log axes, so the top-left corner is the one
+    // region they never occupy.
+    //
+    // 0.84 and not higher: DrawATLASLabel runs AFTER this legend is placed and sets a top margin
+    // of 0.14, which puts the frame's top edge at 0.86. A legend top above that draws its first
+    // row on top of the frame line rather than inside the plot.
+    const double legTop = 0.84;
+    TLegend leg(0.20, std::max(0.45, legTop - 0.05 * nLeg), 0.52, legTop);
     leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.025);
 
     bool first = true;
@@ -1322,12 +2212,35 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::cout << "Multiple signal processes in this run — multi-file overlays will carry no"
                   << " process label and no shaded truth distribution\n";
 
+    // Do all the entries share one background INPUT ntuple? Truth MET comes from that input and
+    // not from the emulator, so where the input is common every file's background histogram is the
+    // same numbers and the overlay can draw it once instead of stacking N copies. A run that mixes
+    // pileup scenarios (r16129 against r16130) or samples does NOT qualify — there the backgrounds
+    // genuinely differ and collapsing them would show one of them standing in for the rest.
+    bool sameBackgroundInput = !backgroundFiles.empty();
+    for (const auto& bf : backgroundFiles)
+        if (bf.first != backgroundFiles[0].first) { sameBackgroundInput = false; break; }
+    if (!sameBackgroundInput)
+        std::cout << "Background inputs differ across entries — the shared-background truth MET"
+                  << " overlay is skipped (the per-file-background version is still produced)\n";
+
     // Effective SoftKiller / EtaSoftKiller threshold distributions (input
     // ntuples don't vary across emu configs, so do this once).
     //if (!signalFiles.empty() && !backgroundFiles.empty())
     //    plotSKThresholds(signalFiles[0].first, backgroundFiles[0].first, outputDir);
 
     // Per-file histogram vectors for multi-file overlays
+    // GEP JwoJ MET, present only for emulator outputs produced with the JwoJ algorithm on.
+    // Runs parallel to labels like the vectors below it — a file without the branch still
+    // pushes an (empty) clone, so index i is file i everywhere — but nothing is DRAWN from
+    // these unless at least one file in the run carried the algorithm (anyGEPJwoJ below).
+    std::vector<TH1F*> sig_h_GEPJwoJMET_vec, back_h_GEPJwoJMET_vec;
+    std::vector<TH1F*> back_hw_GEPJwoJMET_vec;
+    std::vector<TH1F*> eff_GEPJwoJMET_80kHz_vec, eff_GEPJwoJMET_60kHz_vec;
+    std::vector<double> thr_GEPJwoJMET_80kHz_vec, thr_GEPJwoJMET_60kHz_vec;
+    // True once any file in this run turned out to carry GEP JwoJ MET.
+    bool anyGEPJwoJ = false;
+
     std::vector<TH1F*> sig_h_TotalMET_vec,  back_h_TotalMET_vec;
     std::vector<TH1F*> sig_h_TotalMETX_vec, back_h_TotalMETX_vec;
     std::vector<TH1F*> sig_h_TotalMETY_vec, back_h_TotalMETY_vec;
@@ -1417,11 +2330,46 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
     // Per-file output directories, collected for the closing summary.
     std::vector<std::string> perFileOutputDirs;
 
+    // --- Rate vs pileup bookkeeping ---
+    // Weighted mu spectra per file: the denominator over every surviving background event, and
+    // one numerator per (MET type, MET threshold) over the events passing that threshold. Only
+    // used where a run pairs the SAME emulator config at PU140 and PU200 — see the matched-
+    // pileup block after the file loop, which is where these turn into curves.
+    //
+    // These run parallel to each other but NOT to labels: a file that fails to open, or whose
+    // ntuple predates the mu branches, is skipped, so the config key / pileup / label of each
+    // entry is recorded alongside it rather than looked up by file index.
+    std::vector<TH1F*> back_hw_mu_all_vec;
+    std::vector<TH1F*> back_hw_mu_pass_vec[nMETTypes][nRateVsMuThr];
+    std::vector<std::string> rateVsMuConfigKey;   // emulator config with the r-tag normalized
+    std::vector<int>         rateVsMuPileup;      // 140 or 200
+    std::vector<std::string> rateVsMuLabels;
+
     // Background <MET> vs jet multiplicity, one profile per MET type per file, plus the jet
     // multiplicity itself for the shaded band under the multi-file overlays.
     std::vector<TProfile*> back_prof_METvsNJets_vec[nMETTypes];
     std::vector<TH1F*> back_h_NJets_vec;
     std::vector<std::string> nJetProfLabels;
+
+    // Same again against the trigger jets. Its own label vector: the truth version needs a truth
+    // jet collection in the ntuple and this one needs the GEP jet collection of the config's own
+    // pileup-suppression variant, so a file can contribute to either, both or neither.
+    std::vector<TProfile*> back_prof_METvsNTrigJets_vec[nMETTypes];
+    std::vector<TH1F*> back_h_NTrigJets_vec;
+    std::vector<std::string> nTrigJetProfLabels;
+    // The variant label ("EtaSK", ...) each of those files was read with, for the axis title.
+    std::vector<std::string> nTrigJetProfVariants;
+
+    // GEP input-object multiplicity, one set per pileup-suppression variant, for the multi-file
+    // overlays. Everything here runs parallel to multLabels[iV] rather than to labels, because a
+    // file whose ntuple is missing a variant contributes to the other two and not to that one.
+    // The threshold profiles carry their own means and errors, so nothing else travels with them.
+    std::vector<TH1F*>       sig_h_nJetsMult_vec[nPUSup],   back_h_nJetsMult_vec[nPUSup];
+    std::vector<TH1F*>       sig_h_nTowersMult_vec[nPUSup], back_h_nTowersMult_vec[nPUSup];
+    std::vector<TProfile*>   sig_prof_nJetsVsThr_vec[nPUSup],   back_prof_nJetsVsThr_vec[nPUSup];
+    std::vector<TProfile*>   sig_prof_nTowersVsThr_vec[nPUSup], back_prof_nTowersVsThr_vec[nPUSup];
+    std::vector<TH2D*>       sig_h2_nTowersVsThr_vec[nPUSup],   back_h2_nTowersVsThr_vec[nPUSup];
+    std::vector<std::string> multLabels[nPUSup];
 
     // Signal MET residual profiles for the multi-file overlays: mean of (Truth - TOB) MET and of
     // (Truth - TOB) / Truth MET, each against truth MET and against the algorithm's TOB SumET,
@@ -1555,6 +2503,33 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         if (hasSumTowerET) {
             metTreeSig->SetBranchAddress("SumTowerET",  &sig_SumTowerET);
             metTreeBack->SetBranchAddress("SumTowerET", &back_SumTowerET);
+        }
+
+        // --- Branch variables: GEP JwoJ MET (present only for JwoJ emulator outputs) ---
+        // Both conditions are required, for the same reason the Z->mumu dimuon block requires
+        // both: the filename tag says the emulation was RUN in JwoJ mode, the branch says the
+        // output actually carries it. Without the name check a stale or hand-merged file could
+        // produce a full set of JwoJ plots built from whatever happened to be in the tree.
+        double sig_GEPJwoJMET  = 0.0, sig_GEPJwoJHardMET  = 0.0, sig_GEPJwoJSoftMET  = 0.0;
+        double back_GEPJwoJMET = 0.0, back_GEPJwoJHardMET = 0.0, back_GEPJwoJSoftMET = 0.0;
+        const bool isGEPJwoJName = (signalFiles[fileIt].second.find("_GEPJwoJ_")     != std::string::npos) &&
+                                   (backgroundFiles[fileIt].second.find("_GEPJwoJ_") != std::string::npos);
+        const bool hasGEPJwoJBranch = (metTreeSig->FindBranch("GEPJwoJMET")  != nullptr) &&
+                                      (metTreeBack->FindBranch("GEPJwoJMET") != nullptr);
+        const bool hasGEPJwoJ = isGEPJwoJName && hasGEPJwoJBranch;
+        if (isGEPJwoJName && !hasGEPJwoJBranch)
+            std::cout << "  _GEPJwoJ_ in the emulator output name but no GEPJwoJMET branch"
+                      << " — GEP JwoJ plots skipped\n";
+        else if (hasGEPJwoJ)
+            std::cout << "  GEP JwoJ MET found — GEP JwoJ plots enabled\n";
+        if (hasGEPJwoJ) {
+            anyGEPJwoJ = true;
+            metTreeSig->SetBranchAddress("GEPJwoJMET",      &sig_GEPJwoJMET);
+            metTreeSig->SetBranchAddress("GEPJwoJHardMET",  &sig_GEPJwoJHardMET);
+            metTreeSig->SetBranchAddress("GEPJwoJSoftMET",  &sig_GEPJwoJSoftMET);
+            metTreeBack->SetBranchAddress("GEPJwoJMET",     &back_GEPJwoJMET);
+            metTreeBack->SetBranchAddress("GEPJwoJHardMET", &back_GEPJwoJHardMET);
+            metTreeBack->SetBranchAddress("GEPJwoJSoftMET", &back_GEPJwoJSoftMET);
         }
 
         metTreeSig->SetBranchAddress("TotalMET",  &sig_TotalMET);
@@ -1708,6 +2683,18 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         else
             std::cout << "  nPrimaryVertices branch not found — primary-vertex plot skipped\n";
 
+        // Pileup of the crossing, written by HERNTupler for the rate-vs-mu curves. Guarded the
+        // same way as nPrimaryVertices so ntuples produced before the branches existed still run.
+        float actualMuBack = -1.0f, averageMuBack = -1.0f;
+        const char* muBranchName = rateVsMuUseAverageMu ? "averageInteractionsPerCrossing"
+                                                        : "actualInteractionsPerCrossing";
+        const bool hasMu = (eventInfoTreeBack->GetBranch(muBranchName) != nullptr);
+        if (hasMu)
+            eventInfoTreeBack->SetBranchAddress(muBranchName,
+                                                rateVsMuUseAverageMu ? &averageMuBack : &actualMuBack);
+        else
+            std::cout << "  " << muBranchName << " branch not found — rate vs pileup plots skipped\n";
+
         // --- Branch variables: WTA-cone GEP jets (optional) ---
         std::vector<double>* gepWTAConeCellsTowersJetsEtValuesSig          = nullptr;
         std::vector<double>* gepWTAConeCellsTowersJetsEtaValuesSig         = nullptr;
@@ -1747,6 +2734,156 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             inTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Et", &inTimeAntiKt4TruthJetsEtValuesBack);
         }
 
+        // --- GEP input-object collections for the multiplicity plots (optional) ---
+        // The jet and tower collections at all three pileup-suppression settings, from the input
+        // ntuple. Only E_T is read from each.
+        //
+        // ChainSource::Get caches, so the tree it hands back for a variant can be the SAME object
+        // the WTA-cone jet block above already addressed — for a non-SK config that is the NoSK
+        // variant, for an SK or EtaSK config the SK one. Calling SetBranchAddress on it again
+        // would rebind that branch and leave the existing jet plots reading into a pointer that
+        // is never filled. So the read pointer is stored indirectly: for a colliding tree it
+        // points at the variable the existing code owns, and only a tree nobody else has claimed
+        // gets an address of its own here.
+        //
+        // These addresses must be set above the pruning block below, or DisableUnusedBranches
+        // switches the Et branches off and every count comes back zero.
+        TTree* multJetTreeSig[nPUSup]    = {};
+        TTree* multJetTreeBack[nPUSup]   = {};
+        TTree* multTowerTreeSig[nPUSup]  = {};
+        TTree* multTowerTreeBack[nPUSup] = {};
+        std::vector<double>*  multJetEtSigOwn[nPUSup]    = {};   // storage for trees we address
+        std::vector<double>*  multJetEtBackOwn[nPUSup]   = {};
+        std::vector<double>*  multTowerEtSigOwn[nPUSup]  = {};
+        std::vector<double>*  multTowerEtBackOwn[nPUSup] = {};
+        std::vector<double>** multJetEtSig[nPUSup]    = {};      // where each variant reads from
+        std::vector<double>** multJetEtBack[nPUSup]   = {};
+        std::vector<double>** multTowerEtSig[nPUSup]  = {};
+        std::vector<double>** multTowerEtBack[nPUSup] = {};
+        bool hasMultVariant[nPUSup] = {};
+        bool hasObjectMultiplicity  = false;
+        if (fillObjectMultiplicity) {
+            for (int iV = 0; iV < nPUSup; ++iV) {
+                const std::string jetTreeName =
+                    std::string("gepWTAConeCellsTowers") + puSupTreeTag[iV] + "JetsTree";
+                const std::string towerTreeName =
+                    std::string("gepCellsTowers") + puSupTreeTag[iV] + "Tree";
+                multJetTreeSig[iV]    = (TTree*)sigF->Get(jetTreeName.c_str());
+                multJetTreeBack[iV]   = (TTree*)backF->Get(jetTreeName.c_str());
+                multTowerTreeSig[iV]  = (TTree*)sigF->Get(towerTreeName.c_str());
+                multTowerTreeBack[iV] = (TTree*)backF->Get(towerTreeName.c_str());
+                hasMultVariant[iV] = multJetTreeSig[iV] && multJetTreeBack[iV] &&
+                                     multTowerTreeSig[iV] && multTowerTreeBack[iV];
+                if (!hasMultVariant[iV]) {
+                    std::cout << "  " << puSupLabel[iV] << " jet/tower trees not found — that"
+                              << " variant is left off the multiplicity plots\n";
+                    continue;
+                }
+                // Jets: reuse the existing pointer where this is the tree the block above claimed.
+                if (hasWTAConeJets && multJetTreeSig[iV] == gepWTAConeCellsTowersJetsTreeSig) {
+                    multJetEtSig[iV] = &gepWTAConeCellsTowersJetsEtValuesSig;
+                } else {
+                    multJetTreeSig[iV]->SetBranchAddress("Et", &multJetEtSigOwn[iV]);
+                    multJetEtSig[iV] = &multJetEtSigOwn[iV];
+                }
+                if (hasWTAConeJets && multJetTreeBack[iV] == gepWTAConeCellsTowersJetsTreeBack) {
+                    multJetEtBack[iV] = &gepWTAConeCellsTowersJetsEtValuesBack;
+                } else {
+                    multJetTreeBack[iV]->SetBranchAddress("Et", &multJetEtBackOwn[iV]);
+                    multJetEtBack[iV] = &multJetEtBackOwn[iV];
+                }
+                // Towers: nothing else in this function reads them, so always our own address.
+                multTowerTreeSig[iV]->SetBranchAddress("Et",  &multTowerEtSigOwn[iV]);
+                multTowerTreeBack[iV]->SetBranchAddress("Et", &multTowerEtBackOwn[iV]);
+                multTowerEtSig[iV]  = &multTowerEtSigOwn[iV];
+                multTowerEtBack[iV] = &multTowerEtBackOwn[iV];
+                hasObjectMultiplicity = true;
+            }
+        }
+
+        // --- Trigger-jet collection for the <MET> vs trigger-jet-multiplicity profiles ---
+        // The WTA-cone GEP jets of whichever pileup-suppression variant this emulator config was
+        // run with, background only — the profiles are a background-rate study.
+        //
+        // The variant comes off the emulator output filename, which carries _NoSK_, _SK_ or
+        // _EtaSK_. The underscores are what keeps the three apart — "EtaSK" and "NoSK" both end in
+        // "SK", and only the delimiters make "_SK_" mean the plain one — so match on the delimited
+        // forms and not on the bare tags.
+        //
+        // Same tree-caching caveat as the block above, and the same fix: where the variant's tree
+        // is one another block has already addressed, read through that block's pointer instead of
+        // rebinding the branch out from under it.
+        int   trigJetPUSupIdx = kTrigJetPUSupIdxDefault;
+        TTree* trigJetTreeBack = nullptr;
+        std::vector<double>*  trigJetEtBackOwn = nullptr;
+        std::vector<double>** trigJetEtBack    = nullptr;
+        if (fillMETvsNTrigJets) {
+            const std::string& emuName = signalFiles[fileIt].second;
+            if      (emuName.find("_EtaSK_") != std::string::npos) trigJetPUSupIdx = 2;
+            else if (emuName.find("_NoSK_")  != std::string::npos) trigJetPUSupIdx = 0;
+            else if (emuName.find("_SK_")    != std::string::npos) trigJetPUSupIdx = 1;
+            else
+                std::cout << "  No _NoSK_/_SK_/_EtaSK_ tag in the emulator filename — trigger-jet"
+                          << " multiplicity falls back to " << puSupLabel[trigJetPUSupIdx] << "\n";
+
+            const std::string trigJetTreeName =
+                std::string("gepWTAConeCellsTowers") + puSupTreeTag[trigJetPUSupIdx] + "JetsTree";
+            if (hasMultVariant[trigJetPUSupIdx] && multJetEtBack[trigJetPUSupIdx]) {
+                trigJetTreeBack = multJetTreeBack[trigJetPUSupIdx];
+                trigJetEtBack   = multJetEtBack[trigJetPUSupIdx];
+            } else {
+                trigJetTreeBack = (TTree*)backF->Get(trigJetTreeName.c_str());
+                if (hasWTAConeJets && trigJetTreeBack == gepWTAConeCellsTowersJetsTreeBack) {
+                    trigJetEtBack = &gepWTAConeCellsTowersJetsEtValuesBack;
+                } else if (trigJetTreeBack) {
+                    trigJetTreeBack->SetBranchAddress("Et", &trigJetEtBackOwn);
+                    trigJetEtBack = &trigJetEtBackOwn;
+                }
+            }
+            if (trigJetTreeBack && trigJetEtBack)
+                std::cout << "  Using trigger-jet tree: " << trigJetTreeName << "\n";
+            else
+                std::cout << "  " << trigJetTreeName << " not found — <MET> vs trigger-jet"
+                          << " multiplicity skipped\n";
+        }
+        const bool hasTrigJets = (trigJetTreeBack != nullptr) && (trigJetEtBack != nullptr);
+
+        // Signal counterpart of the trigger-jet handle above. Same variant index and the same tree
+        // name, so signal and background end up binned in the identical quantity — an N-jet
+        // dependent MET selection has to be designed against both at once, and comparing the two
+        // only means anything if the jet count is built the same way on each side.
+        //
+        // Deliberately its own handle and its own flag rather than being folded into hasTrigJets:
+        // a signal file without the collection then leaves every existing background plot exactly
+        // as it was, instead of silently taking them away too.
+        //
+        // Same tree-caching caveat as the background block: where the variant's tree is one
+        // another block has already addressed, read through that block's pointer rather than
+        // rebinding the branch out from under it.
+        TTree* trigJetTreeSig = nullptr;
+        std::vector<double>*  trigJetEtSigOwn = nullptr;
+        std::vector<double>** trigJetEtSig    = nullptr;
+        if (fillMETvsNTrigJets) {
+            const std::string trigJetTreeName =
+                std::string("gepWTAConeCellsTowers") + puSupTreeTag[trigJetPUSupIdx] + "JetsTree";
+            if (hasMultVariant[trigJetPUSupIdx] && multJetEtSig[trigJetPUSupIdx]) {
+                trigJetTreeSig = multJetTreeSig[trigJetPUSupIdx];
+                trigJetEtSig   = multJetEtSig[trigJetPUSupIdx];
+            } else {
+                trigJetTreeSig = (TTree*)sigF->Get(trigJetTreeName.c_str());
+                if (hasWTAConeJets && trigJetTreeSig == gepWTAConeCellsTowersJetsTreeSig) {
+                    trigJetEtSig = &gepWTAConeCellsTowersJetsEtValuesSig;
+                } else if (trigJetTreeSig) {
+                    trigJetTreeSig->SetBranchAddress("Et", &trigJetEtSigOwn);
+                    trigJetEtSig = &trigJetEtSigOwn;
+                }
+            }
+            if (!(trigJetTreeSig && trigJetEtSig))
+                std::cout << "  " << trigJetTreeName << " not found on the signal file — signal"
+                          << " <MET> vs trigger-jet multiplicity skipped\n";
+        }
+        const bool hasTrigJetsSig = (trigJetTreeSig != nullptr) && (trigJetEtSig != nullptr);
+
         // --- Branch variables: Z->mumu dimuon system (signal only, Zmumu only) ---
         double sig_dimuonPt = -1.0, sig_dimuonMass = -1.0;
         int    sig_nTruthMuons = 0;
@@ -1775,6 +2912,16 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::string tag = std::to_string(fileIt);
         TH1F* sig_h_TotalMET   = new TH1F(("sig_h_TotalMET_"  +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_h_TotalMET  = new TH1F(("back_h_TotalMET_" +tag).c_str(), "", nMETBins, metBinEdges);
+        // GEP JwoJ MET, plus its two terms before the coefficients are applied. Booked
+        // unconditionally so nothing downstream has to null-check them; they simply stay empty
+        // on a file that does not carry the algorithm, and every draw of them is gated on
+        // hasGEPJwoJ.
+        TH1F* sig_h_GEPJwoJMET      = new TH1F(("sig_h_GEPJwoJMET_"     +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_h_GEPJwoJMET     = new TH1F(("back_h_GEPJwoJMET_"    +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* sig_h_GEPJwoJHardMET  = new TH1F(("sig_h_GEPJwoJHardMET_" +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_h_GEPJwoJHardMET = new TH1F(("back_h_GEPJwoJHardMET_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* sig_h_GEPJwoJSoftMET  = new TH1F(("sig_h_GEPJwoJSoftMET_" +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_h_GEPJwoJSoftMET = new TH1F(("back_h_GEPJwoJSoftMET_"+tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* sig_h_TotalMETX  = new TH1F(("sig_h_TotalMETX_" +tag).c_str(), "", 80, -400, 400);
         TH1F* back_h_TotalMETX = new TH1F(("back_h_TotalMETX_"+tag).c_str(), "", 80, -400, 400);
         TH1F* sig_h_TotalMETY  = new TH1F(("sig_h_TotalMETY_" +tag).c_str(), "", 80, -400, 400);
@@ -1806,6 +2953,22 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* back_h_TowerMetX = new TH1F(("back_h_TowerMetX_"+tag).c_str(), "", 80, -400, 400);
         TH1F* sig_h_TowerMetY  = new TH1F(("sig_h_TowerMetY_" +tag).c_str(), "", 80, -400, 400);
         TH1F* back_h_TowerMetY = new TH1F(("back_h_TowerMetY_"+tag).c_str(), "", 80, -400, 400);
+        // MET direction of each GEP term, phi = atan2(MET_y, MET_x) over [-pi, pi]. 16 bins of
+        // ~0.39 rad — four times the width first tried, which spread the statistics thin enough
+        // that the bin-to-bin scatter swamped any modulation the plot exists to show. Still far
+        // coarser than the tower phi granularity the direction is built from, so structure here is
+        // physics or digitization rather than binning.
+        // A flat distribution is the expectation for background; the signal follows its own
+        // topology, and the interesting failure mode is a modulation shared by all three terms.
+        const int    nMetPhiBins = 16;
+        const double kPiVal      = M_PI;
+        TH1F* sig_h_JetMetPhi    = new TH1F(("sig_h_JetMetPhi_"   +tag).c_str(), "", nMetPhiBins, -kPiVal, kPiVal);
+        TH1F* back_h_JetMetPhi   = new TH1F(("back_h_JetMetPhi_"  +tag).c_str(), "", nMetPhiBins, -kPiVal, kPiVal);
+        TH1F* sig_h_TowerMetPhi  = new TH1F(("sig_h_TowerMetPhi_" +tag).c_str(), "", nMetPhiBins, -kPiVal, kPiVal);
+        TH1F* back_h_TowerMetPhi = new TH1F(("back_h_TowerMetPhi_"+tag).c_str(), "", nMetPhiBins, -kPiVal, kPiVal);
+        TH1F* sig_h_TotalMETPhi  = new TH1F(("sig_h_TotalMETPhi_" +tag).c_str(), "", nMetPhiBins, -kPiVal, kPiVal);
+        TH1F* back_h_TotalMETPhi = new TH1F(("back_h_TotalMETPhi_"+tag).c_str(), "", nMetPhiBins, -kPiVal, kPiVal);
+        for (TH1F* h : { back_h_JetMetPhi, back_h_TowerMetPhi, back_h_TotalMETPhi }) h->Sumw2();
         TH1F* sig_h_TowerMet   = new TH1F(("sig_h_TowerMet_"  +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_h_TowerMet  = new TH1F(("back_h_TowerMet_" +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* sig_h_JetMet     = new TH1F(("sig_h_JetMet_"    +tag).c_str(), "", nMETBins, metBinEdges);
@@ -1847,6 +3010,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
 
         // Weighted background histograms for rate plots
         TH1F* back_hw_TotalMET = new TH1F(("back_hw_TotalMET_"+tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_GEPJwoJMET = new TH1F(("back_hw_GEPJwoJMET_"+tag).c_str(), "", nMETBins, metBinEdges);
+        back_hw_GEPJwoJMET->Sumw2();
         TH1F* back_hw_gMET     = new TH1F(("back_hw_gMET_"    +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_hw_gMET_NC  = new TH1F(("back_hw_gMET_NC_" +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_hw_gMET_Rms = new TH1F(("back_hw_gMET_Rms_"+tag).c_str(), "", nMETBins, metBinEdges);
@@ -1886,6 +3051,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* back_hwBin_gMET_JwoJAOD = new TH1F(("back_hwBin_gMET_JwoJAOD_"+tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_hwBin_gMET_NCAOD   = new TH1F(("back_hwBin_gMET_NCAOD_"  +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_hwBin_gMET_RmsAOD  = new TH1F(("back_hwBin_gMET_RmsAOD_" +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hwBin_GEPJwoJMET = new TH1F(("back_hwBin_GEPJwoJMET_"+tag).c_str(), "", nMETBins, metBinEdges);
+        back_hwBin_GEPJwoJMET->Sumw2();
         back_hwBin_TotalMET->Sumw2(); back_hwBin_gMET->Sumw2();
         back_hwBin_gMET_NC->Sumw2();  back_hwBin_gMET_Rms->Sumw2();
         back_hwBin_jMET->Sumw2();     back_hwBin_JetMET->Sumw2();
@@ -1904,6 +3071,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* back_hw_gMET_JwoJAOD_JZ0 = new TH1F(("back_hw_gMET_JwoJAOD_JZ0_"+tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_hw_gMET_NCAOD_JZ0   = new TH1F(("back_hw_gMET_NCAOD_JZ0_"  +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_hw_gMET_RmsAOD_JZ0  = new TH1F(("back_hw_gMET_RmsAOD_JZ0_" +tag).c_str(), "", nMETBins, metBinEdges);
+        TH1F* back_hw_GEPJwoJMET_JZ0 = new TH1F(("back_hw_GEPJwoJMET_JZ0_"+tag).c_str(), "", nMETBins, metBinEdges);
+        back_hw_GEPJwoJMET_JZ0->Sumw2();
         back_hw_TotalMET_JZ0->Sumw2(); back_hw_gMET_JZ0->Sumw2();
         back_hw_gMET_NC_JZ0->Sumw2();  back_hw_gMET_Rms_JZ0->Sumw2();
         back_hw_jMET_JZ0->Sumw2();     back_hw_JetMET_JZ0->Sumw2();
@@ -1957,9 +3126,32 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH2F* back_h2_JetMET_TOBMet_vs_truthMET   = new TH2F(("back_h2_JetMET_TOBMet_vs_truthMET_"  +tag).c_str(), "", nBkTruthX, bkTruthXedges, nBkTOBY, bkTOBYedges);
         TH2F* back_h2_TowerMET_TOBMet_vs_truthMET = new TH2F(("back_h2_TowerMET_TOBMet_vs_truthMET_"+tag).c_str(), "", nBkTruthX, bkTruthXedges, nBkTOBY, bkTOBYedges);
         TH2F* back_h2_TotalMET_TOBMet_vs_truthMET = new TH2F(("back_h2_TotalMET_TOBMet_vs_truthMET_"+tag).c_str(), "", nBkTruthX, bkTruthXedges, nBkTOBY, bkTOBYedges);
+        TH2F* sig_h2_GEPJwoJMET_TOBMet_vs_truthMET  = new TH2F(("sig_h2_GEPJwoJMET_TOBMet_vs_truthMET_" +tag).c_str(), "", n2D, lo2D, hi2D, n2D, lo2D, hi2D);
+        TH2F* back_h2_GEPJwoJMET_TOBMet_vs_truthMET = new TH2F(("back_h2_GEPJwoJMET_TOBMet_vs_truthMET_"+tag).c_str(), "", nBkTruthX, bkTruthXedges, nBkTOBY, bkTOBYedges);
+        back_h2_GEPJwoJMET_TOBMet_vs_truthMET->Sumw2();
         back_h2_gJwoJ_TOBMet_vs_truthMET->Sumw2(); back_h2_gNC_TOBMet_vs_truthMET->Sumw2();
         back_h2_gRms_TOBMet_vs_truthMET->Sumw2();  back_h2_JetMET_TOBMet_vs_truthMET->Sumw2();
         back_h2_TowerMET_TOBMet_vs_truthMET->Sumw2(); back_h2_TotalMET_TOBMet_vs_truthMET->Sumw2();
+
+        // --- GEP JwoJ: pairwise MET-vs-MET comparison histograms ---
+        // The upper triangle of an nCmp2DTypes x nCmp2DTypes matrix: entry [i][j] with j > i
+        // holds cmp2DTypeIdx[j] (y) against cmp2DTypeIdx[i] (x). Same square binning as the
+        // combined-selection 2D histograms above, so both read the same way. Unweighted on the
+        // background side as well — these are correlation/calibration plots, not rate plots,
+        // and a weighted fill would let a handful of very high-weight JZ0 events dictate the
+        // fitted slope.
+        TH2F* sig_h2_cmp[nCmp2DTypes][nCmp2DTypes]  = {};
+        TH2F* back_h2_cmp[nCmp2DTypes][nCmp2DTypes] = {};
+        if (hasGEPJwoJ) {
+            for (int i = 0; i < nCmp2DTypes; ++i) {
+                for (int j = i + 1; j < nCmp2DTypes; ++j) {
+                    const std::string pairTag = std::string(metTypeShort[cmp2DTypeIdx[j]]) + "_vs_"
+                                              + metTypeShort[cmp2DTypeIdx[i]] + "_" + tag;
+                    sig_h2_cmp[i][j]  = new TH2F(("sig_h2_cmp_" +pairTag).c_str(), "", n2D, lo2D, hi2D, n2D, lo2D, hi2D);
+                    back_h2_cmp[i][j] = new TH2F(("back_h2_cmp_"+pairTag).c_str(), "", n2D, lo2D, hi2D, n2D, lo2D, hi2D);
+                }
+            }
+        }
 
         // Residual (truth - TOB) / truth  1D distributions — signal and background
         TH1F* sig_h1_gJwoJ_relResidual     = new TH1F(("sig_h1_gJwoJ_relResidual_"    +tag).c_str(), "", 100, -3.0, 3.0);
@@ -2081,6 +3273,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* h_turnOn_num_TotalMET_40kHz = new TH1F(("h_turnOn_num_TotalMET_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_TotalMET_80kHz = new TH1F(("h_turnOn_num_TotalMET_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_TotalMET_60kHz = new TH1F(("h_turnOn_num_TotalMET_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_GEPJwoJMET_20kHz = new TH1F(("h_turnOn_num_GEPJwoJMET_20kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_GEPJwoJMET_40kHz = new TH1F(("h_turnOn_num_GEPJwoJMET_40kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_GEPJwoJMET_80kHz = new TH1F(("h_turnOn_num_GEPJwoJMET_80kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
+        TH1F* h_turnOn_num_GEPJwoJMET_60kHz = new TH1F(("h_turnOn_num_GEPJwoJMET_60kHz_"+tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         // gFEX NoiseCut and Rms individual turn-on numerators
         TH1F* h_turnOn_num_gMET_NC_20kHz  = new TH1F(("h_turnOn_num_gMET_NC_20kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
         TH1F* h_turnOn_num_gMET_NC_40kHz  = new TH1F(("h_turnOn_num_gMET_NC_40kHz_" +tag).c_str(), "", nTurnOnBins, turnOnBinEdges);
@@ -2170,6 +3366,103 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_h_NJets->SetDirectory(0);
         back_h_NJets->Sumw2();
 
+        // The same set again against the trigger-jet multiplicity, filled from the config's own
+        // pileup-suppression variant of the WTA-cone GEP jets. Booked regardless of whether that
+        // collection turned up, so the draw block below has objects to reach for either way; it
+        // guards on hasTrigJets instead.
+        TProfile* back_prof_METvsNTrigJets[nMETTypes];
+        for (int iA = 0; iA < nMETTypes; ++iA) {
+            back_prof_METvsNTrigJets[iA] = new TProfile(
+                (std::string("back_prof_METvsNTrigJets_") + metTypeShort[iA] + "_" + tag).c_str(),
+                "", nNTrigJetBins, 0.0, nTrigJetAxisMax);
+            back_prof_METvsNTrigJets[iA]->SetDirectory(0);
+        }
+        TH1F* back_h_NTrigJets = new TH1F(("back_h_NTrigJets_"+tag).c_str(), "",
+                                          nNTrigJetBins, 0.0, nTrigJetAxisMax);
+        back_h_NTrigJets->SetDirectory(0);
+        back_h_NTrigJets->Sumw2();
+
+        // Signal counterparts, booked unconditionally for the same reason the background ones are;
+        // the fill and the draw guard on hasTrigJetsSig.
+        //
+        // Filled UNWEIGHTED, unlike the background set, which carries the per-event rate weights.
+        // The signal is a single process with no slice reweighting to apply, so its <MET> is a
+        // plain average over events, and every other signal histogram in this macro is filled the
+        // same way. The consequence for the sig/bkg ratio below is worth being explicit about:
+        // the numerator is an unweighted mean and the denominator a rate-weighted one. Both are
+        // "the average MET an event of this kind presents to the trigger", which is the quantity
+        // an N-jet dependent threshold has to be set against, but they are not the same estimator.
+        TProfile* sig_prof_METvsNTrigJets[nMETTypes];
+        for (int iA = 0; iA < nMETTypes; ++iA) {
+            sig_prof_METvsNTrigJets[iA] = new TProfile(
+                (std::string("sig_prof_METvsNTrigJets_") + metTypeShort[iA] + "_" + tag).c_str(),
+                "", nNTrigJetBins, 0.0, nTrigJetAxisMax);
+            sig_prof_METvsNTrigJets[iA]->SetDirectory(0);
+        }
+        TH1F* sig_h_NTrigJets = new TH1F(("sig_h_NTrigJets_"+tag).c_str(), "",
+                                         nNTrigJetBins, 0.0, nTrigJetAxisMax);
+        sig_h_NTrigJets->SetDirectory(0);
+        sig_h_NTrigJets->Sumw2();
+
+        // --- GEP input-object multiplicity, one set per pileup-suppression variant ---
+        // Jet counts on a linear axis of one jet per bin, tower counts on a log-spaced one, plus a
+        // TProfile per object of the count above each E_T threshold. Background is filled with the
+        // rate weights, as everywhere else here, so its average is the multiplicity of a typical
+        // weighted crossing rather than of a typical generated event; signal is unweighted.
+        //
+        // The profile bins are CENTRED on the threshold points — half a step either side — so that
+        // Fill(threshold, n) lands each threshold in its own bin and GetBinCenter reads it back
+        // exactly. Only the bin means are ever used; the curves carry no error bars.
+        const std::vector<double> towerMultEdges = makeLogBinEdges(nTowerMultBins, kTowerMultAxisMin, towerMultMax);
+        TH1F* sig_h_nJetsMult[nPUSup]   = {};   TH1F* back_h_nJetsMult[nPUSup]   = {};
+        TH1F* sig_h_nTowersMult[nPUSup] = {};   TH1F* back_h_nTowersMult[nPUSup] = {};
+        TProfile* sig_prof_nJetsVsThr[nPUSup]   = {};   TProfile* back_prof_nJetsVsThr[nPUSup]   = {};
+        TProfile* sig_prof_nTowersVsThr[nPUSup] = {};   TProfile* back_prof_nTowersVsThr[nPUSup] = {};
+        TH2D*     sig_h2_nTowersVsThr[nPUSup]   = {};   TH2D*     back_h2_nTowersVsThr[nPUSup]   = {};
+        TH2D*     sig_h2_nJetsVsThr[nPUSup]     = {};   TH2D*     back_h2_nJetsVsThr[nPUSup]     = {};
+        const double jetThrLo   = -0.5 * jetThrStep,   jetThrHi   = jetThrMax   + 0.5 * jetThrStep;
+        const double towerThrLo = -0.5 * towerThrStep, towerThrHi = towerThrMax + 0.5 * towerThrStep;
+        for (int iV = 0; iV < nPUSup; ++iV) {
+            if (!hasMultVariant[iV]) continue;
+            const std::string vt = std::string(puSupShort[iV]) + "_" + tag;
+            sig_h_nJetsMult[iV]    = new TH1F(("sig_h_nJetsMult_"   +vt).c_str(), "", nJetMultBins, jetMultAxisMin, jetMultAxisMax);
+            back_h_nJetsMult[iV]   = new TH1F(("back_h_nJetsMult_"  +vt).c_str(), "", nJetMultBins, jetMultAxisMin, jetMultAxisMax);
+            sig_h_nTowersMult[iV]  = new TH1F(("sig_h_nTowersMult_" +vt).c_str(), "", nTowerMultBins, towerMultEdges.data());
+            back_h_nTowersMult[iV] = new TH1F(("back_h_nTowersMult_"+vt).c_str(), "", nTowerMultBins, towerMultEdges.data());
+            for (TH1F* h : { sig_h_nJetsMult[iV],   back_h_nJetsMult[iV],
+                             sig_h_nTowersMult[iV], back_h_nTowersMult[iV] }) {
+                h->SetDirectory(0);
+                h->Sumw2();
+            }
+            sig_prof_nJetsVsThr[iV]    = new TProfile(("sig_prof_nJetsVsThr_"   +vt).c_str(), "", nJetThrPts,   jetThrLo,   jetThrHi);
+            back_prof_nJetsVsThr[iV]   = new TProfile(("back_prof_nJetsVsThr_"  +vt).c_str(), "", nJetThrPts,   jetThrLo,   jetThrHi);
+            sig_prof_nTowersVsThr[iV]  = new TProfile(("sig_prof_nTowersVsThr_" +vt).c_str(), "", nTowerThrPts, towerThrLo, towerThrHi);
+            back_prof_nTowersVsThr[iV] = new TProfile(("back_prof_nTowersVsThr_"+vt).c_str(), "", nTowerThrPts, towerThrLo, towerThrHi);
+            for (TProfile* p : { sig_prof_nJetsVsThr[iV],   back_prof_nJetsVsThr[iV],
+                                 sig_prof_nTowersVsThr[iV], back_prof_nTowersVsThr[iV] })
+                p->SetDirectory(0);
+            // Towers only: the full count distribution at each threshold, for the percentile
+            // curves. Its y projection in one threshold bin IS that threshold's count histogram.
+            sig_h2_nTowersVsThr[iV]  = new TH2D(("sig_h2_nTowersVsThr_" +vt).c_str(), "",
+                                                nTowerThrPts, towerThrLo, towerThrHi,
+                                                nTowerCountBins, kTowerCountAxisMin, kTowerCountAxisMax);
+            back_h2_nTowersVsThr[iV] = new TH2D(("back_h2_nTowersVsThr_"+vt).c_str(), "",
+                                                nTowerThrPts, towerThrLo, towerThrHi,
+                                                nTowerCountBins, kTowerCountAxisMin, kTowerCountAxisMax);
+            sig_h2_nTowersVsThr[iV]->SetDirectory(0);
+            back_h2_nTowersVsThr[iV]->SetDirectory(0);
+            // Same for jets, so NJets_vs_Threshold can carry percentile risers too. The count
+            // axis is the jet-multiplicity one (a few tens) rather than the tower one (thousands).
+            sig_h2_nJetsVsThr[iV]  = new TH2D(("sig_h2_nJetsVsThr_" +vt).c_str(), "",
+                                              nJetThrPts, jetThrLo, jetThrHi,
+                                              nJetMultBins, jetMultAxisMin, jetMultAxisMax);
+            back_h2_nJetsVsThr[iV] = new TH2D(("back_h2_nJetsVsThr_"+vt).c_str(), "",
+                                              nJetThrPts, jetThrLo, jetThrHi,
+                                              nJetMultBins, jetMultAxisMin, jetMultAxisMax);
+            sig_h2_nJetsVsThr[iV]->SetDirectory(0);
+            back_h2_nJetsVsThr[iV]->SetDirectory(0);
+        }
+
         // Reconstructed primary vertices per background event. Filled both ways: raw counts
         // give the sample's vertex multiplicity, the weighted version gives the vertex
         // multiplicity of the background rate (dominated by whichever slices carry the weight).
@@ -2180,6 +3473,28 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                                                     "Reconstructed primary vertices;N_{primary vertices};Weighted events",
                                                     35, 20, 160);
         back_hw_nPrimaryVertices->Sumw2();
+
+        // Rate vs pileup: the weighted mu spectrum of every surviving background event
+        // (denominator) and of the events passing each fixed MET threshold (numerators), one set
+        // per MET type. Deliberately kept as a pass fraction rather than a rate at this stage —
+        // the conversion to Hz happens in the matched-pileup block after the file loop, where
+        // both pileup scenarios of a config are in hand.
+        TH1F* back_hw_mu_all = new TH1F(("back_hw_mu_all_"+tag).c_str(),
+                                        "Background mu spectrum;#LTPU#GT;Weighted events",
+                                        nMuBins, muAxisMin, muAxisMax);
+        back_hw_mu_all->SetDirectory(0);
+        back_hw_mu_all->Sumw2();
+        TH1F* back_hw_mu_pass[nMETTypes][nRateVsMuThr];
+        for (int iA = 0; iA < nMETTypes; ++iA) {
+            for (int iT = 0; iT < nRateVsMuThr; ++iT) {
+                back_hw_mu_pass[iA][iT] = new TH1F(
+                    (std::string("back_hw_mu_pass_") + metTypeShort[iA] + "_"
+                     + rateVsMuThrName[iT] + "_" + tag).c_str(),
+                    "", nMuBins, muAxisMin, muAxisMax);
+                back_hw_mu_pass[iA][iT]->SetDirectory(0);
+                back_hw_mu_pass[iA][iT]->Sumw2();
+            }
+        }
 
         // Per-JZ-slice MET histograms for background (gFEX MET, GEP Jet MET, GEP Tower MET)
         TH1F* back_h_gMET_jz[nJZSlices_];
@@ -2316,6 +3631,12 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             sig_h_metTruthNonIntY->Fill(sig_metTruthNonIntY);
             sig_h_JetMetX->Fill(sig_JetMetX); sig_h_JetMetY->Fill(sig_JetMetY);
             sig_h_TowerMetX->Fill(sig_TowerMetX); sig_h_TowerMetY->Fill(sig_TowerMetY);
+            // MET direction per GEP term. A term with both components exactly zero has no
+            // direction at all — atan2(0, 0) is 0, which would pile a spike onto the phi = 0 bin
+            // and read as a real preferred direction — so those events are left out.
+            if (sig_JetMetX   != 0.0 || sig_JetMetY   != 0.0) sig_h_JetMetPhi->Fill(std::atan2(sig_JetMetY,   sig_JetMetX));
+            if (sig_TowerMetX != 0.0 || sig_TowerMetY != 0.0) sig_h_TowerMetPhi->Fill(std::atan2(sig_TowerMetY, sig_TowerMetX));
+            if (sig_TotalMETX != 0.0 || sig_TotalMETY != 0.0) sig_h_TotalMETPhi->Fill(std::atan2(sig_TotalMETY, sig_TotalMETX));
             // 2D combined: x=gFEX MET, y=GEP MET (clamped to [0, hi2D])
             auto clamp2D = [&](double v) { return std::min(v, hi2D - 1e-9); };
             sig_h2_JwoJ_Jet->Fill(clamp2D(sig_gMET),     clamp2D(sig_JetMet));
@@ -2324,6 +3645,22 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             sig_h2_NC_Tower->Fill(clamp2D(sig_gMET_NC),  clamp2D(sig_TowerMet));
             sig_h2_Rms_Jet->Fill(clamp2D(sig_gMET_Rms),  clamp2D(sig_JetMet));
             sig_h2_Rms_Tower->Fill(clamp2D(sig_gMET_Rms),clamp2D(sig_TowerMet));
+            // GEP JwoJ: the distribution, its two uncoefficiented terms, and every unordered
+            // pair of the comparison MET types. The per-event table is indexed the same way as
+            // metTypeShort so the pair loop stays generic.
+            if (hasGEPJwoJ) {
+                sig_h_GEPJwoJMET->Fill(clampVal(sig_h_GEPJwoJMET,         sig_GEPJwoJMET));
+                sig_h_GEPJwoJHardMET->Fill(clampVal(sig_h_GEPJwoJHardMET, sig_GEPJwoJHardMET));
+                sig_h_GEPJwoJSoftMET->Fill(clampVal(sig_h_GEPJwoJSoftMET, sig_GEPJwoJSoftMET));
+                const double sigMETByType2D[nMETTypes] = {
+                    sig_gMET, sig_gMET_NC, sig_gMET_Rms, sig_jMET,
+                    sig_JetMet, sig_TowerMet, sig_TotalMET, sig_GEPJwoJMET
+                };
+                for (int i = 0; i < nCmp2DTypes; ++i)
+                    for (int j = i + 1; j < nCmp2DTypes; ++j)
+                        sig_h2_cmp[i][j]->Fill(clamp2D(sigMETByType2D[cmp2DTypeIdx[i]]),
+                                               clamp2D(sigMETByType2D[cmp2DTypeIdx[j]]));
+            }
             sig_h_metTruthNonInt->Fill(clampVal(sig_h_metTruthNonInt, sig_metTruthNonInt));
             sig_h_metTruthNonInt_coarse->Fill(std::min(sig_metTruthNonInt, 599.9));
             sig_h_metTruthInt->Fill(clampVal(sig_h_metTruthInt, sig_metTruthInt));
@@ -2374,6 +3711,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 fillCalib(sig_h2_TotalMET_TOBMet_vs_truthMET,
                           sig_h1_TotalMET_relResidual, sig_h2_TotalMET_relResidual_vs_truthMET, sig_h2_TotalMET_relResidual_vs_sumET,
                           sig_h1_TotalMET_absResidual, sig_h2_TotalMET_absResidual_vs_truthMET, sig_h2_TotalMET_absResidual_vs_sumET, sig_TotalMET, sig_SumET);
+                // GEP JwoJ against truth. The 2D correlation only, not the residual histograms
+                // the call above also fills: those feed the resMETTypeIdx overlays, which this
+                // MET type is deliberately left out of (see the note by nResMETTypes).
+                if (hasGEPJwoJ)
+                    sig_h2_GEPJwoJMET_TOBMet_vs_truthMET->Fill(truthCl, std::min(sig_GEPJwoJMET, hi2D - 1e-9));
             }
         }
 
@@ -2544,6 +3886,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 back_hw_jMET_JZ0->Fill(clampVal(back_hw_jMET_JZ0,         back_jMET),      wJZ0);
                 back_hw_JetMET_JZ0->Fill(clampVal(back_hw_JetMET_JZ0,     back_JetMet),    wJZ0);
                 back_hw_TowerMET_JZ0->Fill(clampVal(back_hw_TowerMET_JZ0, back_TowerMet),  wJZ0);
+                if (hasGEPJwoJ)
+                    back_hw_GEPJwoJMET_JZ0->Fill(clampVal(back_hw_GEPJwoJMET_JZ0, back_GEPJwoJMET), wJZ0);
                 if (hasGFexSimMET) {
                     gFexMETTreeBack->GetEntry(iEvt);
                     gFexMETNoiseCutTreeBack->GetEntry(iEvt);
@@ -2575,6 +3919,28 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_h_gMET_Rms->Fill(clampVal(back_h_gMET_Rms, back_gMET_Rms), w);
             jFexMETTreeBack->GetEntry(iEvt);
             back_h_jMET->Fill(clampVal(back_h_jMET, back_jMET), w);
+
+            // --- Rate vs pileup fills ---
+            // Placed after the jFEX GetEntry above so all seven MET types are loaded. Events
+            // whose mu falls outside the axis are dropped rather than clamped into the end bins:
+            // the axis already spans both generated profiles, so anything outside it belongs to
+            // neither and would distort the bin it was pushed into.
+            if (hasMu) {
+                const double muEvt = rateVsMuUseAverageMu ? averageMuBack : actualMuBack;
+                if (muEvt >= muAxisMin && muEvt < muAxisMax) {
+                    const double backMETByTypeMu[nMETTypes] = {
+                        back_gMET, back_gMET_NC, back_gMET_Rms, back_jMET,
+                        back_JetMet, back_TowerMet, back_TotalMET, back_GEPJwoJMET
+                    };
+                    back_hw_mu_all->Fill(muEvt, w);
+                    for (int iA = 0; iA < nMETTypes; ++iA) {
+                        if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                        for (int iT = 0; iT < nRateVsMuThr; ++iT)
+                            if (backMETByTypeMu[iA] > rateVsMuThr[iT])
+                                back_hw_mu_pass[iA][iT]->Fill(muEvt, w);
+                    }
+                }
+            }
             //back_h_gMETX->Fill(back_gMETX, w); back_h_gMETY->Fill(back_gMETY, w);
             //back_h_gMETX_NC->Fill(back_gMETX_NC, w); back_h_gMETY_NC->Fill(back_gMETY_NC, w);
             //back_h_gMETX_Rms->Fill(back_gMETX_Rms, w); back_h_gMETY_Rms->Fill(back_gMETY_Rms, w);
@@ -2582,6 +3948,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_h_metTruthNonIntY->Fill(back_metTruthNonIntY, w);
             back_h_JetMetX->Fill(back_JetMetX, w); back_h_JetMetY->Fill(back_JetMetY, w);
             back_h_TowerMetX->Fill(back_TowerMetX, w); back_h_TowerMetY->Fill(back_TowerMetY, w);
+            // MET direction per GEP term; events with a null vector carry no direction (see the
+            // signal loop above).
+            if (back_JetMetX   != 0.0 || back_JetMetY   != 0.0) back_h_JetMetPhi->Fill(std::atan2(back_JetMetY,   back_JetMetX),   w);
+            if (back_TowerMetX != 0.0 || back_TowerMetY != 0.0) back_h_TowerMetPhi->Fill(std::atan2(back_TowerMetY, back_TowerMetX), w);
+            if (back_TotalMETX != 0.0 || back_TotalMETY != 0.0) back_h_TotalMETPhi->Fill(std::atan2(back_TotalMETY, back_TotalMETX), w);
             back_h_metTruthNonInt->Fill(clampVal(back_h_metTruthNonInt, back_metTruthNonInt), w);
             back_h_metTruthInt->Fill(clampVal(back_h_metTruthInt, back_metTruthInt), w);
             back_h_metTruthIntOut->Fill(clampVal(back_h_metTruthIntOut, back_metTruthIntOut), w);
@@ -2598,6 +3969,27 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_hw_jMET->Fill(clampVal(back_hw_jMET, back_jMET), w);
             back_hw_JetMET->Fill(clampVal(back_hw_JetMET, back_JetMet), w);
             back_hw_TowerMET->Fill(clampVal(back_hw_TowerMET, back_TowerMet), w);
+            // GEP JwoJ: the weighted rate histogram, the unweighted shape ones, and the
+            // pairwise 2D comparisons. The 2D fills are UNWEIGHTED on purpose — see the note
+            // where those histograms are booked.
+            if (hasGEPJwoJ) {
+                back_hw_GEPJwoJMET->Fill(clampVal(back_hw_GEPJwoJMET, back_GEPJwoJMET), w);
+                back_h_GEPJwoJMET->Fill(clampVal(back_h_GEPJwoJMET,         back_GEPJwoJMET),     w);
+                back_h_GEPJwoJHardMET->Fill(clampVal(back_h_GEPJwoJHardMET, back_GEPJwoJHardMET), w);
+                back_h_GEPJwoJSoftMET->Fill(clampVal(back_h_GEPJwoJSoftMET, back_GEPJwoJSoftMET), w);
+                const double backMETByType2D[nMETTypes] = {
+                    back_gMET, back_gMET_NC, back_gMET_Rms, back_jMET,
+                    back_JetMet, back_TowerMet, back_TotalMET, back_GEPJwoJMET
+                };
+                auto clamp2Dbk = [&](double v) { return std::min(v, hi2D - 1e-9); };
+                for (int i = 0; i < nCmp2DTypes; ++i)
+                    for (int j = i + 1; j < nCmp2DTypes; ++j)
+                        back_h2_cmp[i][j]->Fill(clamp2Dbk(backMETByType2D[cmp2DTypeIdx[i]]),
+                                                clamp2Dbk(backMETByType2D[cmp2DTypeIdx[j]]));
+                if (back_metTruthNonInt > 0.0)
+                    back_h2_GEPJwoJMET_TOBMet_vs_truthMET->Fill(std::min(back_metTruthNonInt, hi2D - 1e-9),
+                                                                clamp2Dbk(back_GEPJwoJMET), w);
+            }
 
             // Same fills weighted by the truth-jet binomial correction at this event's leading
             // truth jet E_T, giving a per-crossing rather than a collision rate. wBin == w when
@@ -2625,6 +4017,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             back_hwBin_jMET->Fill(clampVal(back_hwBin_jMET, back_jMET), wBin);
             back_hwBin_JetMET->Fill(clampVal(back_hwBin_JetMET, back_JetMet), wBin);
             back_hwBin_TowerMET->Fill(clampVal(back_hwBin_TowerMET, back_TowerMet), wBin);
+            if (hasGEPJwoJ)
+                back_hwBin_GEPJwoJMET->Fill(clampVal(back_hwBin_GEPJwoJMET, back_GEPJwoJMET), wBin);
             if (hasGFexSimMET) {
                 gFexMETTreeBack->GetEntry(iEvt);          // AOD gFEX copies for the AOD-vs-Sim block
                 gFexMETNoiseCutTreeBack->GetEntry(iEvt);
@@ -2735,6 +4129,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         const double sc_JetMET         = normalizeRateHist(back_hw_JetMET);
         const double sc_TowerMET       = normalizeRateHist(back_hw_TowerMET);
         normalizeRateHist(back_hw_TotalMET);
+        if (hasGEPJwoJ) normalizeRateHist(back_hw_GEPJwoJMET);
         if (hasSumJetET) normalizeRateHist(back_hw_SumJetET);   // H_T rate curve
         normalizeRateHist(back_hw_gMET_JwoJAOD);
         normalizeRateHist(back_hw_gMET_NCAOD);
@@ -2850,6 +4245,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         double thr_TotalMET_40kHz  = findThreshold(back_hw_TotalMET,  40e3);
         double thr_TotalMET_80kHz  = findThreshold(back_hw_TotalMET,  80e3);
         double thr_TotalMET_60kHz  = findThreshold(back_hw_TotalMET,  60e3);
+        double thr_GEPJwoJMET_20kHz = hasGEPJwoJ ? findThreshold(back_hw_GEPJwoJMET, 20e3) : 0.0;
+        double thr_GEPJwoJMET_40kHz = hasGEPJwoJ ? findThreshold(back_hw_GEPJwoJMET, 40e3) : 0.0;
+        double thr_GEPJwoJMET_80kHz = hasGEPJwoJ ? findThreshold(back_hw_GEPJwoJMET, 80e3) : 0.0;
+        double thr_GEPJwoJMET_60kHz = hasGEPJwoJ ? findThreshold(back_hw_GEPJwoJMET, 60e3) : 0.0;
         double thr_gMET_JwoJAOD_20kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJAOD, 20e3) : 0.0;
         double thr_gMET_JwoJAOD_40kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJAOD, 40e3) : 0.0;
         double thr_gMET_JwoJAOD_80kHz = hasGFexSimMET ? findThreshold(back_hw_gMET_JwoJAOD, 80e3) : 0.0;
@@ -2870,34 +4269,85 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // points mean the same thing as everywhere else in this macro.
         TH1F* back_hw_byMETType[nMETTypes] = {
             back_hw_gMET, back_hw_gMET_NC, back_hw_gMET_Rms, back_hw_jMET,
-            back_hw_JetMET, back_hw_TowerMET, back_hw_TotalMET
+            back_hw_JetMET, back_hw_TowerMET, back_hw_TotalMET, back_hw_GEPJwoJMET
         };
-        double thrMu[nMETTypes][nMuRates];
-        for (int iA = 0; iA < nMETTypes; ++iA)
+        double thrMu[nMETTypes][nMuRates] = {};
+        for (int iA = 0; iA < nMETTypes; ++iA) {
+            if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;   // empty histogram, no threshold
             for (int iR = 0; iR < nMuRates; ++iR)
                 thrMu[iA][iR] = findThreshold(back_hw_byMETType[iA], muRatesHz[iR]);
+        }
 
+        // One row per MET type, whole GeV. All four rate points are quoted, including the 60 kHz
+        // one that was computed above but previously not printed.
+        auto thrRow = [](const char* name, double t20, double t40, double t60, double t80) {
+            return std::string(Form("  %-14s %6.0f %6.0f %6.0f %6.0f\n", name, t20, t40, t60, t80));
+        };
+        std::cout << "  Thresholds [GeV] at fixed background rate:\n"
+                  << Form("  %-14s %6s %6s %6s %6s\n", "MET type", "20kHz", "40kHz", "60kHz", "80kHz");
         if (hasGFexSimMET)
-            std::cout << "  Thresholds [GeV] — gMET JwoJSim 20/40/80 kHz: "
-                      << thr_gMET_JwoJAOD_20kHz << " / " << thr_gMET_JwoJAOD_40kHz << " / " << thr_gMET_JwoJAOD_80kHz << "\n"
-                      << "                    gMET NCSim   20/40/80 kHz: "
-                      << thr_gMET_NCAOD_20kHz   << " / " << thr_gMET_NCAOD_40kHz   << " / " << thr_gMET_NCAOD_80kHz   << "\n"
-                      << "                    gMET RmsSim  20/40/80 kHz: "
-                      << thr_gMET_RmsAOD_20kHz  << " / " << thr_gMET_RmsAOD_40kHz  << " / " << thr_gMET_RmsAOD_80kHz  << "\n";
-        std::cout << "  Thresholds [GeV] — gMET JwoJ 20/40/80 kHz: "
-                  << thr_gMET_20kHz     << " / " << thr_gMET_40kHz     << " / " << thr_gMET_80kHz     << "\n"
-                  << "                    gMET NC   20/40/80 kHz: "
-                  << thr_gMET_NC_20kHz  << " / " << thr_gMET_NC_40kHz  << " / " << thr_gMET_NC_80kHz  << "\n"
-                  << "                    gMET Rms  20/40/80 kHz: "
-                  << thr_gMET_Rms_20kHz << " / " << thr_gMET_Rms_40kHz << " / " << thr_gMET_Rms_80kHz << "\n"
-                  << "                    jMET      20/40/80 kHz: "
-                  << thr_jMET_20kHz     << " / " << thr_jMET_40kHz     << " / " << thr_jMET_80kHz     << "\n"
-                  << "                    JetMET    20/40/80 kHz: "
-                  << thr_JetMET_20kHz   << " / " << thr_JetMET_40kHz   << " / " << thr_JetMET_80kHz   << "\n"
-                  << "                    TowerMET  20/40/80 kHz: "
-                  << thr_TowerMET_20kHz << " / " << thr_TowerMET_40kHz << " / " << thr_TowerMET_80kHz << "\n"
-                  << "                    TotalMET  20/40/80 kHz: "
-                  << thr_TotalMET_20kHz << " / " << thr_TotalMET_40kHz << " / " << thr_TotalMET_80kHz << "\n";
+            std::cout << thrRow("gMET JwoJSim", thr_gMET_JwoJAOD_20kHz, thr_gMET_JwoJAOD_40kHz,
+                                thr_gMET_JwoJAOD_60kHz, thr_gMET_JwoJAOD_80kHz)
+                      << thrRow("gMET NCSim",   thr_gMET_NCAOD_20kHz,   thr_gMET_NCAOD_40kHz,
+                                thr_gMET_NCAOD_60kHz,   thr_gMET_NCAOD_80kHz)
+                      << thrRow("gMET RmsSim",  thr_gMET_RmsAOD_20kHz,  thr_gMET_RmsAOD_40kHz,
+                                thr_gMET_RmsAOD_60kHz,  thr_gMET_RmsAOD_80kHz);
+        std::cout << thrRow("gMET JwoJ", thr_gMET_20kHz,     thr_gMET_40kHz,     thr_gMET_60kHz,     thr_gMET_80kHz)
+                  << thrRow("gMET NC",   thr_gMET_NC_20kHz,  thr_gMET_NC_40kHz,  thr_gMET_NC_60kHz,  thr_gMET_NC_80kHz)
+                  << thrRow("gMET Rms",  thr_gMET_Rms_20kHz, thr_gMET_Rms_40kHz, thr_gMET_Rms_60kHz, thr_gMET_Rms_80kHz)
+                  << thrRow("jMET",      thr_jMET_20kHz,     thr_jMET_40kHz,     thr_jMET_60kHz,     thr_jMET_80kHz)
+                  << thrRow("JetMET",    thr_JetMET_20kHz,   thr_JetMET_40kHz,   thr_JetMET_60kHz,   thr_JetMET_80kHz)
+                  << thrRow("TowerMET",  thr_TowerMET_20kHz, thr_TowerMET_40kHz, thr_TowerMET_60kHz, thr_TowerMET_80kHz)
+                  << thrRow("TotalMET",  thr_TotalMET_20kHz, thr_TotalMET_40kHz, thr_TotalMET_60kHz, thr_TotalMET_80kHz);
+        if (hasGEPJwoJ)
+            std::cout << thrRow("GEPJwoJMET", thr_GEPJwoJMET_20kHz, thr_GEPJwoJMET_40kHz,
+                                thr_GEPJwoJMET_60kHz, thr_GEPJwoJMET_80kHz);
+
+        // --- Signal efficiency at each of those thresholds [%] ---
+        // Denominator is every signal event in the sample (the MET histograms are unweighted and
+        // clamped into range, so nothing is lost off the top). The threshold no longer lands on a
+        // bin edge now that findThreshold interpolates, so the bin holding it is split by the same
+        // uniform-density assumption used there rather than counted whole.
+        auto sigEffAbove = [](TH1F* h, double thrGeV) {
+            const int nB = h->GetNbinsX();
+            const double total = h->Integral(0, nB + 1);
+            if (total <= 0.0) return 0.0;
+            const int iThr = h->FindFixBin(thrGeV);
+            if (iThr > nB)  return 0.0;
+            double above = h->Integral(iThr + 1, nB + 1);   // bins strictly above the one holding thr
+            if (iThr >= 1) {                                 // partial bin: the part above thr
+                const double lo = h->GetBinLowEdge(iThr), w = h->GetBinWidth(iThr);
+                if (w > 0.0) above += h->GetBinContent(iThr) * std::max(0.0, (lo + w - thrGeV) / w);
+            } else {
+                above += h->GetBinContent(0);                // underflow sits below every threshold
+            }
+            return 100.0 * above / total;
+        };
+        auto effRow = [&sigEffAbove](const char* name, TH1F* hSig,
+                                     double t20, double t40, double t60, double t80) {
+            return std::string(Form("  %-14s %6.2f %6.2f %6.2f %6.2f\n", name,
+                                    sigEffAbove(hSig, t20), sigEffAbove(hSig, t40),
+                                    sigEffAbove(hSig, t60), sigEffAbove(hSig, t80)));
+        };
+        std::cout << "  Signal efficiency [%] at those thresholds (" << nSig << " events):\n"
+                  << Form("  %-14s %6s %6s %6s %6s\n", "MET type", "20kHz", "40kHz", "60kHz", "80kHz");
+        if (hasGFexSimMET)
+            std::cout << effRow("gMET JwoJSim", sig_h_gMET_JwoJAOD, thr_gMET_JwoJAOD_20kHz,
+                                thr_gMET_JwoJAOD_40kHz, thr_gMET_JwoJAOD_60kHz, thr_gMET_JwoJAOD_80kHz)
+                      << effRow("gMET NCSim",   sig_h_gMET_NCAOD,   thr_gMET_NCAOD_20kHz,
+                                thr_gMET_NCAOD_40kHz,   thr_gMET_NCAOD_60kHz,   thr_gMET_NCAOD_80kHz)
+                      << effRow("gMET RmsSim",  sig_h_gMET_RmsAOD,  thr_gMET_RmsAOD_20kHz,
+                                thr_gMET_RmsAOD_40kHz,  thr_gMET_RmsAOD_60kHz,  thr_gMET_RmsAOD_80kHz);
+        std::cout << effRow("gMET JwoJ", sig_h_gMET,     thr_gMET_20kHz,     thr_gMET_40kHz,     thr_gMET_60kHz,     thr_gMET_80kHz)
+                  << effRow("gMET NC",   sig_h_gMET_NC,  thr_gMET_NC_20kHz,  thr_gMET_NC_40kHz,  thr_gMET_NC_60kHz,  thr_gMET_NC_80kHz)
+                  << effRow("gMET Rms",  sig_h_gMET_Rms, thr_gMET_Rms_20kHz, thr_gMET_Rms_40kHz, thr_gMET_Rms_60kHz, thr_gMET_Rms_80kHz)
+                  << effRow("jMET",      sig_h_jMET,     thr_jMET_20kHz,     thr_jMET_40kHz,     thr_jMET_60kHz,     thr_jMET_80kHz)
+                  << effRow("JetMET",    sig_h_JetMet,   thr_JetMET_20kHz,   thr_JetMET_40kHz,   thr_JetMET_60kHz,   thr_JetMET_80kHz)
+                  << effRow("TowerMET",  sig_h_TowerMet, thr_TowerMET_20kHz, thr_TowerMET_40kHz, thr_TowerMET_60kHz, thr_TowerMET_80kHz)
+                  << effRow("TotalMET",  sig_h_TotalMET, thr_TotalMET_20kHz, thr_TotalMET_40kHz, thr_TotalMET_60kHz, thr_TotalMET_80kHz);
+        if (hasGEPJwoJ)
+            std::cout << effRow("GEPJwoJMET", sig_h_GEPJwoJMET, thr_GEPJwoJMET_20kHz, thr_GEPJwoJMET_40kHz,
+                                thr_GEPJwoJMET_60kHz, thr_GEPJwoJMET_80kHz);
 
         // --- Estimated background rate for fixed-threshold trigger items (kHz) ---
         // gXEJWOJ = gFEX XE (JwoJ), jXE = jFEX XE; number = fixed MET threshold [GeV].
@@ -3042,6 +4492,12 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             if (sig_TotalMET  > thr_TotalMET_40kHz)  h_turnOn_num_TotalMET_40kHz->Fill(truthMET);
             if (sig_TotalMET  > thr_TotalMET_80kHz)  h_turnOn_num_TotalMET_80kHz->Fill(truthMET);
             if (sig_TotalMET  > thr_TotalMET_60kHz)  h_turnOn_num_TotalMET_60kHz->Fill(truthMET);
+            if (hasGEPJwoJ) {
+                if (sig_GEPJwoJMET > thr_GEPJwoJMET_20kHz) h_turnOn_num_GEPJwoJMET_20kHz->Fill(truthMET);
+                if (sig_GEPJwoJMET > thr_GEPJwoJMET_40kHz) h_turnOn_num_GEPJwoJMET_40kHz->Fill(truthMET);
+                if (sig_GEPJwoJMET > thr_GEPJwoJMET_80kHz) h_turnOn_num_GEPJwoJMET_80kHz->Fill(truthMET);
+                if (sig_GEPJwoJMET > thr_GEPJwoJMET_60kHz) h_turnOn_num_GEPJwoJMET_60kHz->Fill(truthMET);
+            }
 
             // --- Z->mumu turn-on vs dimuon p_{T} ---
             // Denominator and numerators are filled here, in the same pass, so both see exactly
@@ -3057,12 +4513,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     sig_h_dimuonMass->Fill(sig_dimuonMass);
                     const double sigMETByType[nMETTypes] = {
                         sig_gMET, sig_gMET_NC, sig_gMET_Rms, sig_jMET,
-                        sig_JetMet, sig_TowerMet, sig_TotalMET
+                        sig_JetMet, sig_TowerMet, sig_TotalMET, sig_GEPJwoJMET
                     };
-                    for (int iA = 0; iA < nMETTypes; ++iA)
+                    for (int iA = 0; iA < nMETTypes; ++iA) {
+                        if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
                         for (int iR = 0; iR < nMuRates; ++iR)
                             if (sigMETByType[iA] > thrMu[iA][iR])
                                 h_turnOnMu_num[iA][iR]->Fill(dimuonPtCl);
+                    }
                 }
             }
             if (hasGFexSimMET) {
@@ -3187,6 +4645,29 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                         sig_sel_nPileupJets[iSel]->Fill(nPileupJets);
                 }
             }
+
+            // --- Signal <MET> vs trigger-jet multiplicity ---
+            // Mirrors the background fill in the following loop: every jet in the collection
+            // counts, no E_T cut, same clamp against a cap change upstream. Unweighted — see the
+            // note where these profiles are booked.
+            if (hasTrigJetsSig) {
+                jFexMETTreeSig->GetEntry(iEvt);   // jFEX MET is not loaded by this pass
+                trigJetTreeSig->GetEntry(iEvt);
+                // Named apart from the sigMETByType above, which lives in the dimuon block's
+                // inner scope and covers the same flavours for a different purpose.
+                const double sigMETByTypeTrigJets[nMETTypes] = {
+                    sig_gMET, sig_gMET_NC, sig_gMET_Rms, sig_jMET,
+                    sig_JetMet, sig_TowerMet, sig_TotalMET, sig_GEPJwoJMET
+                };
+                const int nTrigJetsSig = *trigJetEtSig ? (int)(*trigJetEtSig)->size() : 0;
+                const double nTrigJetsSigCl =
+                    std::min((double)nTrigJetsSig, nTrigJetAxisMax - 1e-9);
+                sig_h_NTrigJets->Fill(nTrigJetsSigCl);
+                for (int iA = 0; iA < nMETTypes; ++iA) {
+                    if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                    sig_prof_METvsNTrigJets[iA]->Fill(nTrigJetsSigCl, sigMETByTypeTrigJets[iA]);
+                }
+            }
         }
 
         // --- Background event-property pass: fill selection histograms at 80 kHz ---
@@ -3243,16 +4724,39 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     for (double et : *inTimeAntiKt4TruthJetsEtValuesBack)
                         if (et > kNJetMinEt) nJetsForProf++;
                 // jFEX MET is not loaded by this pass's GetEntry block above, unlike the other
-                // six MET types, so pull its entry before reading back_jMET.
+                // MET types, so pull its entry before reading back_jMET.
                 jFexMETTreeBack->GetEntry(iEvt);
                 const double backMETByType[nMETTypes] = {
                     back_gMET, back_gMET_NC, back_gMET_Rms, back_jMET,
-                    back_JetMet, back_TowerMet, back_TotalMET
+                    back_JetMet, back_TowerMet, back_TotalMET, back_GEPJwoJMET
                 };
                 const double nJetsCl = std::min((double)nJetsForProf, nJetAxisMax - 1e-9);
                 back_h_NJets->Fill(nJetsCl, w);
-                for (int iA = 0; iA < nMETTypes; ++iA)
+                for (int iA = 0; iA < nMETTypes; ++iA) {
+                    if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
                     back_prof_METvsNJets[iA]->Fill(nJetsCl, backMETByType[iA], w);
+                }
+            }
+
+            // --- <MET> vs trigger-jet multiplicity ---
+            // The same profiles against the jets the trigger reconstructs. Every jet in the
+            // collection counts, with no E_T cut: these are already the objects the trigger was
+            // handed. The collection is capped at ten jets, which the axis covers outright, so the
+            // clamp only guards against a cap change upstream.
+            if (hasTrigJets) {
+                jFexMETTreeBack->GetEntry(iEvt);   // as above: jFEX MET is not loaded by this pass
+                trigJetTreeBack->GetEntry(iEvt);
+                const double backMETByType[nMETTypes] = {
+                    back_gMET, back_gMET_NC, back_gMET_Rms, back_jMET,
+                    back_JetMet, back_TowerMet, back_TotalMET, back_GEPJwoJMET
+                };
+                const int nTrigJets = *trigJetEtBack ? (int)(*trigJetEtBack)->size() : 0;
+                const double nTrigJetsCl = std::min((double)nTrigJets, nTrigJetAxisMax - 1e-9);
+                back_h_NTrigJets->Fill(nTrigJetsCl, w);
+                for (int iA = 0; iA < nMETTypes; ++iA) {
+                    if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                    back_prof_METvsNTrigJets[iA]->Fill(nTrigJetsCl, backMETByType[iA], w);
+                }
             }
             // Per-selection TOB MET phi: Incl/JwoJ=gFEX JwoJ, NC, Rms, Jet, Tower
             /*double phi_TOBback[nSel80] = {
@@ -3304,6 +4808,109 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             }
         }
 
+        // --- GEP input-object multiplicity pass ---
+        // How many jets and towers the emulator is handed, at all three pileup-suppression
+        // settings, and how that count falls as an E_T threshold is raised on them.
+        //
+        // Its own pass rather than a few lines bolted onto the loops above: it reads three full
+        // tower collections per event for signal and three for background, which dominates its
+        // cost either way, and keeping it separate makes it one block to switch off
+        // (fillObjectMultiplicity) when runtime matters more than these plots.
+        if (hasObjectMultiplicity) {
+            // One object collection into its total count and its count-vs-threshold profile.
+            // Objects at or below zero are dropped — the emulator's own threshold-0 behaviour, and
+            // what removes the E_T = 0 placeholders SoftKiller leaves in the tower collection.
+            // The total is clamped into the axis at both ends: the top because the collection can
+            // outrun it, the bottom because the log tower axis starts at kTowerMultAxisMin.
+            //
+            // The per-threshold counts are built by histogramming the objects into step-wide
+            // buckets once and then running a suffix sum, rather than rescanning the collection
+            // for each of the 21 tower thresholds — the difference between one pass over 6400
+            // towers and twenty-one of them, per event, per variant.
+            // h2Thr is optional (towers only) and holds the full count distribution per threshold,
+            // which the percentile curves are read off.
+            std::vector<double> thrCounts;   // reused across events to avoid reallocating
+            auto fillMultiplicity = [&thrCounts](TH1F* hCount, TProfile* pThr, TH2D* h2Thr,
+                                                 int nThrPts, double thrStep,
+                                                 const std::vector<double>* etValues, double w) {
+                if (!hCount || !pThr || !etValues) return;
+                thrCounts.assign(nThrPts, 0.0);
+                int n = 0;
+                for (double et : *etValues) {
+                    if (et <= 0.0) continue;
+                    n++;
+                    // Bucket index of the highest threshold this object still clears.
+                    int k = (int)(et / thrStep);
+                    if (k >= nThrPts) k = nThrPts - 1;   // above the last threshold: clears all
+                    thrCounts[k] += 1.0;
+                }
+                // Suffix sum: count above threshold k is everything in bucket k and beyond.
+                for (int k = nThrPts - 2; k >= 0; --k) thrCounts[k] += thrCounts[k + 1];
+                for (int k = 0; k < nThrPts; ++k) pThr->Fill(k * thrStep, thrCounts[k], w);
+                if (h2Thr) {
+                    const double cntMax = h2Thr->GetYaxis()->GetXmax();
+                    for (int k = 0; k < nThrPts; ++k)
+                        h2Thr->Fill(k * thrStep, std::min(thrCounts[k], cntMax - 1e-9), w);
+                }
+
+                const double lo = hCount->GetXaxis()->GetXmin();
+                const double hi = hCount->GetXaxis()->GetXmax();
+                hCount->Fill(std::min(std::max((double)n, lo), hi - 1e-9), w);
+            };
+
+            TStopwatch swMult; swMult.Start();
+            std::cout << "  Object-multiplicity pass: " << nSig << " signal / " << nBack
+                      << " background events\n" << std::flush;
+            for (unsigned int iEvt = 0; iEvt < nSig; iEvt++) {
+                if (printIOProgress && iEvt > 0 && iEvt % progressEvery == 0) {
+                    std::cout << "  multiplicity (signal) " << iEvt << "/" << nSig
+                              << " (" << swMult.RealTime() << " s)\n" << std::flush;
+                    swMult.Continue();
+                }
+                for (int iV = 0; iV < nPUSup; ++iV) {
+                    if (!hasMultVariant[iV]) continue;
+                    multJetTreeSig[iV]->GetEntry(iEvt);
+                    multTowerTreeSig[iV]->GetEntry(iEvt);
+                    fillMultiplicity(sig_h_nJetsMult[iV],   sig_prof_nJetsVsThr[iV],   sig_h2_nJetsVsThr[iV],
+                                     nJetThrPts,   jetThrStep,   *multJetEtSig[iV],   1.0);
+                    fillMultiplicity(sig_h_nTowersMult[iV], sig_prof_nTowersVsThr[iV], sig_h2_nTowersVsThr[iV],
+                                     nTowerThrPts, towerThrStep, *multTowerEtSig[iV], 1.0);
+                }
+            }
+            swMult.Start();
+            for (unsigned int iEvt = 0; iEvt < nBack; iEvt++) {
+                if (printIOProgress && iEvt > 0 && iEvt % progressEvery == 0) {
+                    std::cout << "  multiplicity (background) " << iEvt << "/" << nBack
+                              << " (" << swMult.RealTime() << " s)\n" << std::flush;
+                    swMult.Continue();
+                }
+                eventInfoTreeBack->GetEntry(iEvt);
+                if (applyHSTPFilter && !passHSTPValuesBack) continue;
+                if (!eventWeightsValuesBack || eventWeightsValuesBack->empty()) continue;
+                const double w = eventWeightsValuesBack->at(0);
+                for (int iV = 0; iV < nPUSup; ++iV) {
+                    if (!hasMultVariant[iV]) continue;
+                    multJetTreeBack[iV]->GetEntry(iEvt);
+                    multTowerTreeBack[iV]->GetEntry(iEvt);
+                    fillMultiplicity(back_h_nJetsMult[iV],   back_prof_nJetsVsThr[iV],   back_h2_nJetsVsThr[iV],
+                                     nJetThrPts,   jetThrStep,   *multJetEtBack[iV],   w);
+                    fillMultiplicity(back_h_nTowersMult[iV], back_prof_nTowersVsThr[iV], back_h2_nTowersVsThr[iV],
+                                     nTowerThrPts, towerThrStep, *multTowerEtBack[iV], w);
+                }
+            }
+            // Bin 1 of each profile is the threshold-0 point: the mean count over the whole
+            // collection.
+            for (int iV = 0; iV < nPUSup; ++iV) {
+                if (!hasMultVariant[iV]) continue;
+                printf("  [multiplicity] %-5s  <N_jets> sig/bkg = %.2f / %.2f,"
+                       "  <N_towers> sig/bkg = %.0f / %.0f   (E_T > 0)\n", puSupShort[iV],
+                       sig_prof_nJetsVsThr[iV]->GetBinContent(1),
+                       back_prof_nJetsVsThr[iV]->GetBinContent(1),
+                       sig_prof_nTowersVsThr[iV]->GetBinContent(1),
+                       back_prof_nTowersVsThr[iV]->GetBinContent(1));
+            }
+        }
+
         // --- Compute efficiencies via binomial division ---
         auto makeEff = [&](TH1F* num, const std::string& name) -> TH1F* {
             TH1F* eff = (TH1F*)num->Clone(name.c_str());
@@ -3339,6 +4946,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* eff_TotalMET_40kHz  = makeEff(h_turnOn_num_TotalMET_40kHz,  "eff_TotalMET_40kHz_" +tag);
         TH1F* eff_TotalMET_80kHz  = makeEff(h_turnOn_num_TotalMET_80kHz,  "eff_TotalMET_80kHz_" +tag);
         TH1F* eff_TotalMET_60kHz  = makeEff(h_turnOn_num_TotalMET_60kHz,  "eff_TotalMET_60kHz_" +tag);
+        TH1F* eff_GEPJwoJMET_20kHz = makeEff(h_turnOn_num_GEPJwoJMET_20kHz, "eff_GEPJwoJMET_20kHz_"+tag);
+        TH1F* eff_GEPJwoJMET_40kHz = makeEff(h_turnOn_num_GEPJwoJMET_40kHz, "eff_GEPJwoJMET_40kHz_"+tag);
+        TH1F* eff_GEPJwoJMET_80kHz = makeEff(h_turnOn_num_GEPJwoJMET_80kHz, "eff_GEPJwoJMET_80kHz_"+tag);
+        TH1F* eff_GEPJwoJMET_60kHz = makeEff(h_turnOn_num_GEPJwoJMET_60kHz, "eff_GEPJwoJMET_60kHz_"+tag);
         // Combined efficiencies
         TH1F* eff_combo_JwoJ_Jet_20kHz   = makeEff(h_turnOn_num_combo_JwoJ_Jet_20kHz,   "eff_combo_JwoJ_Jet_20kHz_"  +tag);
         TH1F* eff_combo_JwoJ_Jet_40kHz   = makeEff(h_turnOn_num_combo_JwoJ_Jet_40kHz,   "eff_combo_JwoJ_Jet_40kHz_"  +tag);
@@ -3381,6 +4992,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // denominator rather than the truth-MET one.
         TH1F* effMu[nMETTypes][nMuRates] = {};
         if (isZmumuSample) {
+            // Built for every MET type including GEP JwoJ, even on a file that does not carry
+            // it: the result is an empty efficiency rather than a null pointer, which is what
+            // the cloneDetached push below (no null guard) and the multi-file vectors need in
+            // order to stay index-parallel with zmumuLabels. Nothing is DRAWN from the JwoJ
+            // entry unless the run actually had the algorithm.
             for (int iA = 0; iA < nMETTypes; ++iA)
                 for (int iR = 0; iR < nMuRates; ++iR) {
                     TH1F* e = (TH1F*)h_turnOnMu_num[iA][iR]->Clone(
@@ -3413,10 +5029,46 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::cout << "  Labelling plots as <PU> = " << gPileup << "\n";
 
         drawOverlay(sig_h_TotalMET,        back_h_TotalMET,        "Total MET (GEP)",      "Total MET (GEP) [GeV]",          fDir + "TotalMET.pdf");
+        if (hasGEPJwoJ) {
+            drawOverlay(sig_h_GEPJwoJMET,     back_h_GEPJwoJMET,     "GEP JwoJ MET",           "GEP JwoJ MET [GeV]",           fDir + "GEPJwoJMET.pdf");
+            drawOverlay(sig_h_GEPJwoJHardMET, back_h_GEPJwoJHardMET, "GEP JwoJ hard term MET", "GEP JwoJ hard term MET [GeV]", fDir + "GEPJwoJHardMET.pdf");
+            drawOverlay(sig_h_GEPJwoJSoftMET, back_h_GEPJwoJSoftMET, "GEP JwoJ soft term MET", "GEP JwoJ soft term MET [GeV]", fDir + "GEPJwoJSoftMET.pdf");
+        }
         drawComponentOverlay(sig_h_TotalMETX, back_h_TotalMETX, "Total MET_{x} (GEP)", "Total MET_{x} (GEP) [GeV]",      fDir + "TotalMETx.pdf");
         drawComponentOverlay(sig_h_TotalMETY, back_h_TotalMETY, "Total MET_{y} (GEP)", "Total MET_{y} (GEP) [GeV]",      fDir + "TotalMETy.pdf");
         drawOverlay(sig_h_TowerMet,        back_h_TowerMet,        "Tower MET (GEP)",       "Tower MET (GEP) [GeV]",          fDir + "TowerMET.pdf");
         drawOverlay(sig_h_JetMet,          back_h_JetMet,          "Jet MET (GEP)",         "Jet MET (GEP) [GeV]",          fDir + "JetMET.pdf");
+
+        // --- The three GEP MET algorithms as distributions, on one canvas ---
+        // The three drawOverlay calls above each put ONE GEP type against background on its own
+        // canvas, which is the wrong comparison for choosing between the terms: to see that the
+        // Jet, Tower and Total spectra have to share an axis. GEP only, deliberately — the FEX
+        // algorithms have their own comparison and do not belong on a plot about GEP terms.
+        // Solid = signal, dashed = QCD dijet, one colour per term. Tower MET drops out under
+        // Overlap Removal, where it carries no meaning, as everywhere else.
+        {
+            std::vector<TH1F*> gepSigs, gepBacks;
+            std::vector<std::string> gepLbls;
+            gepSigs.push_back(sig_h_JetMet);    gepBacks.push_back(back_h_JetMet);
+            gepLbls.push_back("GEP Jet MET");
+            if (!hasOverlapRemoval) {
+                gepSigs.push_back(sig_h_TowerMet);  gepBacks.push_back(back_h_TowerMet);
+                gepLbls.push_back("GEP Tower MET");
+            }
+            gepSigs.push_back(sig_h_TotalMET);  gepBacks.push_back(back_h_TotalMET);
+            gepLbls.push_back("GEP Total MET");
+            if (hasGEPJwoJ) {
+                gepSigs.push_back(sig_h_GEPJwoJMET); gepBacks.push_back(back_h_GEPJwoJMET);
+                gepLbls.push_back("GEP JwoJ MET");
+            }
+            // Two legend columns and a taller frame: six entries of "GEP Tower MET (bkg)" length
+            // fill a one-column box that the signal spectra then run straight through, since these
+            // curves stay high across the whole axis rather than falling away to the right.
+            drawOverlayMulti(gepSigs, gepBacks, gepLbls, "GEP algorithm comparison — MET",
+                             "MET [GeV]", fDir + "MET_GEP_AlgoComparison.pdf", fileSignalName,
+                             /*nLegCols=*/2, /*yMaxScale=*/200.0);
+        }
+
         drawOverlay(sig_h_SumET,           back_h_SumET,           "GEP TOB #Sigma E_{T}",         "GEP TOB #Sigma E_{T} [GeV]",          fDir + "SumET.pdf");
         if (hasSumJetET)   drawOverlay(sig_h_SumJetET,   back_h_SumJetET,   "GEP H_{T} (Sum Jet E_{T})",    "GEP H_{T} [GeV]",                     fDir + "SumJetET.pdf");
         if (hasSumTowerET) drawOverlay(sig_h_SumTowerET, back_h_SumTowerET, "GEP Tower #Sigma E_{T}",       "GEP Tower #Sigma E_{T} [GeV]",        fDir + "SumTowerET.pdf");
@@ -3446,6 +5098,53 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawComponentOverlay(sig_h_TowerMetX, back_h_TowerMetX, "GEP Tower MET_{x}", "GEP Tower MET_{x} [GeV]", fDir + "TowerMETx.pdf");
             drawComponentOverlay(sig_h_TowerMetY, back_h_TowerMetY, "GEP Tower MET_{y}", "GEP Tower MET_{y} [GeV]", fDir + "TowerMETy.pdf");
         }
+
+        // --- The three GEP MET terms on one canvas, per component ---
+        // Total MET is the scale-factor-weighted sum of the Jet and Tower terms, so putting all
+        // three on one axis shows directly how wide each term sits and which of them sets the
+        // width of the recombination. Signal and background go on SEPARATE canvases: background is
+        // filled with the rate weights and signal is not, so one canvas would put two different
+        // normalizations side by side and invite reading across them. Tower MET drops out for
+        // Overlap Removal configs, where it carries no meaning — the same convention as the GEP
+        // algorithm-comparison plots.
+        if (hasJetMetXY && hasTowerMetXY) {
+            std::vector<TH1F*> sigX, sigY, sigP, bkgX, bkgY, bkgP;
+            std::vector<std::string> termLbls;
+            sigX.push_back(sig_h_JetMetX);   sigY.push_back(sig_h_JetMetY);   sigP.push_back(sig_h_JetMetPhi);
+            bkgX.push_back(back_h_JetMetX);  bkgY.push_back(back_h_JetMetY);  bkgP.push_back(back_h_JetMetPhi);
+            termLbls.push_back("GEP Jet MET");
+            if (!hasOverlapRemoval) {
+                sigX.push_back(sig_h_TowerMetX);   sigY.push_back(sig_h_TowerMetY);   sigP.push_back(sig_h_TowerMetPhi);
+                bkgX.push_back(back_h_TowerMetX);  bkgY.push_back(back_h_TowerMetY);  bkgP.push_back(back_h_TowerMetPhi);
+                termLbls.push_back("GEP Tower MET");
+            }
+            sigX.push_back(sig_h_TotalMETX);   sigY.push_back(sig_h_TotalMETY);   sigP.push_back(sig_h_TotalMETPhi);
+            bkgX.push_back(back_h_TotalMETX);  bkgY.push_back(back_h_TotalMETY);  bkgP.push_back(back_h_TotalMETPhi);
+            termLbls.push_back("GEP Total MET");
+
+            drawComponentMultiDist(sigX, termLbls, "GEP MET_{x} terms — signal",
+                                   "MET_{x} [GeV]", fDir + "GEP_METx_terms_sig.pdf",
+                                   /*logy=*/true, "GeV", fileSignalName);
+            drawComponentMultiDist(sigY, termLbls, "GEP MET_{y} terms — signal",
+                                   "MET_{y} [GeV]", fDir + "GEP_METy_terms_sig.pdf",
+                                   /*logy=*/true, "GeV", fileSignalName);
+            drawComponentMultiDist(sigP, termLbls, "GEP MET #phi terms — signal",
+                                   "#phi(MET) [rad]", fDir + "GEP_METphi_terms_sig.pdf",
+                                   /*logy=*/false, "rad", fileSignalName);
+            {
+                BkgProcLabel bkgProc;   // background-only canvases: label as QCD dijet
+                drawComponentMultiDist(bkgX, termLbls, "GEP MET_{x} terms — background",
+                                       "MET_{x} [GeV]", fDir + "GEP_METx_terms_bkg.pdf",
+                                       /*logy=*/true, "GeV");
+                drawComponentMultiDist(bkgY, termLbls, "GEP MET_{y} terms — background",
+                                       "MET_{y} [GeV]", fDir + "GEP_METy_terms_bkg.pdf",
+                                       /*logy=*/true, "GeV");
+                drawComponentMultiDist(bkgP, termLbls, "GEP MET #phi terms — background",
+                                       "#phi(MET) [rad]", fDir + "GEP_METphi_terms_bkg.pdf",
+                                       /*logy=*/false, "rad");
+            }
+        }
+
         // --- Per-file GEP vs gFEX MET comparison ---
         drawAlgoComparison(sig_h_TotalMET, back_h_TotalMET, sig_h_gMET, back_h_gMET,
                            "Jet Tagger (GEP)", "gFEX",
@@ -3687,6 +5386,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             if (!hasOverlapRemoval)
                 drawJZ0Comparison(back_hw_TowerMET, back_hw_TowerMET_JZ0, back_hwBin_TowerMET, "GEP Tower MET", "GEP_TowerMET");
             drawJZ0Comparison(back_hw_TotalMET, back_hw_TotalMET_JZ0, back_hwBin_TotalMET, "GEP Total MET", "GEP_TotalMET");
+            if (hasGEPJwoJ)
+                drawJZ0Comparison(back_hw_GEPJwoJMET, back_hw_GEPJwoJMET_JZ0, back_hwBin_GEPJwoJMET, "GEP JwoJ MET", "GEP_JwoJMET");
             if (hasGFexSimMET) {
                 drawJZ0Comparison(back_hw_gMET_JwoJAOD, back_hw_gMET_JwoJAOD_JZ0, back_hwBin_gMET_JwoJAOD, "gFEX JwoJ (AOD)",     "gFEX_MET_AOD");
                 drawJZ0Comparison(back_hw_gMET_NCAOD,   back_hw_gMET_NCAOD_JZ0,   back_hwBin_gMET_NCAOD,   "gFEX NoiseCut (AOD)", "gFEX_NoiseCut_MET_AOD");
@@ -3696,6 +5397,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
 
         // --- Per-file rate vs threshold plots ---
         drawRateVsThreshold(back_hw_TotalMET,  "Rate vs Emulated MET threshold",          "MET threshold [GeV]", fDir + "Rate_TotalMET.pdf");
+        if (hasGEPJwoJ)
+            drawRateVsThreshold(back_hw_GEPJwoJMET, "Rate vs GEP JwoJ MET threshold",     "MET threshold [GeV]", fDir + "Rate_GEPJwoJMET.pdf");
         drawRateVsThreshold(back_hw_gMET,      "Rate vs gFEX MET threshold (JwoJ)",       "MET threshold [GeV]", fDir + "Rate_gFEX_MET_JwoJ.pdf");
         drawRateVsThreshold(back_hw_gMET_NC,   "Rate vs gFEX MET threshold (NoiseCut)",   "MET threshold [GeV]", fDir + "Rate_gFEX_MET_NoiseCut.pdf");
         drawRateVsThreshold(back_hw_gMET_Rms,  "Rate vs gFEX MET threshold (Rms)",        "MET threshold [GeV]", fDir + "Rate_gFEX_MET_Rms.pdf");
@@ -3715,6 +5418,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> effLabels = hasOverlapRemoval
                 ? std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
+            if (hasGEPJwoJ) { effHists.push_back(sig_h_GEPJwoJMET); effLabels.push_back("GEP JwoJ MET"); }
             drawEffVsThresholdMulti(effHists, effLabels,
                                     "Signal Efficiency vs MET Threshold", "MET threshold [GeV]",
                                     fDir + "SigEff_vs_Threshold_AlgoComparison.pdf", "");
@@ -3731,6 +5435,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> gepL = hasOverlapRemoval
                 ? std::vector<std::string>{"GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
+            if (hasGEPJwoJ) { gepHists.push_back(sig_h_GEPJwoJMET); gepL.push_back("GEP JwoJ MET"); }
             drawEffVsThresholdMulti(gepHists, gepL,
                                     "Signal Efficiency vs GEP MET Threshold", "MET threshold [GeV]",
                                     fDir + "SigEff_vs_Threshold_GEP_AlgoComparison.pdf", "");
@@ -3822,6 +5527,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawTOBvsTruth(sig_h2_JetMET_TOBMet_vs_truthMET,   calDir + "sig_GEP_JetMET_TOBMet_vs_truthMET.pdf",   "GEP Jet");
             drawTOBvsTruth(sig_h2_TowerMET_TOBMet_vs_truthMET, calDir + "sig_GEP_TowerMET_TOBMet_vs_truthMET.pdf", "GEP Tower");
             drawTOBvsTruth(sig_h2_TotalMET_TOBMet_vs_truthMET, calDir + "sig_GEP_TotalMET_TOBMet_vs_truthMET.pdf", "GEP Total");
+            if (hasGEPJwoJ)
+                drawTOBvsTruth(sig_h2_GEPJwoJMET_TOBMet_vs_truthMET, calDir + "sig_GEP_JwoJMET_TOBMet_vs_truthMET.pdf", "GEP JwoJ");
             // Background (lower z-floor to show high-MET tails; x capped at 300 GeV)
             {
             BkgProcLabel bkgProcCal;   // background calibration plots
@@ -3831,6 +5538,80 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawTOBvsTruth(back_h2_JetMET_TOBMet_vs_truthMET,   calDir + "back_GEP_JetMET_TOBMet_vs_truthMET.pdf",   "GEP Jet",      1e-14, 300.0);
             drawTOBvsTruth(back_h2_TowerMET_TOBMet_vs_truthMET, calDir + "back_GEP_TowerMET_TOBMet_vs_truthMET.pdf", "GEP Tower",    1e-14, 300.0);
             drawTOBvsTruth(back_h2_TotalMET_TOBMet_vs_truthMET, calDir + "back_GEP_TotalMET_TOBMet_vs_truthMET.pdf", "GEP Total",    1e-14, 300.0);
+            if (hasGEPJwoJ)
+                drawTOBvsTruth(back_h2_GEPJwoJMET_TOBMet_vs_truthMET, calDir + "back_GEP_JwoJMET_TOBMet_vs_truthMET.pdf", "GEP JwoJ", 1e-14, 300.0);
+            }
+
+            // --- GEP JwoJ: pairwise MET-vs-MET comparison ---
+            // Every unordered pair of the comparison MET types, signal and background, each with
+            // a linear fit to the profile and the slope-1 line to read it against. Same drawing
+            // recipe as drawTOBvsTruth above, but with a trigger MET on BOTH axes rather than
+            // truth on x: what is being read off is how two algorithms track each other, so the
+            // fitted slope is a relative energy scale and the scatter about it is the extent to
+            // which one could stand in for the other.
+            //
+            // Both axes are clamped into range at fill time, the same way the combined-selection
+            // 2D histograms above are, so the last row and last column each carry the whole tail
+            // piled into one bin rather than losing it to overflow. Nothing is outside the axes,
+            // so the profile and the fit see every event — but the two edge bins sit at a
+            // position the events in them do not really have, which is worth remembering before
+            // reading a slope as a calibration.
+            if (hasGEPJwoJ) {
+                std::string cmpDir = fDir + "JwoJComparison/";
+                gSystem->mkdir(cmpDir.c_str(), true);
+
+                auto drawMETvsMET = [&](TH2F* h, const std::string& path,
+                                        const std::string& xLabel, const std::string& yLabel,
+                                        double zmin) {
+                    if (!h || h->Integral() <= 0) return;
+                    h->Scale(1.0 / h->Integral());
+                    h->SetMinimum(zmin);
+                    h->GetXaxis()->SetTitle((xLabel + " [GeV]").c_str());
+                    h->GetYaxis()->SetTitle((yLabel + " [GeV]").c_str());
+                    TCanvas cTmp(("cCmp2D_"+std::string(h->GetName())).c_str(), "", 700, 600);
+                    cTmp.SetLogz();
+                    cTmp.SetRightMargin(0.15); cTmp.SetLeftMargin(0.14);
+                    cTmp.SetBottomMargin(0.14); cTmp.SetTicks(1, 1);
+                    h->Draw("COLZ");
+                    const double xmax = h->GetXaxis()->GetXmax();
+                    const double ymax = h->GetYaxis()->GetXmax();
+                    const double r    = h->GetCorrelationFactor(1, 2);
+                    TProfile* prof = h->ProfileX((std::string(h->GetName())+"_pfx").c_str(), 1, -1, "s");
+                    prof->SetMarkerStyle(20); prof->SetMarkerSize(0.5);
+                    prof->SetMarkerColor(kBlack); prof->SetLineColor(kBlack);
+                    TF1* fitFn = new TF1((std::string("lf_")+h->GetName()).c_str(), "pol1", 0, xmax);
+                    prof->Fit(fitFn, "QN");
+                    const double slope = fitFn->GetParameter(1), intercept = fitFn->GetParameter(0);
+                    fitFn->SetLineColor(kP10Blue); fitFn->SetLineWidth(2);
+                    fitFn->Draw("SAME"); prof->Draw("SAME");
+                    const double rng = std::min(xmax, ymax);
+                    TLine* diag = new TLine(0, 0, rng, rng);
+                    diag->SetLineColor(kP10Red); diag->SetLineStyle(2); diag->SetLineWidth(2);
+                    diag->Draw("SAME");
+                    TLegend leg(0.16, 0.62, 0.61, 0.88);
+                    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
+                    leg.AddEntry(diag,  "Slope = 1", "l");
+                    leg.AddEntry(fitFn, Form("Fit: y = %.3f x + %.1f GeV", slope, intercept), "l");
+                    leg.AddEntry((TObject*)nullptr, Form("r = %.4f", r), "");
+                    leg.Draw();
+                    cTmp.cd(); DrawATLASLabel(); cTmp.SaveAs(path.c_str());
+                    delete prof; delete fitFn;
+                };
+
+                for (int i = 0; i < nCmp2DTypes; ++i) {
+                    for (int j = i + 1; j < nCmp2DTypes; ++j) {
+                        const std::string xLbl = metTypeLabel[cmp2DTypeIdx[i]];
+                        const std::string yLbl = metTypeLabel[cmp2DTypeIdx[j]];
+                        const std::string stem = std::string(metTypeShort[cmp2DTypeIdx[j]]) + "_vs_"
+                                               + metTypeShort[cmp2DTypeIdx[i]] + ".pdf";
+                        drawMETvsMET(sig_h2_cmp[i][j],  cmpDir + "sig_"  + stem, xLbl, yLbl, 1e-5);
+                        {
+                            BkgProcLabel bkgProcCmp;   // background-only plot
+                            drawMETvsMET(back_h2_cmp[i][j], cmpDir + "back_" + stem, xLbl, yLbl, 1e-8);
+                        }
+                    }
+                }
+                std::cout << "  GEP JwoJ pairwise MET comparisons written to " << cmpDir << "\n";
             }
 
             // 1D residual distributions, individual and overlaid
@@ -4032,6 +5813,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> rateLabels = hasOverlapRemoval
                 ? std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
+            if (hasGEPJwoJ) { rateHists.push_back(back_hw_GEPJwoJMET); rateLabels.push_back("GEP JwoJ MET"); }
             drawRateVsThresholdMulti(rateHists, rateLabels,
                                      "Rate vs MET threshold", "MET threshold [GeV]",
                                      fDir + "Rate_AlgoComparison.pdf", "",
@@ -4046,6 +5828,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> rateLabels = hasOverlapRemoval
                 ? std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
+            if (hasGEPJwoJ) { rateHists.push_back(back_hw_GEPJwoJMET); rateLabels.push_back("GEP JwoJ MET"); }
             drawRateVsThresholdMulti(rateHists, rateLabels,
                                      "Rate vs MET threshold", "MET threshold [GeV]",
                                      fDir + "Rate_AlgoComparison_kHz_200GeV.pdf", "",
@@ -4068,6 +5851,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> rateLabels = hasOverlapRemoval
                 ? std::vector<std::string>{"GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
+            if (hasGEPJwoJ) { rateHists.push_back(back_hw_GEPJwoJMET); rateLabels.push_back("GEP JwoJ MET"); }
             drawRateVsThresholdMulti(rateHists, rateLabels,
                                      "Rate vs GEP MET threshold", "MET threshold [GeV]",
                                      fDir + "Rate_GEP_AlgoComparison.pdf", "",
@@ -4078,39 +5862,49 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::vector<std::string> allTOLabels = hasOverlapRemoval
             ? std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Total MET"}
             : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
-        auto allTOEffs = [&](TH1F* g, TH1F* gNC, TH1F* gRms, TH1F* j, TH1F* jet, TH1F* tower, TH1F* total) {
-            return hasOverlapRemoval
+        // GEP JwoJ takes a trailing slot on each of these rather than a position inside them, so
+        // the existing curve order -- and so the colour each existing algorithm is drawn in -- is
+        // unchanged for a run without it.
+        if (hasGEPJwoJ) allTOLabels.push_back("GEP JwoJ MET");
+        auto allTOEffs = [&](TH1F* g, TH1F* gNC, TH1F* gRms, TH1F* j, TH1F* jet, TH1F* tower, TH1F* total,
+                             TH1F* jwoj = nullptr) {
+            std::vector<TH1F*> v = hasOverlapRemoval
                 ? std::vector<TH1F*>{g, gNC, gRms, j, jet, total}
                 : std::vector<TH1F*>{g, gNC, gRms, j, jet, tower, total};
+            if (hasGEPJwoJ && jwoj) v.push_back(jwoj);
+            return v;
         };
-        auto allTOThrs = [&](double g, double gNC, double gRms, double j, double jet, double tower, double total) {
-            return hasOverlapRemoval
+        auto allTOThrs = [&](double g, double gNC, double gRms, double j, double jet, double tower, double total,
+                             double jwoj = 0.0) {
+            std::vector<double> v = hasOverlapRemoval
                 ? std::vector<double>{g, gNC, gRms, j, jet, total}
                 : std::vector<double>{g, gNC, gRms, j, jet, tower, total};
+            if (hasGEPJwoJ) v.push_back(jwoj);
+            return v;
         };
         drawTurnOnOverlay(
-            allTOEffs(eff_gMET_20kHz, eff_gMET_NC_20kHz, eff_gMET_Rms_20kHz, eff_jMET_20kHz, eff_JetMET_20kHz, eff_TowerMET_20kHz, eff_TotalMET_20kHz),
+            allTOEffs(eff_gMET_20kHz, eff_gMET_NC_20kHz, eff_gMET_Rms_20kHz, eff_jMET_20kHz, eff_JetMET_20kHz, eff_TowerMET_20kHz, eff_TotalMET_20kHz, eff_GEPJwoJMET_20kHz),
             allTOLabels,
             "Turn-on at 20 kHz", fDir + "TurnOn_20kHz.pdf",
-            allTOThrs(thr_gMET_20kHz, thr_gMET_NC_20kHz, thr_gMET_Rms_20kHz, thr_jMET_20kHz, thr_JetMET_20kHz, thr_TowerMET_20kHz, thr_TotalMET_20kHz),
+            allTOThrs(thr_gMET_20kHz, thr_gMET_NC_20kHz, thr_gMET_Rms_20kHz, thr_jMET_20kHz, thr_JetMET_20kHz, thr_TowerMET_20kHz, thr_TotalMET_20kHz, thr_GEPJwoJMET_20kHz),
             "Rate = 20 kHz", sig_h_metTruthNonInt_coarse);
         drawTurnOnOverlay(
-            allTOEffs(eff_gMET_40kHz, eff_gMET_NC_40kHz, eff_gMET_Rms_40kHz, eff_jMET_40kHz, eff_JetMET_40kHz, eff_TowerMET_40kHz, eff_TotalMET_40kHz),
+            allTOEffs(eff_gMET_40kHz, eff_gMET_NC_40kHz, eff_gMET_Rms_40kHz, eff_jMET_40kHz, eff_JetMET_40kHz, eff_TowerMET_40kHz, eff_TotalMET_40kHz, eff_GEPJwoJMET_40kHz),
             allTOLabels,
             "Turn-on at 40 kHz", fDir + "TurnOn_40kHz.pdf",
-            allTOThrs(thr_gMET_40kHz, thr_gMET_NC_40kHz, thr_gMET_Rms_40kHz, thr_jMET_40kHz, thr_JetMET_40kHz, thr_TowerMET_40kHz, thr_TotalMET_40kHz),
+            allTOThrs(thr_gMET_40kHz, thr_gMET_NC_40kHz, thr_gMET_Rms_40kHz, thr_jMET_40kHz, thr_JetMET_40kHz, thr_TowerMET_40kHz, thr_TotalMET_40kHz, thr_GEPJwoJMET_40kHz),
             "Rate = 40 kHz", sig_h_metTruthNonInt_coarse);
         drawTurnOnOverlay(
-            allTOEffs(eff_gMET_80kHz, eff_gMET_NC_80kHz, eff_gMET_Rms_80kHz, eff_jMET_80kHz, eff_JetMET_80kHz, eff_TowerMET_80kHz, eff_TotalMET_80kHz),
+            allTOEffs(eff_gMET_80kHz, eff_gMET_NC_80kHz, eff_gMET_Rms_80kHz, eff_jMET_80kHz, eff_JetMET_80kHz, eff_TowerMET_80kHz, eff_TotalMET_80kHz, eff_GEPJwoJMET_80kHz),
             allTOLabels,
             "Turn-on at 80 kHz", fDir + "TurnOn_80kHz.pdf",
-            allTOThrs(thr_gMET_80kHz, thr_gMET_NC_80kHz, thr_gMET_Rms_80kHz, thr_jMET_80kHz, thr_JetMET_80kHz, thr_TowerMET_80kHz, thr_TotalMET_80kHz),
+            allTOThrs(thr_gMET_80kHz, thr_gMET_NC_80kHz, thr_gMET_Rms_80kHz, thr_jMET_80kHz, thr_JetMET_80kHz, thr_TowerMET_80kHz, thr_TotalMET_80kHz, thr_GEPJwoJMET_80kHz),
             "Rate = 80 kHz", sig_h_metTruthNonInt_coarse, 0.52);
         drawTurnOnOverlay(
-            allTOEffs(eff_gMET_60kHz, eff_gMET_NC_60kHz, eff_gMET_Rms_60kHz, eff_jMET_60kHz, eff_JetMET_60kHz, eff_TowerMET_60kHz, eff_TotalMET_60kHz),
+            allTOEffs(eff_gMET_60kHz, eff_gMET_NC_60kHz, eff_gMET_Rms_60kHz, eff_jMET_60kHz, eff_JetMET_60kHz, eff_TowerMET_60kHz, eff_TotalMET_60kHz, eff_GEPJwoJMET_60kHz),
             allTOLabels,
             "Turn-on at 60 kHz", fDir + "TurnOn_60kHz.pdf",
-            allTOThrs(thr_gMET_60kHz, thr_gMET_NC_60kHz, thr_gMET_Rms_60kHz, thr_jMET_60kHz, thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz),
+            allTOThrs(thr_gMET_60kHz, thr_gMET_NC_60kHz, thr_gMET_Rms_60kHz, thr_jMET_60kHz, thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz, thr_GEPJwoJMET_60kHz),
             "Rate = 60 kHz", sig_h_metTruthNonInt_coarse, 0.52);
         // gFEX-only algorithm comparison turn-ons
         drawTurnOnOverlay(
@@ -4141,39 +5935,44 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::vector<std::string> gepTOLabels = hasOverlapRemoval
             ? std::vector<std::string>{"GEP Jet MET", "GEP Total MET"}
             : std::vector<std::string>{"GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
-        auto gepTOEffs = [&](TH1F* jet, TH1F* tower, TH1F* total) {
-            return hasOverlapRemoval
+        if (hasGEPJwoJ) gepTOLabels.push_back("GEP JwoJ MET");
+        auto gepTOEffs = [&](TH1F* jet, TH1F* tower, TH1F* total, TH1F* jwoj = nullptr) {
+            std::vector<TH1F*> v = hasOverlapRemoval
                 ? std::vector<TH1F*>{jet, total}
                 : std::vector<TH1F*>{jet, tower, total};
+            if (hasGEPJwoJ && jwoj) v.push_back(jwoj);
+            return v;
         };
-        auto gepTOThrs = [&](double jet, double tower, double total) {
-            return hasOverlapRemoval
+        auto gepTOThrs = [&](double jet, double tower, double total, double jwoj = 0.0) {
+            std::vector<double> v = hasOverlapRemoval
                 ? std::vector<double>{jet, total}
                 : std::vector<double>{jet, tower, total};
+            if (hasGEPJwoJ) v.push_back(jwoj);
+            return v;
         };
         drawTurnOnOverlay(
-            gepTOEffs(eff_JetMET_20kHz, eff_TowerMET_20kHz, eff_TotalMET_20kHz),
+            gepTOEffs(eff_JetMET_20kHz, eff_TowerMET_20kHz, eff_TotalMET_20kHz, eff_GEPJwoJMET_20kHz),
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 20 kHz", fDir + "TurnOn_GEP_AlgoComparison_20kHz.pdf",
-            gepTOThrs(thr_JetMET_20kHz, thr_TowerMET_20kHz, thr_TotalMET_20kHz), "Rate = 20 kHz",
+            gepTOThrs(thr_JetMET_20kHz, thr_TowerMET_20kHz, thr_TotalMET_20kHz, thr_GEPJwoJMET_20kHz), "Rate = 20 kHz",
             sig_h_metTruthNonInt_coarse);
         drawTurnOnOverlay(
-            gepTOEffs(eff_JetMET_40kHz, eff_TowerMET_40kHz, eff_TotalMET_40kHz),
+            gepTOEffs(eff_JetMET_40kHz, eff_TowerMET_40kHz, eff_TotalMET_40kHz, eff_GEPJwoJMET_40kHz),
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 40 kHz", fDir + "TurnOn_GEP_AlgoComparison_40kHz.pdf",
-            gepTOThrs(thr_JetMET_40kHz, thr_TowerMET_40kHz, thr_TotalMET_40kHz), "Rate = 40 kHz",
+            gepTOThrs(thr_JetMET_40kHz, thr_TowerMET_40kHz, thr_TotalMET_40kHz, thr_GEPJwoJMET_40kHz), "Rate = 40 kHz",
             sig_h_metTruthNonInt_coarse);
         drawTurnOnOverlay(
-            gepTOEffs(eff_JetMET_80kHz, eff_TowerMET_80kHz, eff_TotalMET_80kHz),
+            gepTOEffs(eff_JetMET_80kHz, eff_TowerMET_80kHz, eff_TotalMET_80kHz, eff_GEPJwoJMET_80kHz),
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 80 kHz", fDir + "TurnOn_GEP_AlgoComparison_80kHz.pdf",
-            gepTOThrs(thr_JetMET_80kHz, thr_TowerMET_80kHz, thr_TotalMET_80kHz), "Rate = 80 kHz",
+            gepTOThrs(thr_JetMET_80kHz, thr_TowerMET_80kHz, thr_TotalMET_80kHz, thr_GEPJwoJMET_80kHz), "Rate = 80 kHz",
             sig_h_metTruthNonInt_coarse);
         drawTurnOnOverlay(
-            gepTOEffs(eff_JetMET_60kHz, eff_TowerMET_60kHz, eff_TotalMET_60kHz),
+            gepTOEffs(eff_JetMET_60kHz, eff_TowerMET_60kHz, eff_TotalMET_60kHz, eff_GEPJwoJMET_60kHz),
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 60 kHz", fDir + "TurnOn_GEP_AlgoComparison_60kHz.pdf",
-            gepTOThrs(thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz), "Rate = 60 kHz",
+            gepTOThrs(thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz, thr_GEPJwoJMET_60kHz), "Rate = 60 kHz",
             sig_h_metTruthNonInt_coarse);
         // jFEX-only turn-ons: a single clean curve per rate point, for when jFEX is the reference
         // being quoted on its own rather than read off one of the comparison canvases.
@@ -4222,8 +6021,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             // Which MET types go on the overlays: all of them, minus Tower MET for OR configs
             // where it carries no meaning (same convention as the GEP comparison plots above).
             std::vector<int> muIdx;
-            for (int iA = 0; iA < nMETTypes; ++iA)
-                if (!(hasOverlapRemoval && iA == towerMETTypeIdx)) muIdx.push_back(iA);
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx)     continue;
+                muIdx.push_back(iA);
+            }
             for (int iR = 0; iR < nMuRates; ++iR) {
                 std::vector<TH1F*>       effs, gepEffs, l1Effs;
                 std::vector<std::string> lbls, gepLbls, l1Lbls;
@@ -4287,12 +6089,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> allLbls,   gepLbls,   l1Lbls;
             for (int iA = 0; iA < nMETTypes; ++iA) {
                 if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
                 allProfs.push_back(back_prof_METvsNJets[iA]);
                 allLbls.push_back(metTypeLabel[iA]);
             }
             for (int g = 0; g < nGEPMETTypes; ++g) {
                 const int iA = gepMETTypeIdx[g];
                 if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
                 gepProfs.push_back(back_prof_METvsNJets[iA]);
                 gepLbls.push_back(metTypeLabel[iA]);
             }
@@ -4307,6 +6111,147 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                                fDir + "MET_vs_NJets_GEP_bkg.pdf", back_h_NJets);
             drawProfileOverlay(l1Profs, l1Lbls, nJetXLabel, "#LTMET#GT [GeV]",
                                fDir + "MET_vs_NJets_L1Calo_bkg.pdf", back_h_NJets);
+        }
+
+        // --- Background <MET> vs trigger-jet multiplicity ---
+        // Same three canvases against the trigger's own jets, to be read against the truth-jet
+        // ones above: a trend that holds in both is one a jet-multiplicity term in the MET
+        // selection could be built on, since the trigger has this count and not the truth one.
+        if (hasTrigJets) {
+            BkgProcLabel bkgProc;   // background-only plot
+            const std::string nTrigJetXLabel =
+                std::string("N_{GEP jets} (WTA cone, ") + puSupLabel[trigJetPUSupIdx] + ", no E_{T} cut)";
+            std::vector<TProfile*>   allProfs,  gepProfs,  l1Profs;
+            std::vector<std::string> allLbls,   gepLbls,   l1Lbls;
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                allProfs.push_back(back_prof_METvsNTrigJets[iA]);
+                allLbls.push_back(metTypeLabel[iA]);
+            }
+            for (int g = 0; g < nGEPMETTypes; ++g) {
+                const int iA = gepMETTypeIdx[g];
+                if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                gepProfs.push_back(back_prof_METvsNTrigJets[iA]);
+                gepLbls.push_back(metTypeLabel[iA]);
+            }
+            for (int l = 0; l < nL1CaloMETTypes; ++l) {
+                const int iA = l1caloMETTypeIdx[l];
+                l1Profs.push_back(back_prof_METvsNTrigJets[iA]);
+                l1Lbls.push_back(metTypeLabel[iA]);
+            }
+            drawProfileOverlay(allProfs, allLbls, nTrigJetXLabel, "#LTMET#GT [GeV]",
+                               fDir + "MET_vs_NTrigJets_AllAlgos_bkg.pdf", back_h_NTrigJets);
+            drawProfileOverlay(gepProfs, gepLbls, nTrigJetXLabel, "#LTMET#GT [GeV]",
+                               fDir + "MET_vs_NTrigJets_GEP_bkg.pdf", back_h_NTrigJets);
+            drawProfileOverlay(l1Profs, l1Lbls, nTrigJetXLabel, "#LTMET#GT [GeV]",
+                               fDir + "MET_vs_NTrigJets_L1Calo_bkg.pdf", back_h_NTrigJets);
+        }
+
+        // --- Signal <MET> vs trigger-jet multiplicity ---
+        // The signal counterpart of the three canvases above, same groupings and same x binning.
+        if (hasTrigJetsSig) {
+            const std::string nTrigJetXLabel =
+                std::string("N_{GEP jets} (WTA cone, ") + puSupLabel[trigJetPUSupIdx] + ", no E_{T} cut)";
+            std::vector<TProfile*>   allProfs,  gepProfs,  l1Profs;
+            std::vector<std::string> allLbls,   gepLbls,   l1Lbls;
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                allProfs.push_back(sig_prof_METvsNTrigJets[iA]);
+                allLbls.push_back(metTypeLabel[iA]);
+            }
+            for (int g = 0; g < nGEPMETTypes; ++g) {
+                const int iA = gepMETTypeIdx[g];
+                if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                gepProfs.push_back(sig_prof_METvsNTrigJets[iA]);
+                gepLbls.push_back(metTypeLabel[iA]);
+            }
+            for (int l = 0; l < nL1CaloMETTypes; ++l) {
+                const int iA = l1caloMETTypeIdx[l];
+                l1Profs.push_back(sig_prof_METvsNTrigJets[iA]);
+                l1Lbls.push_back(metTypeLabel[iA]);
+            }
+            drawProfileOverlay(allProfs, allLbls, nTrigJetXLabel, "#LTMET#GT [GeV]",
+                               fDir + "MET_vs_NTrigJets_AllAlgos_sig.pdf", sig_h_NTrigJets);
+            drawProfileOverlay(gepProfs, gepLbls, nTrigJetXLabel, "#LTMET#GT [GeV]",
+                               fDir + "MET_vs_NTrigJets_GEP_sig.pdf", sig_h_NTrigJets);
+            drawProfileOverlay(l1Profs, l1Lbls, nTrigJetXLabel, "#LTMET#GT [GeV]",
+                               fDir + "MET_vs_NTrigJets_L1Calo_sig.pdf", sig_h_NTrigJets);
+
+            // --- Signal vs background, one canvas per MET flavour, with a sig/bkg ratio panel ---
+            // The plot an N-jet dependent MET threshold is actually read off: where the ratio
+            // falls with jet multiplicity, a threshold that rises with it separates better than a
+            // flat one. Needs both sets of profiles, so it is guarded on both flags.
+            if (hasTrigJets) {
+                for (int iA = 0; iA < nMETTypes; ++iA) {
+                    if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                    if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                    drawProfileSigBkgRatio(sig_prof_METvsNTrigJets[iA],
+                                           back_prof_METvsNTrigJets[iA],
+                                           gProcLabel.empty() ? std::string("Signal") : gProcLabel,
+                                           kBkgProcLabel,
+                                           nTrigJetXLabel, "#LTMET#GT [GeV]",
+                                           metTypeLabel[iA],
+                                           fDir + "MET_vs_NTrigJets_" + metTypeShort[iA]
+                                               + "_SigVsBkg_ratio.pdf",
+                                           back_h_NTrigJets);
+                }
+            }
+        }
+
+        // --- GEP input-object multiplicity: No SK vs SK vs EtaSK ---
+        // Four canvases, each carrying all three pileup-suppression variants for signal (solid)
+        // and background (dashed): the total jet and tower counts, and how the average of each
+        // falls as an E_T threshold is raised — which is the plot a jetEt / towerEt threshold is
+        // chosen off. Read from the input ntuple, so identical for every emulator config of this
+        // process and pileup; they are written per config anyway so each config directory is
+        // self-contained.
+        if (hasObjectMultiplicity) {
+            const std::string multDir = fDir + "Multiplicity/";
+            gSystem->mkdir(multDir.c_str(), true);
+            std::vector<TH1F*>         sJet, bJet, sTow, bTow;
+            std::vector<TGraphErrors*> sJetG, bJetG, sTowG, bTowG;
+            std::vector<TGraph*>       sTowP, bTowP;   // percentile companions (towers)
+            std::vector<TGraph*>       sJetP, bJetP;   // percentile companions (jets)
+            std::vector<std::string>   vLbls;
+            for (int iV = 0; iV < nPUSup; ++iV) {
+                if (!hasMultVariant[iV]) continue;
+                vLbls.push_back(puSupLabel[iV]);
+                sJet.push_back(sig_h_nJetsMult[iV]);    bJet.push_back(back_h_nJetsMult[iV]);
+                sTow.push_back(sig_h_nTowersMult[iV]);  bTow.push_back(back_h_nTowersMult[iV]);
+                sJetG.push_back(makeMultVsThresholdGraph(sig_prof_nJetsVsThr[iV],    kBlack));
+                bJetG.push_back(makeMultVsThresholdGraph(back_prof_nJetsVsThr[iV],   kBlack));
+                sTowG.push_back(makeMultVsThresholdGraph(sig_prof_nTowersVsThr[iV],  kBlack));
+                bTowG.push_back(makeMultVsThresholdGraph(back_prof_nTowersVsThr[iV], kBlack));
+                sTowP.push_back(makeMultPercentileGraph(sig_h2_nTowersVsThr[iV],  kMultPercentile, kBlack));
+                bTowP.push_back(makeMultPercentileGraph(back_h2_nTowersVsThr[iV], kMultPercentile, kBlack));
+                sJetP.push_back(makeMultPercentileGraph(sig_h2_nJetsVsThr[iV],    kMultPercentile, kBlack));
+                bJetP.push_back(makeMultPercentileGraph(back_h2_nJetsVsThr[iV],   kMultPercentile, kBlack));
+            }
+            drawMultiplicityOverlay(sJet, bJet, vLbls, "GEP jet multiplicity",
+                                    "N_{GEP jets} (E_{T} > 0)",
+                                    multDir + "NJets.pdf", /*logx=*/false, fileSignalName);
+            drawMultiplicityOverlay(sTow, bTow, vLbls, "GEP tower multiplicity",
+                                    "N_{GEP towers} (E_{T} > 0)",
+                                    multDir + "NTowers.pdf", /*logx=*/true, fileSignalName);
+            drawMultVsThresholdOverlay(sJetG, bJetG, vLbls, "GEP jet multiplicity vs threshold",
+                                       "Jet E_{T} threshold [GeV]", "#LTN_{GEP jets}#GT",
+                                       multDir + "NJets_vs_Threshold.pdf", jetThrMax,
+                                       /*logy=*/false, kJetMultThrYMax, fileSignalName,
+                                       sJetP, bJetP,
+                                       Form("dotted: %.0fth percentile", kMultPercentile * 100.0));
+            drawMultVsThresholdOverlay(sTowG, bTowG, vLbls, "GEP tower multiplicity vs threshold",
+                                       "Tower E_{T} threshold [GeV]", "#LTN_{GEP towers}#GT",
+                                       multDir + "NTowers_vs_Threshold.pdf", towerThrMax,
+                                       /*logy=*/true, kTowerMultThrYMax, fileSignalName,
+                                       sTowP, bTowP,
+                                       Form("dotted: %.0fth percentile", kMultPercentile * 100.0));
+            for (auto* g : sJetG) delete g;   for (auto* g : bJetG) delete g;
+            for (auto* g : sTowG) delete g;   for (auto* g : bTowG) delete g;
+            for (auto* g : sTowP) delete g;   for (auto* g : bTowP) delete g;
         }
 
         // --- Combined gFEX+GEP turn-on curves at best thresholds ---
@@ -4400,6 +6345,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         auto out_RateVsEff_JetMET   = MakeRateVsEff(sig_h_JetMet,   back_hw_JetMET);
         auto out_RateVsEff_TowerMET = MakeRateVsEff(sig_h_TowerMet, back_hw_TowerMET);
         auto out_RateVsEff_TotalMET = MakeRateVsEff(sig_h_TotalMET, back_hw_TotalMET);
+        auto out_RateVsEff_GEPJwoJMET = MakeRateVsEff(sig_h_GEPJwoJMET, back_hw_GEPJwoJMET);
 
         // Style helper
         auto styleRVE = [](TGraph* g, Color_t col) {
@@ -4415,6 +6361,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         styleRVE(out_RateVsEff_JetMET.gRate_vsEff,   kP10Blue);
         styleRVE(out_RateVsEff_TowerMET.gRate_vsEff, kP10Green);
         styleRVE(out_RateVsEff_TotalMET.gRate_vsEff, kP10Violet);
+        styleRVE(out_RateVsEff_GEPJwoJMET.gRate_vsEff, kP10Brown);
 
         // Individual PDFs
         auto drawRVEsingle = [&](TGraph* g, const std::string& title, const std::string& path) {
@@ -4432,6 +6379,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         drawRVEsingle(out_RateVsEff_JetMET.gRate_vsEff,   "GEP Jet MET",        fDir + "RateVsEff_JetMET.pdf");
         drawRVEsingle(out_RateVsEff_TowerMET.gRate_vsEff, "GEP Tower MET",      fDir + "RateVsEff_TowerMET.pdf");
         drawRVEsingle(out_RateVsEff_TotalMET.gRate_vsEff, "GEP Total MET",      fDir + "RateVsEff_TotalMET.pdf");
+        if (hasGEPJwoJ)
+            drawRVEsingle(out_RateVsEff_GEPJwoJMET.gRate_vsEff, "GEP JwoJ MET", fDir + "RateVsEff_GEPJwoJMET.pdf");
 
         // Overlay: all individual algorithms — gFEX differentiated by JwoJ/NC/Rms, jFEX, and GEP types
         {
@@ -4443,6 +6392,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> allRVELabels = hasOverlapRemoval
                 ? std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX", "GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
+            if (hasGEPJwoJ) {
+                allRVE.push_back(out_RateVsEff_GEPJwoJMET.gRate_vsEff);
+                allRVELabels.push_back("GEP JwoJ MET");
+            }
             drawRateVsEffOverlay(allRVE, allRVELabels, (fDir + "RateVsEff_overlay.pdf"), "");
         }
         // gFEX-only algorithm comparison
@@ -4458,6 +6411,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             std::vector<std::string> gepRVELabels = hasOverlapRemoval
                 ? std::vector<std::string>{"GEP Jet MET", "GEP Total MET"}
                 : std::vector<std::string>{"GEP Jet MET", "GEP Tower MET", "GEP Total MET"};
+            if (hasGEPJwoJ) {
+                gepRVE.push_back(out_RateVsEff_GEPJwoJMET.gRate_vsEff);
+                gepRVELabels.push_back("GEP JwoJ MET");
+            }
             drawRateVsEffOverlay(gepRVE, gepRVELabels, (fDir + "RateVsEff_GEP_AlgoComparison.pdf"), "");
         }
 
@@ -4585,6 +6542,16 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         };
         sig_h_TotalMET_vec.push_back(cloneDetached(sig_h_TotalMET));
         back_h_TotalMET_vec.push_back(cloneDetached(back_h_TotalMET));
+        // GEP JwoJ. Pushed for every file, carrying an empty histogram where the file did not
+        // have the algorithm, so these stay index-parallel with labels; the multi-file draws
+        // are gated on anyGEPJwoJ instead.
+        sig_h_GEPJwoJMET_vec.push_back(cloneDetached(sig_h_GEPJwoJMET));
+        back_h_GEPJwoJMET_vec.push_back(cloneDetached(back_h_GEPJwoJMET));
+        back_hw_GEPJwoJMET_vec.push_back(cloneDetached(back_hw_GEPJwoJMET));
+        eff_GEPJwoJMET_80kHz_vec.push_back(cloneDetached(eff_GEPJwoJMET_80kHz));
+        eff_GEPJwoJMET_60kHz_vec.push_back(cloneDetached(eff_GEPJwoJMET_60kHz));
+        thr_GEPJwoJMET_80kHz_vec.push_back(thr_GEPJwoJMET_80kHz);
+        thr_GEPJwoJMET_60kHz_vec.push_back(thr_GEPJwoJMET_60kHz);
         sig_h_TotalMETX_vec.push_back(cloneDetached(sig_h_TotalMETX));
         back_h_TotalMETX_vec.push_back(cloneDetached(back_h_TotalMETX));
         sig_h_TotalMETY_vec.push_back(cloneDetached(sig_h_TotalMETY));
@@ -4617,6 +6584,29 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_hw_JetMET_vec.push_back(cloneDetached(back_hw_JetMET));
         back_hw_TowerMET_vec.push_back(cloneDetached(back_hw_TowerMET));
         if (hasSumJetET) back_hw_SumJetET_vec.push_back(cloneDetached(back_hw_SumJetET));
+
+        // Rate vs pileup: hand over this file's mu spectra plus the two things the matched-
+        // pileup block needs to pair them up. The config key is the emulator output string with
+        // the reconstruction tag normalized away, so the SAME configuration at r16129 (PU140)
+        // and r16130 (PU200) collapses onto one key while anything else — a different jet/tower
+        // threshold, SK mode, scale factor, or signal process — stays separate. The mu
+        // histograms are already SetDirectory(0), so they survive the file Close below as they
+        // are and need no clone. Nothing is pushed when the ntuple has no mu branch, which is
+        // why these vectors carry their own labels rather than indexing into labels[].
+        if (hasMu) {
+            std::string cfgKey = signalFiles[fileIt].second + " " + backgroundFiles[fileIt].second;
+            for (const char* rTag : { "r16129", "r16130" })
+                for (size_t p = cfgKey.find(rTag); p != std::string::npos; p = cfgKey.find(rTag, p))
+                    cfgKey.replace(p, 6, "rPU");
+            rateVsMuConfigKey.push_back(cfgKey);
+            rateVsMuPileup.push_back(
+                IsPU140Path(backgroundFiles[fileIt].first + " " + backgroundFiles[fileIt].second) ? 140 : 200);
+            rateVsMuLabels.push_back(labels[fileIt]);
+            back_hw_mu_all_vec.push_back(back_hw_mu_all);
+            for (int iA = 0; iA < nMETTypes; ++iA)
+                for (int iT = 0; iT < nRateVsMuThr; ++iT)
+                    back_hw_mu_pass_vec[iA][iT].push_back(back_hw_mu_pass[iA][iT]);
+        }
         eff_gMET_80kHz_vec.push_back(cloneDetached(eff_gMET_80kHz));
         eff_gMET_60kHz_vec.push_back(cloneDetached(eff_gMET_60kHz));
         eff_gMET_NC_80kHz_vec.push_back(cloneDetached(eff_gMET_NC_80kHz));
@@ -4668,6 +6658,45 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 back_prof_METvsNJets_vec[iA].push_back(p);
             }
         }
+        if (hasTrigJets) {
+            nTrigJetProfLabels.push_back(labels[fileIt]);
+            nTrigJetProfVariants.push_back(puSupLabel[trigJetPUSupIdx]);
+            back_h_NTrigJets_vec.push_back(cloneDetached(back_h_NTrigJets));
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                TProfile* p = (TProfile*)back_prof_METvsNTrigJets[iA]->Clone(
+                    (std::string("back_prof_METvsNTrigJets_multi_") + metTypeShort[iA] + "_" + tag).c_str());
+                p->SetDirectory(0);
+                back_prof_METvsNTrigJets_vec[iA].push_back(p);
+            }
+        }
+        // Object multiplicity: one push per variant present in THIS file's ntuple, so a file
+        // missing a variant drops out of that variant's overlay and stays in the other two. The
+        // count histograms have already been normalized in place by the per-file draw above,
+        // which is harmless — drawMultiplicityOverlay normalizes again and unit area is
+        // idempotent. The profiles are never touched by the drawing code.
+        auto cloneProfDetached = [](TProfile* p, const std::string& name) -> TProfile* {
+            TProfile* c = (TProfile*)p->Clone(name.c_str());
+            c->SetDirectory(0);
+            return c;
+        };
+        for (int iV = 0; iV < nPUSup; ++iV) {
+            if (!hasMultVariant[iV]) continue;
+            const std::string vt = std::string(puSupShort[iV]) + "_multi_" + tag;
+            multLabels[iV].push_back(labels[fileIt]);
+            sig_h_nJetsMult_vec[iV].push_back(cloneDetached(sig_h_nJetsMult[iV]));
+            back_h_nJetsMult_vec[iV].push_back(cloneDetached(back_h_nJetsMult[iV]));
+            sig_h_nTowersMult_vec[iV].push_back(cloneDetached(sig_h_nTowersMult[iV]));
+            back_h_nTowersMult_vec[iV].push_back(cloneDetached(back_h_nTowersMult[iV]));
+            sig_prof_nJetsVsThr_vec[iV].push_back(cloneProfDetached(sig_prof_nJetsVsThr[iV],    "sig_prof_nJetsVsThr_"   + vt));
+            back_prof_nJetsVsThr_vec[iV].push_back(cloneProfDetached(back_prof_nJetsVsThr[iV],  "back_prof_nJetsVsThr_"  + vt));
+            sig_prof_nTowersVsThr_vec[iV].push_back(cloneProfDetached(sig_prof_nTowersVsThr[iV],   "sig_prof_nTowersVsThr_"  + vt));
+            back_prof_nTowersVsThr_vec[iV].push_back(cloneProfDetached(back_prof_nTowersVsThr[iV], "back_prof_nTowersVsThr_" + vt));
+            TH2D* s2 = (TH2D*)sig_h2_nTowersVsThr[iV]->Clone(("sig_h2_nTowersVsThr_"  + vt).c_str());
+            TH2D* b2 = (TH2D*)back_h2_nTowersVsThr[iV]->Clone(("back_h2_nTowersVsThr_" + vt).c_str());
+            s2->SetDirectory(0);  b2->SetDirectory(0);
+            sig_h2_nTowersVsThr_vec[iV].push_back(s2);
+            back_h2_nTowersVsThr_vec[iV].push_back(b2);
+        }
         if (hasGFexSimMET) {
             sig_h_gMET_JwoJAOD_vec.push_back(cloneDetached(sig_h_gMET_JwoJAOD));
             back_h_gMET_JwoJAOD_vec.push_back(cloneDetached(back_h_gMET_JwoJAOD));
@@ -4708,6 +6737,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         std::string mDir = overlayDir;
         gSystem->mkdir(mDir.c_str(), true);
         drawOverlayMulti(sig_h_TotalMET_vec,      back_h_TotalMET_vec,      labels, "Total MET (GEP)",     "MET [GeV]",          mDir + "TotalMET.pdf",        mfSignalName);
+        if (anyGEPJwoJ)
+            drawOverlayMulti(sig_h_GEPJwoJMET_vec, back_h_GEPJwoJMET_vec, labels, "GEP JwoJ MET",        "MET [GeV]",          mDir + "GEPJwoJMET.pdf",      mfSignalName);
         drawOverlayMulti(sig_h_TowerMet_vec,      back_h_TowerMet_vec,      labels, "Tower MET (GEP)",     "MET [GeV]",          mDir + "TowerMET.pdf",        mfSignalName);
         drawOverlayMulti(sig_h_JetMet_vec,        back_h_JetMet_vec,        labels, "Jet MET (GEP)",       "MET [GeV]",          mDir + "JetMET.pdf",          mfSignalName);
         drawOverlayMulti(sig_h_SumET_vec,         back_h_SumET_vec,         labels, "GEP TOB #Sigma E_{T}",         "GEP TOB #Sigma E_{T} [GeV]",   mDir + "SumET.pdf",      mfSignalName);
@@ -4718,8 +6749,19 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         drawOverlayMulti(sig_h_gMET_Rms_vec,      back_h_gMET_Rms_vec,      labels, "gFEX MET (Rms)",      "MET [GeV]",          mDir + "gFEX_MET_Rms.pdf",      mfSignalName);
         drawOverlayMulti(sig_h_jMET_vec,          back_h_jMET_vec,          labels, "jFEX MET",            "MET [GeV]",          mDir + "jFEX_MET.pdf",          mfSignalName);
         drawOverlayMulti(sig_h_metTruthNonInt_vec,back_h_metTruthNonInt_vec,labels, "Truth MET (NonInt)",  "MET [GeV]",          mDir + "TruthMET_NonInt.pdf",   mfSignalName);
+        // Same quantity with the background drawn ONCE. Truth MET is a property of the input
+        // ntuple, so where every entry reads the same dijet input the N background curves above
+        // are N copies of one histogram; this version puts the signals against a single reference.
+        // No process label: the whole point is that several processes are on the canvas at once.
+        if (sameBackgroundInput && !back_h_metTruthNonInt_vec.empty())
+            drawSignalsVsSharedBackground(sig_h_metTruthNonInt_vec, labels,
+                                          back_h_metTruthNonInt_vec[0], kBkgProcLabel,
+                                          "Truth MET (NonInt)", "Truth MET_{NonInt} [GeV]",
+                                          mDir + "TruthMET_NonInt_SharedBkg.pdf", "");
 
         drawRateVsThresholdMulti(back_hw_TotalMET_vec,  labels, "Rate vs Emulated MET threshold",        "MET threshold [GeV]", mDir + "Rate_TotalMET.pdf",        mfSignalName);
+        if (anyGEPJwoJ)
+            drawRateVsThresholdMulti(back_hw_GEPJwoJMET_vec, labels, "Rate vs GEP JwoJ MET threshold",    "MET threshold [GeV]", mDir + "Rate_GEPJwoJMET.pdf",      mfSignalName);
         drawRateVsThresholdMulti(back_hw_gMET_vec,      labels, "Rate vs gFEX MET threshold (JwoJ)",     "MET threshold [GeV]", mDir + "Rate_gFEX_MET_JwoJ.pdf",   mfSignalName);
         drawRateVsThresholdMulti(back_hw_gMET_NC_vec,   labels, "Rate vs gFEX MET threshold (NoiseCut)", "MET threshold [GeV]", mDir + "Rate_gFEX_MET_NoiseCut.pdf",mfSignalName);
         drawRateVsThresholdMulti(back_hw_gMET_Rms_vec,  labels, "Rate vs gFEX MET threshold (Rms)",      "MET threshold [GeV]", mDir + "Rate_gFEX_MET_Rms.pdf",    mfSignalName);
@@ -4732,6 +6774,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
 
         // --- Multi-file signal efficiency vs threshold ---
         drawEffVsThresholdMulti(sig_h_TotalMET_vec,  labels, "Signal Efficiency vs GEP Total MET Threshold",    "MET threshold [GeV]", mDir + "SigEff_vs_Threshold_TotalMET.pdf",   mfSignalName);
+        if (anyGEPJwoJ)
+            drawEffVsThresholdMulti(sig_h_GEPJwoJMET_vec, labels, "Signal Efficiency vs GEP JwoJ MET Threshold", "MET threshold [GeV]", mDir + "SigEff_vs_Threshold_GEPJwoJMET.pdf", mfSignalName);
         drawEffVsThresholdMulti(sig_h_gMET_vec,      labels, "Signal Efficiency vs gFEX MET Threshold (JwoJ)",  "MET threshold [GeV]", mDir + "SigEff_vs_Threshold_gFEX_JwoJ.pdf", mfSignalName);
         drawEffVsThresholdMulti(sig_h_gMET_NC_vec,   labels, "Signal Efficiency vs gFEX MET Threshold (NC)",    "MET threshold [GeV]", mDir + "SigEff_vs_Threshold_gFEX_NC.pdf",   mfSignalName);
         drawEffVsThresholdMulti(sig_h_gMET_Rms_vec,  labels, "Signal Efficiency vs gFEX MET Threshold (Rms)",   "MET threshold [GeV]", mDir + "SigEff_vs_Threshold_gFEX_Rms.pdf",  mfSignalName);
@@ -4743,7 +6787,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // One canvas per MET type, one curve per config: the GEP types and the FEX types, so
         // every algorithm that gets a Rate_*.pdf overlay above also gets a rate-vs-efficiency one.
         {
-            std::vector<TGraph*> rveJet, rveTower, rveTotal;
+            std::vector<TGraph*> rveJet, rveTower, rveTotal, rveGEPJwoJ;
             std::vector<TGraph*> rveGMET, rveGMET_NC, rveGMET_Rms, rveJMET;
             for (unsigned int i = 0; i < labels.size(); i++) {
                 auto outJ = MakeRateVsEff(sig_h_JetMet_vec[i],   back_hw_JetMET_vec[i]);
@@ -4760,6 +6804,10 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 rveGMET_NC.push_back((TGraph*)outGNC.gRate_vsEff->Clone(Form("rve_gMET_NC_%u",  i)));
                 rveGMET_Rms.push_back((TGraph*)outGRms.gRate_vsEff->Clone(Form("rve_gMET_Rms_%u", i)));
                 rveJMET.push_back((TGraph*)outjM.gRate_vsEff->Clone(Form("rve_jMET_%u",     i)));
+                if (anyGEPJwoJ) {
+                    auto outJwoJ = MakeRateVsEff(sig_h_GEPJwoJMET_vec[i], back_hw_GEPJwoJMET_vec[i]);
+                    rveGEPJwoJ.push_back((TGraph*)outJwoJ.gRate_vsEff->Clone(Form("rve_GEPJwoJMET_%u", i)));
+                }
             }
             drawRateVsEffOverlay(rveJet,   labels, mDir + "RateVsEff_JetMET_multi.pdf",   mfSignalName);
             drawRateVsEffOverlay(rveTower, labels, mDir + "RateVsEff_TowerMET_multi.pdf",  mfSignalName);
@@ -4768,6 +6816,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawRateVsEffOverlay(rveGMET_NC,  labels, mDir + "RateVsEff_gFEX_MET_NoiseCut_multi.pdf", mfSignalName);
             drawRateVsEffOverlay(rveGMET_Rms, labels, mDir + "RateVsEff_gFEX_MET_Rms_multi.pdf",      mfSignalName);
             drawRateVsEffOverlay(rveJMET,     labels, mDir + "RateVsEff_jFEX_MET_multi.pdf",          mfSignalName);
+            if (anyGEPJwoJ)
+                drawRateVsEffOverlay(rveGEPJwoJ, labels, mDir + "RateVsEff_GEPJwoJMET_multi.pdf", mfSignalName);
+            for (auto* g : rveGEPJwoJ) delete g;
             for (auto* g : rveJet)   delete g;
             for (auto* g : rveTower) delete g;
             for (auto* g : rveTotal) delete g;
@@ -4869,6 +6920,18 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                           "GEP Total MET Turn-on at 60 kHz",
                           mDir + "TurnOn_60kHz_TotalMET_multi.pdf",
                           thr_TotalMET_60kHz_vec, "Rate = 60 kHz", truthOverlay, 0.38, 0.18);
+        if (anyGEPJwoJ) {
+            drawTurnOnOverlay(eff_GEPJwoJMET_80kHz_vec,
+                              makeConfigLabels("GEP JwoJ MET"),
+                              "GEP JwoJ MET Turn-on at 80 kHz",
+                              mDir + "TurnOn_80kHz_GEPJwoJMET_multi.pdf",
+                              thr_GEPJwoJMET_80kHz_vec, "Rate = 80 kHz", truthOverlay, 0.38, 0.18);
+            drawTurnOnOverlay(eff_GEPJwoJMET_60kHz_vec,
+                              makeConfigLabels("GEP JwoJ MET"),
+                              "GEP JwoJ MET Turn-on at 60 kHz",
+                              mDir + "TurnOn_60kHz_GEPJwoJMET_multi.pdf",
+                              thr_GEPJwoJMET_60kHz_vec, "Rate = 60 kHz", truthOverlay, 0.38, 0.18);
+        }
 
         // --- Z->mumu dimuon-p_{T} turn-on across configs, one canvas per MET type per rate ---
         if (zmumuLabels.size() > 1) {
@@ -4879,7 +6942,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             };
             TH1F* dimuonOverlay = (multipleSignalProcesses || sig_h_dimuonPt_coarse_vec.empty())
                                   ? nullptr : sig_h_dimuonPt_coarse_vec[0];
-            for (int iA = 0; iA < nMETTypes; ++iA)
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                if (!anyGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
                 for (int iR = 0; iR < nMuRates; ++iR)
                     drawTurnOnOverlay(effMu_vec[iA][iR], makeZmumuLabels(metTypeLabel[iA]),
                                       std::string(metTypeLabel[iA]) + " Z #rightarrow " + kMuMu + " turn-on at " + muRateNames[iR],
@@ -4887,6 +6951,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                                       thrMu_vec[iA][iR],
                                       std::string("Rate = ") + muRateNames[iR], dimuonOverlay,
                                       0.45, 0.18, "Dimuon p_{T} [GeV]");
+            }
         }
 
         // --- Background <MET> vs jet multiplicity across configs, one canvas per MET type ---
@@ -4897,12 +6962,93 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             // The multiplicity is a property of the background sample, not of the emulator
             // config, so the first file's distribution stands for all the curves on the canvas.
             TH1F* nJetOverlay = back_h_NJets_vec.empty() ? nullptr : back_h_NJets_vec[0];
-            for (int iA = 0; iA < nMETTypes; ++iA)
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                if (!anyGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
                 drawProfileOverlay(back_prof_METvsNJets_vec[iA], nJetProfLabels,
                                    nJetXLabel,
                                    Form("#LT%s#GT [GeV]", metTypeLabel[iA]),
                                    mDir + "MET_vs_NJets_" + metTypeShort[iA] + "_multi.pdf",
                                    nJetOverlay);
+            }
+        }
+
+        // --- Background <MET> vs trigger-jet multiplicity across configs, one canvas per MET type ---
+        // Unlike the truth-jet version, the multiplicity here is NOT shared across the curves: each
+        // config counts the jets of its own pileup-suppression variant, so a run that mixes NoSK
+        // with EtaSK has one distribution per curve and no single one to shade behind them. The
+        // band is drawn only when every config read the same variant, which is also the only case
+        // where the axis can name it.
+        if (nTrigJetProfLabels.size() > 1) {
+            BkgProcLabel bkgProc;   // background-only plots: label as QCD dijet, not the signal
+            const bool oneVariant =
+                std::equal(nTrigJetProfVariants.begin() + 1, nTrigJetProfVariants.end(),
+                           nTrigJetProfVariants.begin());
+            const std::string nTrigJetXLabel = oneVariant
+                ? std::string("N_{GEP jets} (WTA cone, ") + nTrigJetProfVariants[0] + ", no E_{T} cut)"
+                : std::string("N_{GEP jets} (WTA cone, per-config PU suppression, no E_{T} cut)");
+            TH1F* nTrigJetOverlay = (oneVariant && !back_h_NTrigJets_vec.empty())
+                ? back_h_NTrigJets_vec[0] : nullptr;
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                if (!anyGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                drawProfileOverlay(back_prof_METvsNTrigJets_vec[iA], nTrigJetProfLabels,
+                                   nTrigJetXLabel,
+                                   Form("#LT%s#GT [GeV]", metTypeLabel[iA]),
+                                   mDir + "MET_vs_NTrigJets_" + metTypeShort[iA] + "_multi.pdf",
+                                   nTrigJetOverlay);
+            }
+        }
+
+        // --- GEP input-object multiplicity across configs -----------------------------------
+        // One canvas per pileup-suppression variant per object, with one signal/background pair
+        // per input file. These are properties of the INPUT ntuple, which every emulator config
+        // of a given process and pileup shares, so the curves separate only where the run mixes
+        // processes or pileups — a run that varies only the emulator configuration will draw
+        // them exactly on top of one another, which is correct rather than a bug.
+        {
+            const std::string multDir = mDir + "Multiplicity/";
+            bool madeMultDir = false;
+            for (int iV = 0; iV < nPUSup; ++iV) {
+                if (multLabels[iV].size() < 2) continue;
+                if (!madeMultDir) { gSystem->mkdir(multDir.c_str(), true); madeMultDir = true; }
+                const std::string vs = puSupShort[iV];
+                const std::string vl = puSupLabel[iV];
+                drawMultiplicityOverlay(sig_h_nJetsMult_vec[iV], back_h_nJetsMult_vec[iV],
+                                        multLabels[iV], "GEP jet multiplicity (" + vl + ")",
+                                        "N_{GEP jets} (E_{T} > 0)",
+                                        multDir + "NJets_" + vs + "_multi.pdf",
+                                        /*logx=*/false, mfSignalName);
+                drawMultiplicityOverlay(sig_h_nTowersMult_vec[iV], back_h_nTowersMult_vec[iV],
+                                        multLabels[iV], "GEP tower multiplicity (" + vl + ")",
+                                        "N_{GEP towers} (E_{T} > 0)",
+                                        multDir + "NTowers_" + vs + "_multi.pdf",
+                                        /*logx=*/true, mfSignalName);
+
+                std::vector<TGraphErrors*> sJetG, bJetG, sTowG, bTowG;
+                std::vector<TGraph*>       sTowP, bTowP;
+                for (unsigned int i = 0; i < multLabels[iV].size(); ++i) {
+                    sJetG.push_back(makeMultVsThresholdGraph(sig_prof_nJetsVsThr_vec[iV][i],    kBlack));
+                    bJetG.push_back(makeMultVsThresholdGraph(back_prof_nJetsVsThr_vec[iV][i],   kBlack));
+                    sTowG.push_back(makeMultVsThresholdGraph(sig_prof_nTowersVsThr_vec[iV][i],  kBlack));
+                    bTowG.push_back(makeMultVsThresholdGraph(back_prof_nTowersVsThr_vec[iV][i], kBlack));
+                    sTowP.push_back(makeMultPercentileGraph(sig_h2_nTowersVsThr_vec[iV][i],  kMultPercentile, kBlack));
+                    bTowP.push_back(makeMultPercentileGraph(back_h2_nTowersVsThr_vec[iV][i], kMultPercentile, kBlack));
+                }
+                drawMultVsThresholdOverlay(sJetG, bJetG, multLabels[iV],
+                                           "GEP jet multiplicity vs threshold (" + vl + ")",
+                                           "Jet E_{T} threshold [GeV]", "#LTN_{GEP jets}#GT",
+                                           multDir + "NJets_vs_Threshold_" + vs + "_multi.pdf",
+                                           jetThrMax, /*logy=*/false, kJetMultThrYMax, mfSignalName);
+                drawMultVsThresholdOverlay(sTowG, bTowG, multLabels[iV],
+                                           "GEP tower multiplicity vs threshold (" + vl + ")",
+                                           "Tower E_{T} threshold [GeV]", "#LTN_{GEP towers}#GT",
+                                           multDir + "NTowers_vs_Threshold_" + vs + "_multi.pdf",
+                                           towerThrMax, /*logy=*/true, kTowerMultThrYMax, mfSignalName,
+                                           sTowP, bTowP,
+                                           Form("dotted: %.0fth percentile", kMultPercentile * 100.0));
+                for (auto* g : sJetG) delete g;   for (auto* g : bJetG) delete g;
+                for (auto* g : sTowG) delete g;   for (auto* g : bTowG) delete g;
+                for (auto* g : sTowP) delete g;   for (auto* g : bTowP) delete g;
+            }
         }
 
         // --- Signal MET residual and resolution across configs, one canvas per MET type ---
@@ -4976,6 +7122,125 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         }
     }
 
+    // --- Average background rate vs pileup, matched PU140 / PU200 pairs only -----------------
+    //
+    // What this is: for a fixed MET threshold, the L1 rate an algorithm would fire at as a
+    // function of the pileup of the crossing. The x axis is mu, and the two pileup scenarios of
+    // a matched pair fill disjoint stretches of it (PU140 over 120-160, PU200 over 180-220), so
+    // together they trace one curve from 120 to 220 with an unpopulated gap in the middle.
+    //
+    // Why it needs a MATCHED pair: mu is the only thing allowed to differ between the two files.
+    // Overlaying two different emulator configurations at two different pileups would fold the
+    // configuration change into what is meant to be read as a pileup dependence, so the pairing
+    // is done on the emulator output string with the r-tag normalized away and a group that has
+    // only one of the two pileups is skipped outright rather than drawn half-length.
+    //
+    // How the rate is computed: within each mu bin, the crossing rate times the weighted
+    // fraction of background events passing the threshold,
+    //
+    //     R(mu) = f_BX x [ Sum(w) over events in the bin with MET > thr ]
+    //                   / [ Sum(w) over all events in the bin ]
+    //
+    // with f_BX = kCrossingRateHz. This is a ratio inside a bin, so any overall constant in the
+    // weights cancels and normalizeRateToTarget does not enter — these histograms are
+    // deliberately left out of the normalizeRateHist pass above for that reason. The CAVEAT next
+    // to targetTotalRateHz still applies in full: the HSTP filter has already removed almost all
+    // of JZ0, so the pass fraction is that of a jet-enriched population, and the absolute scale
+    // carries that enrichment at every mu.
+    //
+    // Uncertainties come from the numerator's weighted error alone. The denominator holds every
+    // event in the bin and the numerator is a subset of it, so the two are correlated and the
+    // denominator's own error is both far smaller and not independent — propagating it as if it
+    // were would overstate the uncertainty rather than improve it.
+    if (!rateVsMuConfigKey.empty()) {
+        std::map<std::string, std::vector<unsigned int>> muGroups;
+        for (unsigned int i = 0; i < rateVsMuConfigKey.size(); ++i)
+            muGroups[rateVsMuConfigKey[i]].push_back(i);
+
+        // Output file names are built from the config label with any pileup marker stripped, so
+        // the PU140 and PU200 entries of a pair produce one name rather than two.
+        auto groupTag = [](const std::string& label) {
+            std::string t = label;
+            for (const char* pu : { "_PU140", "_PU200", "PU140", "PU200" })
+                for (size_t p = t.find(pu); p != std::string::npos; p = t.find(pu, p))
+                    t.erase(p, std::strlen(pu));
+            for (char& ch : t)
+                if (!std::isalnum((unsigned char)ch) && ch != '_' && ch != '-' && ch != '.') ch = '_';
+            while (!t.empty() && t.back() == '_') t.pop_back();
+            return t.empty() ? std::string("config") : t;
+        };
+
+        int nPairsDrawn = 0;
+        for (const auto& grp : muGroups) {
+            const std::vector<unsigned int>& idx = grp.second;
+            bool has140 = false, has200 = false;
+            for (unsigned int i : idx) {
+                if (rateVsMuPileup[i] == 140) has140 = true;
+                else                          has200 = true;
+            }
+            if (!(has140 && has200)) {
+                std::cout << "  [rate vs mu] " << rateVsMuLabels[idx[0]]
+                          << ": only PU" << (has140 ? 140 : 200)
+                          << " present for this configuration — skipped (needs the same config at"
+                          << " both r16129 and r16130)\n";
+                continue;
+            }
+
+            const std::string mDir = overlayDir;
+            gSystem->mkdir(mDir.c_str(), true);
+            const std::string tagOut = groupTag(rateVsMuLabels[idx[0]]);
+
+            // Denominator: every surviving background event of every file in the group. The two
+            // pileups populate disjoint bins, so adding them is a concatenation along mu.
+            TH1F* denom = (TH1F*)back_hw_mu_all_vec[idx[0]]->Clone(("rateVsMu_denom_"+tagOut).c_str());
+            denom->SetDirectory(0);
+            for (unsigned int k = 1; k < idx.size(); ++k) denom->Add(back_hw_mu_all_vec[idx[k]]);
+
+            for (int iT = 0; iT < nRateVsMuThr; ++iT) {
+                std::vector<TGraphErrors*> graphs;
+                std::vector<std::string>   graphLabels;
+                for (int iA = 0; iA < nMETTypes; ++iA) {
+                    if (!anyGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                    TH1F* numer = (TH1F*)back_hw_mu_pass_vec[iA][iT][idx[0]]->Clone(
+                        (std::string("rateVsMu_numer_") + metTypeShort[iA] + "_"
+                         + rateVsMuThrName[iT] + "_" + tagOut).c_str());
+                    numer->SetDirectory(0);
+                    for (unsigned int k = 1; k < idx.size(); ++k)
+                        numer->Add(back_hw_mu_pass_vec[iA][iT][idx[k]]);
+
+                    std::vector<double> xs, ys, xerrs, yerrs;
+                    for (int ib = 1; ib <= denom->GetNbinsX(); ++ib) {
+                        const double d = denom->GetBinContent(ib);
+                        if (d <= 0.0) continue;   // the 160-180 gap, and anything else unpopulated
+                        xs.push_back(denom->GetBinCenter(ib));
+                        ys.push_back(kCrossingRateHz * numer->GetBinContent(ib) / d);
+                        xerrs.push_back(0.0);
+                        yerrs.push_back(kCrossingRateHz * numer->GetBinError(ib) / d);
+                    }
+                    delete numer;
+                    if (xs.empty()) continue;
+                    graphs.push_back(new TGraphErrors(xs.size(), xs.data(), ys.data(),
+                                                      xerrs.data(), yerrs.data()));
+                    graphLabels.push_back(metTypeLabel[iA]);
+                }
+                drawRateVsMuOverlay(graphs, graphLabels,
+                                    Form("Rate vs #LTPU#GT, MET > %.0f GeV", rateVsMuThr[iT]),
+                                    mDir + "RateVsMu_MET" + rateVsMuThrName[iT] + "_" + tagOut + ".pdf",
+                                    // Header carries the threshold as well as the config: the
+                                    // three canvases are otherwise identical to look at.
+                                    Form("%s, MET > %.0f GeV", tagOut.c_str(), rateVsMuThr[iT]));
+                for (auto* g : graphs) delete g;
+            }
+            delete denom;
+            nPairsDrawn++;
+            std::cout << "  [rate vs mu] " << tagOut << ": PU140 + PU200 matched, "
+                      << nRateVsMuThr << " thresholds written to " << mDir << "\n";
+        }
+        if (nPairsDrawn == 0)
+            std::cout << "  [rate vs mu] no configuration appears at both PU140 and PU200 —"
+                      << " no rate-vs-pileup plots produced\n";
+    }
+
     // Closing summary: the per-file subdirectories are named after the emulator output and the
     // config label, so pointing only at outputDir leaves you to work out which one belongs to
     // which config. List them alongside the multi-file overlay directory.
@@ -5020,37 +7285,12 @@ void metAnalysisAndRates() {
     const std::string sigInputTtbarDilepPU140   = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
     const std::string sigInputZmumuPU140 = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/Zmumu_v4/mc21_14TeV_Zmumu_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
     const std::string backInputPU140 = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/QCD_Dijet_JZ*_v4/mc21_14TeV_jj_JZ*_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
-    const std::string emuDir    = "/data/larsonma/GEPMET/outputNTuplesDev_METv2/";
+    const std::string emuDir    = "/data/larsonma/GEPMET/outputNTuplesDev_METv3/";
 
     // The trailing _twrSF{x}_jetSF{y} tag encodes the (tower, jet) scale factors
     // applied in the totalMET sum (see makeOutputMETFileName). Compare 1,1 vs 1,0p4
     // to see the effect of down-weighting the jet contribution. Future: per-eta calibrated SFs.
     std::vector<std::pair<std::string, std::string>> signalFiles = {
-        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },*/
-
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   }
-
-       // { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-
-
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
 
         // For new OR studies 08122026
         //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
@@ -5075,31 +7315,117 @@ void metAnalysisAndRates() {
         { sigInputZmumu, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"     },
         { sigInputZmumu, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"       },*/
 
-        // For "Nominal" aka firmware implemented algorithm.
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        // For "Nominal" aka firmware implemented algorithm. Several signal processes at ONE
+        // emulator config against one shared dijet background — the run the
+        // TruthMET_NonInt_SharedBkg overlay exists for.
+        //
+        // Z->mumu is left out on purpose: its truth MET_NonInt is empty (the muons are Int, not
+        // NonInt), so it would contribute a curve sitting on zero and drag the shared axis with
+        // it. Its own plots come from the dimuon-p_{T} turn-ons, not from truth MET.
+        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
+        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        //{ sigInputZmumuPU140,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
 
         // PU suppression comparison studies for nominal configuration [PU 200]:
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
+
+
+        // First GEP JwoJ studies - hard Et threshold scan
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt15.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt20.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt15.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt20.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt15.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt20.root"   },
 
         // PU suppression comparison studies for nominal configuration [PU 140]:
-        /*{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
-
-        // PU 200 vs. 140 EtaSK rates
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
         //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        // PU 200 vs. 140 EtaSK rates, nominal: NO jet or tower E_T threshold (jetEt0_towerEt0), so
+        // the pileup dependence is the algorithm's own and not that of a threshold cutting into a
+        // pileup-dependent spectrum. Same config at r16129 and r16130, which is what the
+        // RateVsMu_MET*.pdf matched-pair block keys on.
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        // "Ideal scenario" 08282026 — the algorithm extensions that each helped on their own,
+        // applied together: EtaSK pileup suppression, J15/T2 jet and tower E_T thresholds, jet
+        // overlap removal, and a down-weighted tower coefficient (TC 0.4, JC 1) in the totalMET
+        // sum. One config, PU 200, across the three processes that carry real truth MET_NonInt.
+        // Z->mumu is excluded for the same reason as in the nominal process comparison above: its
+        // truth MET_NonInt is empty, so it would sit on zero and drag the shared axis.
+        // Background is the same dijet file in all three entries, so the shared-background truth
+        // MET overlay is produced as well as the per-file ones.
+        /*{ sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"                },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+        // Same config and the same three processes at PU 140 (r16129), so the fixed-rate
+        // threshold and efficiency printouts come out for both pileup scenarios in one run.
+        { sigInputPU140,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"                },
+        { sigInputTtbarSemilepPU140, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { sigInputTtbarDilepPU140,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },*/
+
+        // "Nominal" process comparison 08282026 — the counterpart of the ideal-scenario block
+        // above at the firmware-implemented configuration: EtaSK pileup suppression, NO jet or
+        // tower E_T threshold (jetEt0_towerEt0), no overlap removal, unit coefficients
+        // (TC 1, JC 1). Same three processes at both pileup values, so one run yields the
+        // nominal fixed-rate thresholds and efficiencies for the PU 140 / PU 200 tables.
+        // Z->mumu is excluded for the same reason as above: its truth MET_NonInt is empty.
+        //{ sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"                },
+        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputPU140,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"                },
+        //{ sigInputTtbarSemilepPU140, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        //{ sigInputTtbarDilepPU140,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        // Overlap removal x tower coefficient at J0/T0, 08282026 — the full 2x2 square with NO
+        // jet or tower E_T threshold on the input objects, so neither effect is confounded by a
+        // threshold cutting into a pileup-dependent spectrum. This is what the jetEt0_towerEt0
+        // TC0.4 production was run for: the extended-algorithm result mixes thresholds, OR and
+        // the coefficient together, and these four points separate the last two.
+        //   entry 0 = nominal (NoOR, TC 1)          entry 2 = NoOR, TC 0.4
+        //   entry 1 = OR, TC 1                      entry 3 = OR,   TC 0.4
+        // ZvvHbb at PU 200 only: OR_twrSF1 exists at r16130 but NOT at r16129, so the square is
+        // complete at PU 200 alone. Shared dijet background across all four, so the
+        // shared-background truth MET overlay is produced too.
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"     },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root" },
+        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"   },
+
+        // Rate vs pileup (mu) study 08212026 — the RateVsMu_MET*.pdf plots.
+        // Those plots pair r16129 with r16130 on the emulator config string and skip any config
+        // that appears at only one pileup, so the entries have to come in PU140 / PU200 pairs of
+        // the SAME configuration. Two pairs here, NoSK and EtaSK, which also shows what the
+        // pileup suppression buys as mu rises. Uncomment together with the matching background
+        // entries, labels, and overlayDir below.
+        /*{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        { sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },*/
 
         // PU 200 + varying tower coefficient studies 08182026
         //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
@@ -5225,27 +7551,83 @@ void metAnalysisAndRates() {
         //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },   // Z->mumu, dropped
+
+
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
 
         // PU suppression comparison studies for nominal configuration [PU 200]:
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
+
+        // First GEP JwoJ studies - hard Et threshold scan
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt15.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt20.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt15.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt20.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt15.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt20.root"   },
+
 
         // PU suppression comparison studies for nominal configuration [PU 140]:
-       /*{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
-
-        // PU 200 vs. 140 EtaSK rates
+       //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
         //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
+
+        // PU 200 vs. 140 EtaSK rates, nominal (jetEt0_towerEt0) — one entry per signal entry above.
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        // "Ideal scenario" 08282026 — matches the six signal entries above. The same dijet
+        // background file within each pileup scenario, so the shared-background overlay is
+        // produced; r16129 backgrounds pair with the r16129 signals (never cross the two).
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },*/
+
+        // "Nominal" process comparison 08282026 — matches the six nominal signal entries above.
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
+
+        // Overlap removal x tower coefficient at J0/T0, 08282026 — matches the four signal
+        // entries above. Same dijet background file in all four, so the thresholds are set by
+        // one and the same background at each configuration's own MET scale.
         //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"     },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root" },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"   },*/
+
+        // Rate vs pileup (mu) study 08212026 — one entry per signal entry above, in the same
+        // order. The rate-vs-mu curves are built entirely from these background files; the
+        // signal side only supplies the config string the pairing keys on.
+        /*{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },*/
 
         // PU 200 + varying tower coefficient studies 08182026
         /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
@@ -5325,23 +7707,71 @@ void metAnalysisAndRates() {
         //"Nominal_ZvvHbb",
         //"Nominal_tt_1lep",
         //"Nominal_tt_2lep",
-        //"Nominal_Zmumu",
+        //"Nominal_Zmumu",   // no truth MET_NonInt — see the signal block above
         //"J10_EtaSK",
         //"J15_EtaSK",
         //"J20_EtaSK",
 
 
-        "J0_T0_NoSK", 
-        "J0_T0_SK", 
-        "J0_T0_EtaSK", 
-        "J15_T2_NoSK", 
-        "J15_T2_SK", 
-        "J15_T2_EtaSK", 
+        /*"J0_T0_NoSK",
+        "J0_T0_SK",
+        "J0_T0_EtaSK",
+        "J15_T0_NoSK",
+        "J15_T0_SK",
+        "J15_T0_EtaSK",
+        "J0_T2_NoSK",
+        "J0_T2_SK",
+        "J0_T2_EtaSK",
+        "J15_T2_NoSK",
+        "J15_T2_SK",
+        "J15_T2_EtaSK",*/
 
-        //"J15_T2_EtaSK_PU140",
-        //"J15_T2_EtaSK_PU200"
+        // PU 200 vs. 140 at nominal (no jet/tower threshold), EtaSK both. The rate-vs-mu output
+        // names are these labels with the _PU140 / _PU200 marker stripped, so the pair MUST differ
+        // only in that marker or the two halves will not collapse onto one file name.
+        //"J0_T0_EtaSK_PU140",
+        //"J0_T0_EtaSK_PU200"
 
-        //"Nominal_ZvvHbb"
+        // "Ideal scenario" / "Nominal" process-comparison blocks above: one emulator config
+        // across three processes at two pileup values, so the legend distinguishes process and
+        // #LTPU#GT, not the configuration. The two blocks share these labels — swap which
+        // signal/background block is uncommented, not these.
+        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}, #LTPU#GT = 200",
+        //"t#bar{t} semileptonic decay, #LTPU#GT = 200",
+        //"t#bar{t} dileptonic decay, #LTPU#GT = 200",
+        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}, #LTPU#GT = 140",
+        //"t#bar{t} semileptonic decay, #LTPU#GT = 140",
+        //"t#bar{t} dileptonic decay, #LTPU#GT = 140"
+
+        // OR x tower coefficient square at J0/T0, in the signal-entry order above.
+        //"NoOR_TC1_JC1",
+        //"OR_TC1_JC1",
+        //"NoOR_TC0.4_JC1",
+        //"OR_TC0.4_JC1"
+
+        // Rate vs pileup (mu) study 08212026 — parallel to the file block above. The rate-vs-mu
+        // output file names come from these labels with the _PU140 / _PU200 marker stripped, so
+        // the two halves of a pair MUST differ only in that marker or they will not collapse
+        // onto one name (they are still paired on the file paths, not on the label).
+        /*"J15_T2_NoSK_PU140",
+        "J15_T2_NoSK_PU200",
+        "J15_T2_EtaSK_PU140",
+        "J15_T2_EtaSK_PU200",*/
+
+
+        //"PU140",
+        //"PU200"
+
+        //"Nominal_ZvvHbb_PU200"
+        "T2_TC0.3_HTH10",
+        "T2_TC0.3_HTH15",
+        "T2_TC0.3_HTH20",
+        "T2_TC0.4_HTH10",
+        "T2_TC0.4_HTH15",
+        "T2_TC0.4_HTH20",
+        "T2_TC0.5_HTH10",
+        "T2_TC0.5_HTH15",
+        "T2_TC0.5_HTH20",
 
         // Z->mumu Overlap Removal comparison 08192026 — parallel to the signal block above.
         /*"NoOR_TC0.3_JC1",
@@ -5375,8 +7805,10 @@ void metAnalysisAndRates() {
         //"OR_TC0.4_JC1",
     };
 
-    std::string signalName = "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}";
-    //std::string signalName = "Z #rightarrow " + kMuMu;        // Z->mumu OR comparison block above
+    std::string signalName = "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}";   // OR x coefficient block above — one process
+    //std::string signalName = "";   // "Ideal scenario" block above — three processes, no single name
+    //std::string signalName = "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}";   // PU140 vs PU200 nominal block above
+    //std::string signalName = "Z #rightarrow mumu";        // Z->mumu OR comparison block above
     //std::string signalName = "t#bar{t} semileptonic decay";   // ttbar semilep coefficient block above
     //std::string signalName = "t#bar{t} dileptonic decay";     // ttbar dilep coefficient block above
     // The "Nominal" block above runs four processes at once, so no single name applies to the
@@ -5385,7 +7817,7 @@ void metAnalysisAndRates() {
     // Per-file legend header (parallel to signalFiles/labels) so each signal process gets
     // its own label on per-file plots. Falls back to signalName for any unset entry.
     std::vector<std::string> signalNames = {
-        "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
         //"Z #rightarrow " + kMuMu,
         //"t#bar{t} semileptonic decay",
         //"t#bar{t} semileptonic decay",
@@ -5398,7 +7830,35 @@ void metAnalysisAndRates() {
         //"Z #rightarrow " + kMuMu,
         //"t#bar{t} semileptonic decay",
         //"t#bar{t} dileptonic decay",
-        //"Z #rightarrow " + kMuMu,
+        //"Z #rightarrow mumu",
+        // Nominal PU-suppression block above: one process at three SK settings, so the single
+        // entry covers every file via the fallback to signalName.
+        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+
+        // Nominal process-comparison block above, in its file order. signalName is empty for that
+        // run — no one name applies to the multi-file overlays — so these carry the per-file plots.
+        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+        //"t#bar{t} semileptonic decay",
+        //"t#bar{t} dileptonic decay",
+
+        // PU140 vs PU200 nominal block above: one process at two pileups, so the single entry
+        // covers both files via the fallback to signalName.
+        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+
+        // "Ideal scenario" block above, in its file order. signalName is empty for this run —
+        // no one process name applies to the multi-file overlays — so these carry the per-file
+        // plots' top-right process label. The PU 140 half repeats the same three names; the
+        // pileup itself is drawn separately by the ATLAS label.
+        "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+        //"t#bar{t} semileptonic decay",
+        //"t#bar{t} dileptonic decay",
+        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+        //"t#bar{t} semileptonic decay",
+        //"t#bar{t} dileptonic decay",
+
+        // OR x coefficient block above: ONE process at four configurations, so the single
+        // entry covers every file via the fallback to signalName.
+        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
     };
     std::string outputDir  = "metAnalysisPlots/";
     //std::string overlayDir = "multiFileOverlay_MET_CoeffComparison_ZvvHbb_PU140/";
@@ -5406,11 +7866,20 @@ void metAnalysisAndRates() {
     //std::string overlayDir = "multiFileOverlay_MET_CoeffComparison_ttbarSemilep_PU200/";   // ttbar semilep coefficient block above
     //std::string overlayDir = "multiFileOverlay_MET_CoeffComparison_ttbarDilep_PU200/";     // ttbar dilep coefficient block above
     //std::string overlayDir = "multiFileOverlay_MET_CoeffComparison_Zmumu_PU200/";          // Z->mumu coefficient block above
-    //std::string overlayDir = "multiFileOverlay_MET_Nominal_ProcessComparison_ZvvHbb_Only/";          // "Nominal" block above
+    //std::string overlayDir = "multiFileOverlay_MET_Nominal_ZvvHbb_JFEX/";          // "Nominal" block above
+    //std::string overlayDir = "multiFileOverlay_MET_Nominal_ProcessComparison/";   // "Nominal" process-comparison block above
     //std::string overlayDir = "multiFileOverlay_MET_ORComparison_Zmumu_PU200/";               // Z->mumu OR comparison block above
-    //std::string overlayDir = "multiFileOverlay_MET_Nominal_EtaSK_PU140_200Comparison/";
+    //std::string overlayDir = "multiFileOverlay_MET_IdealScenario_J15_T2_EtaSK_OR_TC0p4_JC1_PU140_200/";   // "Ideal scenario" block above
+    //std::string overlayDir = "multiFileOverlay_MET_J0T0_ORxCoeff_ZvvHbb_PU200_NEWJFEX/";   // OR x coefficient square block above
+    //std::string overlayDir = "multiFileOverlay_MET_Nominal_ProcessComparison_PU140_200/";   // "Nominal" process comparison block above
+    //std::string overlayDir = "multiFileOverlay_MET_Nominal_EtaSK_PU140_200Comparison/";   // PU140 vs PU200 nominal block above
     //std::string overlayDir = "multiFileOverlay_MET_ORComparison_ZvvHbb_PU200/";
-    std::string overlayDir = "multiFileOverlay_MET_EtaSK_PU200_PUSupComparison/"; 
+    //std::string overlayDir = "multiFileOverlay_MET_EtaSK_PU200_nominal_verbose_JFEXFIX/";
+    std::string overlayDir = "multiFileOverlay_MET_GEPJwoJ_HardThresholdScan/";
+
+    //mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root
+    //std::string overlayDir = "multiFileOverlay_MET_RateVsPileup_ZmumuPUComparison/";   // rate vs mu study above
+    //std::string overlayDir = "multiFileOverlay_MET_Nominal_PUSupComparison_PU200/";   // nominal PU-suppression block above
     gSystem->mkdir(outputDir.c_str(), true);
 
     analyze_files(signalFiles, backgroundFiles, labels, outputDir, signalName, overlayDir, signalNames);
