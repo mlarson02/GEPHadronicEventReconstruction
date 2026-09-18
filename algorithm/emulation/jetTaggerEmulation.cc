@@ -854,9 +854,14 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 int et2 = seedValues[indices[iSeed] + nSeedsOutput_].et;
                 int etSum = et1 + et2; 
 
-                // Convert eta to signed integers centered at 0
-                int eta1 = seedValues[iSeed].eta - (1 << (eta_bit_length_ - 1));
-                int eta2 = seedValues[indices[iSeed] + nSeedsOutput_].eta - (1 << (eta_bit_length_ - 1));
+                // Convert eta to signed integers centered at 0. As for phi below, the bias is
+                // half the *grid*, eta_range_ / 2, not half the field: the two only agree when
+                // every code of the eta field is a real tower, which is false now that the v3
+                // eta field carries 3 bits of TOB padding. The unweighted midpoint below is
+                // invariant under the choice of bias anyway (the arithmetic shift floors, so
+                // the bias cancels exactly); this only keeps the intermediate values physical.
+                int eta1 = seedValues[iSeed].eta - (eta_range_ / 2);
+                int eta2 = seedValues[indices[iSeed] + nSeedsOutput_].eta - (eta_range_ / 2);
 
                 // Convert phi to signed integers centered at 0. The bias is half the
                 // *grid*, phi_range_ / 2, not half the field: the two only agree when
@@ -897,11 +902,11 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                               << " et1=" << et1 << " et2=" << et2
                               << " eta1=" << eta1 << " eta2=" << eta2 << " dphi=" << dphi
                               << " eta_mid=" << eta_mid << " phi_mid=" << phi_mid
-                              << " -> eta=" << (eta_mid + (1 << (eta_bit_length_ - 1)))
+                              << " -> eta=" << (eta_mid + (eta_range_ / 2))
                               << " phi=" << (phi_mid + (phi_range_ / 2)) << "\n";
 
                 // --- Convert midpoints back to digitized unsigned format ---
-                unsigned int eta_mid_digitized = eta_mid + (1 << (eta_bit_length_ - 1));
+                unsigned int eta_mid_digitized = eta_mid + (eta_range_ / 2);
                 unsigned int phi_mid_digitized = phi_mid + (phi_range_ / 2);
                 //std::cout << "phi_mid_digitized: " << phi_mid_digitized << "\n";
 

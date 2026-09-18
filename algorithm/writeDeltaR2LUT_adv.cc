@@ -35,8 +35,8 @@ int main() {
 
     //std::cout << "r2Cut_ for LUT: " << r2Cut_ << "\n";
 
-    for (unsigned int etaIt = 0; etaIt < (1 << eta_bit_length_); ++etaIt) {
-        for (unsigned int phiIt = 0; phiIt < (1 << (phi_bit_length_ - 1)); ++phiIt) { // phi bit length - 1 as max deltaPhi = pi, not 2pi
+    for (unsigned int etaIt = 0; etaIt < eta_range_; ++etaIt) {
+        for (unsigned int phiIt = 0; phiIt < (phi_range_ / 2); ++phiIt) { // half the grid: a wrapped deltaPhi never exceeds pi
             if (idx >= max_R2lut_size_) break; // STOP when you reach max_lut_size_!
                 
             //std::cout << "idx: " << idx << "\n";
@@ -64,8 +64,8 @@ int main() {
 
     //std::cout << "r2Cut_ for LUT: " << r2Cut_ << "\n";
 
-    for (unsigned int etaIt = 0; etaIt < (1 << eta_bit_length_); ++etaIt) {
-        for (unsigned int phiIt = 0; phiIt < (1 << (phi_bit_length_ - 1)); ++phiIt) { // phi bit length - 1 as max deltaPhi = pi, not 2pi
+    for (unsigned int etaIt = 0; etaIt < eta_range_; ++etaIt) {
+        for (unsigned int phiIt = 0; phiIt < (phi_range_ / 2); ++phiIt) { // half the grid: a wrapped deltaPhi never exceeds pi
             if (i >= max_Rlut_size_) break;
 
             float deltaEta = etaIt * eta_granularity_;
@@ -96,8 +96,8 @@ int main() {
 
     //std::cout << "r2Cut_ for LUT: " << r2Cut_ << "\n";
 
-    for (unsigned int etaIt = 0; etaIt < (1 << eta_bit_length_); ++etaIt) {
-        for (unsigned int phiIt = 0; phiIt < (1 << (phi_bit_length_ - 1)); ++phiIt) { // phi bit length - 1 as max deltaPhi = pi, not 2pi
+    for (unsigned int etaIt = 0; etaIt < eta_range_; ++etaIt) {
+        for (unsigned int phiIt = 0; phiIt < (phi_range_ / 2); ++phiIt) { // half the grid: a wrapped deltaPhi never exceeds pi
             if (iR >= max_R_8b_lut_size_) break;
             
 

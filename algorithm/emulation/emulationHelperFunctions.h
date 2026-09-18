@@ -367,9 +367,9 @@ void write_constants_header(const std::string& header_path,
                             unsigned int nProtoSeeds, // up to 6, used for seed position optimization
                             unsigned int total_bits_, // 64 for basic, adv for now.. 
                             unsigned int et_bit_length_, // 13 for basic & adv
-                            unsigned int eta_bit_length_, // 10 for basic (standard TOB format), 7 for adv - field width only, see eta_range_
+                            unsigned int eta_bit_length_, // 10 for both (standard TOB format) - field width only, see eta_range_
                             unsigned int eta_range_, // 98 for both: the GEP tower grid, (4.9 - -4.9) / 0.1
-                            unsigned int phi_bit_length_, // 9 for basic (standard TOB format), 6 for adv - field width only, see phi_range_
+                            unsigned int phi_bit_length_, // 9 for both (standard TOB format) - field width only, see phi_range_
                             unsigned int phi_range_, // 64 for both: the GEP tower grid, 2*pi / (pi/32)
                             unsigned int max_R_8b_lut_size_, // 8, only needed for advanced algorithm, provides 2 * R_cut / 256 = ~0.09 granularity in deltaR
                             unsigned int substruct_0_bit_length_, // number of subjets for large-R jet - ALREADY IMPLEMENTED IN HLS

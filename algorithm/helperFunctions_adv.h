@@ -92,7 +92,7 @@ inline bool passesRCut(
     ap_uint<eta_bit_length_> uDEta;
     ap_uint<phi_bit_length_ - 1> corrDPhi;
     calcDeltaEtaPhi(eta1, phi1, eta2, phi2, uDEta, corrDPhi);
-    ap_uint<eta_bit_length_ + phi_bit_length_ - 1> lutIndex = uDEta * (1 << (phi_bit_length_ - 1)) + corrDPhi;
+    ap_uint<eta_bit_length_ + phi_bit_length_ - 1> lutIndex = uDEta * (phi_range_ / 2) + corrDPhi; // row stride = number of distinct wrapped |deltaPhi| codes, matching the LUT writer (see emulationHelperFunctions.h::calcLutIndex)
     if (lutIndex >= max_R2lut_size_) return false; // out of table -> definitely beyond rCut_
     return lut_[lutIndex];
 }
@@ -106,7 +106,7 @@ inline bool passesTwoRCut(
     ap_uint<eta_bit_length_> uDEta;
     ap_uint<phi_bit_length_ - 1> corrDPhi;
     calcDeltaEtaPhi(eta1, phi1, eta2, phi2, uDEta, corrDPhi);
-    ap_uint<eta_bit_length_ + phi_bit_length_ - 1> lutIndex = uDEta * (1 << (phi_bit_length_ - 1)) + corrDPhi;
+    ap_uint<eta_bit_length_ + phi_bit_length_ - 1> lutIndex = uDEta * (phi_range_ / 2) + corrDPhi; // row stride = number of distinct wrapped |deltaPhi| codes, matching the LUT writer (see emulationHelperFunctions.h::calcLutIndex)
     if (lutIndex >= max_Rlut_size_) return false; // out of table -> definitely beyond 2*rCut_
     return lutR_[lutIndex] <= digitized_two_rCut_;
 }
@@ -120,7 +120,7 @@ inline bool passesSearchRadius(
     ap_uint<eta_bit_length_> uDEta;
     ap_uint<phi_bit_length_ - 1> corrDPhi;
     calcDeltaEtaPhi(eta1, phi1, eta2, phi2, uDEta, corrDPhi);
-    ap_uint<eta_bit_length_ + phi_bit_length_ - 1> lutIndex = uDEta * (1 << (phi_bit_length_ - 1)) + corrDPhi;
+    ap_uint<eta_bit_length_ + phi_bit_length_ - 1> lutIndex = uDEta * (phi_range_ / 2) + corrDPhi; // row stride = number of distinct wrapped |deltaPhi| codes, matching the LUT writer (see emulationHelperFunctions.h::calcLutIndex)
     if (lutIndex >= max_Rlut_size_) return false; // out of table -> definitely beyond rMergeCut_
     return lutR_[lutIndex] <= digitized_rMergeCut_;
 }

@@ -60,9 +60,15 @@ int writeLUTsConstantsEmulation() {
 
         else if(algoVersion == 3){
             etBitLength = 13;
-            etaBitLength = 7;
+            // v3 now carries the same padded TOB field widths as v2 (10b eta / 9b phi).
+            // The codes still span etaRange / phiRange; the top 3 bits of each field are
+            // zero padding. Matches eta_bits_padding_ / phi_bits_padding_ in constants_adv.h.
+            // Nothing below derives a size or a granularity from these -- the LUT bounds and
+            // the granularities all come from etaRange / phiRange -- so widening them here
+            // changes only the packed output format.
+            etaBitLength = 10;
             etaRange = 98;
-            phiBitLength = 6;
+            phiBitLength = 9;
             phiRange = 64;
             substruct0BitLength = 2;
             substruct1BitLength = 8;

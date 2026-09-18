@@ -67,7 +67,10 @@ int main() {
 
             // Pack MSB -> LSB as num_subjets | phi | eta | et, i.e. et occupies the LSBs
             // (matches constants_adv.h)
-            uint32_t combined_value =
+            // uint64_t, not uint32_t: with the padded eta/phi fields the packed word is
+            // num_subjets(2) + phi(9) + eta(10) + et(13) = 34 bits, so a 32-bit accumulator
+            // silently drops num_subjets off the top of the hex column.
+            uint64_t combined_value =
                 ((numsubjets_value & maskN(num_subjets_length_)) << (phi_bit_length_ + eta_bit_length_ + et_bit_length_)) |
                 ((phi_value  & maskN(phi_bit_length_ )) << (eta_bit_length_ + et_bit_length_)) |
                 ((eta_value  & maskN(eta_bit_length_ )) <<  et_bit_length_) |

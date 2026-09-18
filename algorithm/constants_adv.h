@@ -10,13 +10,13 @@ constexpr unsigned int nSeedsInput_ = 6;
 constexpr unsigned int nSeedsOutput_ = 2;
 constexpr unsigned int maxObjectsConsidered_ = 256;
 constexpr double et_granularity_ = 0.25;
-constexpr unsigned int subjet_et_threshold_ = 200;
+constexpr double subjet_et_threshold_gev_ = 25.0;
 constexpr double r2Cut_ = 1.21;
 constexpr double rCut_ = 1.1;
 constexpr double rMergeCut_ = 2.0;
 constexpr unsigned int et_bit_length_ = 13;
-constexpr unsigned int eta_bit_length_ = 9;
-constexpr unsigned int phi_bit_length_ = 8;
+constexpr unsigned int eta_bit_length_ = 10;
+constexpr unsigned int phi_bit_length_ = 9;
 constexpr unsigned int num_subjets_length_ = 2;
 constexpr unsigned int deltaRBits_ = 8;
 constexpr unsigned int eta_range_ = 98;
@@ -31,6 +31,11 @@ constexpr unsigned int pi_digitized_in_phi_ = 32;
 constexpr unsigned int et_min_ = 0;
 constexpr unsigned int et_max_ = 2048;
 
+
+// Derived from GeV, never hardcoded as a code count: 200 codes was 25 GeV under the old
+// 0.125 GeV/LSB encoding (et_max_ = 1024) but is 50 GeV under the current 0.25 GeV/LSB one,
+// so the literal silently doubled the threshold when et_max_ moved to 2048.
+constexpr unsigned int subjet_et_threshold_ = static_cast<unsigned int>(subjet_et_threshold_gev_ / et_granularity_ + 0.5);
 
 constexpr unsigned int padded_zeroes_length_ = 64 - et_bit_length_ - eta_bit_length_ - phi_bit_length_ - num_subjets_length_ - num_subjets_length_;
 constexpr unsigned int padded_zeroes_length_32b_ = 32 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;

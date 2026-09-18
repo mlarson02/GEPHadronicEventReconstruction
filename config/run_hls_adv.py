@@ -17,13 +17,13 @@ base_constants = {
     "nSeedsOutput_": 2,
     "maxObjectsConsidered_": 256,
     "et_granularity_": 0.25, # 250 MeV LSB = et_max_ / (1 << et_bit_length_)
-    "subjet_et_threshold_": 200, # == 25 GeV 
+    "subjet_et_threshold_gev_": 25.0, # physics intent; digitized below against et_granularity_
     "r2Cut_": 1.21,
     "rCut_": 1.1,
     "rMergeCut_": 2.0,
     "et_bit_length_": 13,
-    "eta_bit_length_": 9,
-    "phi_bit_length_": 8,
+    "eta_bit_length_": 10, # 7 eta code bits + eta_bits_padding_
+    "phi_bit_length_": 9,  # 6 phi code bits + phi_bits_padding_
     "num_subjets_length_": 2, # note: with latest format, have 36 free bits!
     "deltaRBits_": 8,
     # ---- digitization grid ----
@@ -279,6 +279,11 @@ def write_constants_h(constants: dict, output_file: str, unroll: int, ii: int, u
 
         # Write the extra constants, LUT include, and struct
         f.write(f'''
+
+// Derived from GeV, never hardcoded as a code count: 200 codes was 25 GeV under the old
+// 0.125 GeV/LSB encoding (et_max_ = 1024) but is 50 GeV under the current 0.25 GeV/LSB one,
+// so the literal silently doubled the threshold when et_max_ moved to 2048.
+constexpr unsigned int subjet_et_threshold_ = static_cast<unsigned int>(subjet_et_threshold_gev_ / et_granularity_ + 0.5);
 
 constexpr unsigned int padded_zeroes_length_ = 64 - et_bit_length_ - eta_bit_length_ - phi_bit_length_ - num_subjets_length_ - num_subjets_length_;
 constexpr unsigned int padded_zeroes_length_32b_ = 32 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;
