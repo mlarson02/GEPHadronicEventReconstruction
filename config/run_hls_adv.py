@@ -295,6 +295,12 @@ typedef ap_uint<total_bits_output_> output;
 constexpr unsigned int eta_bits_padding_ = 3;
 constexpr unsigned int phi_bits_padding_ = 3;
 
+// Widths of the eta/phi codes themselves, as opposed to the padded TOB fields they ship in.
+// Size ALL arithmetic from these, never from *_bit_length_: the padding carries no information
+// and only inflates the multipliers, adders and comparators downstream.
+constexpr unsigned int eta_code_bits_ = eta_bit_length_ - eta_bits_padding_; // spans eta_range_
+constexpr unsigned int phi_code_bits_ = phi_bit_length_ - phi_bits_padding_; // spans phi_range_
+
 // MSB -> LSB word order is phi | eta | et, i.e. et occupies the LSBs and phi the MSBs
 constexpr unsigned int et_low_   = 0;
 constexpr unsigned int et_high_  = et_low_ + et_bit_length_ - 1;
@@ -445,7 +451,7 @@ if __name__ == "__main__":
                             print(f" Wrote {constsFilename}")
                             #run_lut_generator_via_root(str(REPO_ROOT / "algorithm" / "writeDeltaR2LUT_adv.cc"))
 
-                            subprocess.run(["vitis", "-s", "jet_tagger_hls_adv.py", file_suffix, "0"], check=True)
+                            subprocess.run(["vitis", "-s", "jet_tagger_hls_adv.py", file_suffix, "1"], check=True)
                             xml_report_path = os.path.join('w', file_suffix, file_suffix, 'syn', 'report', 'jet_tagger_top_csynth.xml')
                             print("xml_report_path,", xml_report_path)
                                     #resources, latency = extract_hls_report(xml_report_path)

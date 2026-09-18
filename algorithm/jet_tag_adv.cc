@@ -82,11 +82,11 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     // Read both triplets first, then apply the swap under a single mask (a dynamic-index read/write on
     // the fully-partitioned seedValues array is a mux/demux -- fixed latency, not a control branch).
     ap_uint<et_bit_length_ > candEt  = seedValues[orSwapIdx].range(et_high_, et_low_);
-    ap_uint<eta_bit_length_ - eta_bits_padding_> candEta = seedValues[orSwapIdx].range(eta_high_ - eta_bits_padding_, eta_low_);
-    ap_uint<phi_bit_length_ - phi_bits_padding_> candPhi = seedValues[orSwapIdx].range(phi_high_ - phi_bits_padding_, phi_low_);
+    ap_uint<eta_code_bits_> candEta = seedValues[orSwapIdx].range(eta_high_ - eta_bits_padding_, eta_low_);
+    ap_uint<phi_code_bits_> candPhi = seedValues[orSwapIdx].range(phi_high_ - phi_bits_padding_, phi_low_);
     ap_uint<et_bit_length_ > subEt  = seedValues[1].range(et_high_, et_low_);
-    ap_uint<eta_bit_length_ - eta_bits_padding_> subEta = seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_);
-    ap_uint<phi_bit_length_ - phi_bits_padding_> subPhi = seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_);
+    ap_uint<eta_code_bits_> subEta = seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_);
+    ap_uint<phi_code_bits_> subPhi = seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_);
     if(doOrSwap){
         // Swap the (Et, eta, phi) triplet between the original subleading seed (slot 1) and the candidate
         seedValues[1].range(et_high_, et_low_)   = candEt;
@@ -201,17 +201,17 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         //std::cout << "iSeed: " << iSeed << "\n";
         //fflush(stdout);
 
-        const ap_int<phi_bit_length_ - phi_bits_padding_ + 2> PI_D     =  ap_int<phi_bit_length_ - phi_bits_padding_ + 2>(pi_digitized_in_phi_);
+        const ap_int<phi_code_bits_ + 2> PI_D     =  ap_int<phi_code_bits_ + 2>(pi_digitized_in_phi_);
         // Wrap period = the full circle in code units = phi_range_ (64), NOT (1 << phi bits) - 1.
         // The old "- 1" made wrapSym wrap one LSB short: a dphi of +63 codes wrapped to 0 instead
         // of -1. Matches TWO_PI_D = int(phi_range_) in the emulation constants generator.
-        const ap_int<phi_bit_length_ - phi_bits_padding_ + 2> TWO_PI_D =  ap_int<phi_bit_length_ - phi_bits_padding_ + 2>(phi_range_);
+        const ap_int<phi_code_bits_ + 2> TWO_PI_D =  ap_int<phi_code_bits_ + 2>(phi_range_);
 
         //std::cout << "pi_digitized_in_phi_: " << pi_digitized_in_phi_ << "\n";
         //std::cout << "PI_D: " << PI_D  << " , TWO_PI_D: " << TWO_PI_D << "\n";
 
         // Wraps a signed phi value into [-PI, PI) using digitized constants
-        auto wrapSym = [&](ap_int<phi_bit_length_ - phi_bits_padding_ + 2> x) -> ap_int<phi_bit_length_ - phi_bits_padding_ + 2> {
+        auto wrapSym = [&](ap_int<phi_code_bits_ + 2> x) -> ap_int<phi_code_bits_ + 2> {
             #pragma HLS INLINE
             if (x >  PI_D)   x -= TWO_PI_D;
             if (x < -PI_D)  x += TWO_PI_D;
@@ -219,33 +219,33 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         };
 
         // Convert eta/phi from unsigned digitized format to signed centered at 0
-        ap_int<eta_bit_length_ - eta_bits_padding_ + 1> eta1 = seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_) - (1 << (eta_bit_length_ - eta_bits_padding_ - 1));
-        ap_int<eta_bit_length_ - eta_bits_padding_ + 1> eta2 = seedValues[candSeedIdx].range(eta_high_ - eta_bits_padding_, eta_low_) - (1 << (eta_bit_length_ - eta_bits_padding_ - 1));
+        ap_int<eta_code_bits_ + 1> eta1 = seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_) - (1 << (eta_code_bits_ - 1));
+        ap_int<eta_code_bits_ + 1> eta2 = seedValues[candSeedIdx].range(eta_high_ - eta_bits_padding_, eta_low_) - (1 << (eta_code_bits_ - 1));
         //std::cout << "eta 1 : " << eta1 << " and eta2 : " << eta2 << "\n";
 
         //std::cout << "phi1: " << seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) << " and phi2: " << seedValues[indices[iSeed] + nSeedsOutput_].range(phi_high_ - phi_bits_padding_, phi_low_) << "\n";
-        ap_int<phi_bit_length_ - phi_bits_padding_ + 2> phi1s = seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) - (1 << (phi_bit_length_ - phi_bits_padding_ - 1));
-        ap_int<phi_bit_length_ - phi_bits_padding_ + 2> phi2s = seedValues[candSeedIdx].range(phi_high_ - phi_bits_padding_, phi_low_) - (1 << (phi_bit_length_ - phi_bits_padding_ - 1));
+        ap_int<phi_code_bits_ + 2> phi1s = seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) - (1 << (phi_code_bits_ - 1));
+        ap_int<phi_code_bits_ + 2> phi2s = seedValues[candSeedIdx].range(phi_high_ - phi_bits_padding_, phi_low_) - (1 << (phi_code_bits_ - 1));
         //std::cout << "phi1s: " << phi1s << " and phi2s: " << phi2s << "\n";
 
         // --- Shortest-arc phi midpoint ---
-        ap_int<phi_bit_length_ - phi_bits_padding_ + 2> dphi = phi2s - phi1s;
+        ap_int<phi_code_bits_ + 2> dphi = phi2s - phi1s;
         //std::cout << "dphi before wrap :" << dphi << "\n";
         dphi = wrapSym(dphi);                          // now in [-PI, PI)
         //std::cout << "dphi after wrap :" << dphi << "\n";
-        ap_int<phi_bit_length_ - phi_bits_padding_ + 2> phi_mid = phi1s + (dphi >> 1);  // arithmetic shift (divide by 2)
+        ap_int<phi_code_bits_ + 2> phi_mid = phi1s + (dphi >> 1);  // arithmetic shift (divide by 2)
         //std::cout << "phi_mid before wrap :" << phi_mid << "\n";
         phi_mid = wrapSym(phi_mid);
         //std::cout << "phi_mid after wrap :" << phi_mid << "\n";
 
         // --- Unweighted eta midpoint ---
-        ap_int<eta_bit_length_ - eta_bits_padding_ + 1> eta_mid = (eta1 + eta2) >> 1;
+        ap_int<eta_code_bits_ + 1> eta_mid = (eta1 + eta2) >> 1;
 
         //std::cout << "eta mid : " << eta_mid << " phi_mid: " << phi_mid << "\n";
 
         // Convert midpoints back to digitized unsigned format
-        ap_uint<eta_bit_length_ - eta_bits_padding_> eta_mid_digitized = eta_mid + (1 << (eta_bit_length_ - eta_bits_padding_ - 1));
-        ap_uint<phi_bit_length_ - phi_bits_padding_> phi_mid_digitized = phi_mid + (1 << (phi_bit_length_ - phi_bits_padding_ - 1));
+        ap_uint<eta_code_bits_> eta_mid_digitized = eta_mid + (1 << (eta_code_bits_ - 1));
+        ap_uint<phi_code_bits_> phi_mid_digitized = phi_mid + (1 << (phi_code_bits_ - 1));
 
         //std::cout << "eta_mid_digitized: " << eta_mid_digitized << " phi_mid_digitized: " << phi_mid_digitized << "\n";
         if(doShift){

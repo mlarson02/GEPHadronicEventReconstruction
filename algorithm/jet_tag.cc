@@ -31,8 +31,8 @@ void jet_tag(input inputObjectValues[maxObjectsConsidered_], output (&outputJetV
     
     for (unsigned int iSeed = 0; iSeed < nSeedsOutput_; ++iSeed){ // Loop through seeds (which access up to Nth element of input object values now)
         #pragma HLS unroll
-        ap_uint<eta_bit_length_ > seedEta = inputObjectValues[iSeed].range(eta_high_, eta_low_);
-        ap_uint<phi_bit_length_ > seedPhi = inputObjectValues[iSeed].range(phi_high_, phi_low_);
+        ap_uint<eta_code_bits_> seedEta = inputObjectValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_);
+        ap_uint<phi_code_bits_> seedPhi = inputObjectValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_);
         ap_uint<et_bit_length_ > outputJetEt = inputObjectValues[iSeed].range(et_high_, et_low_);
         //std::cout << "inputObjectValues[iSeed]: " << inputObjectValues[iSeed] << "\n";
         //std::cout << "et_high_: " << et_high_ << " , et_low_: " << et_low_ << "\n";
@@ -61,10 +61,10 @@ void jet_tag(input inputObjectValues[maxObjectsConsidered_], output (&outputJetV
             if (iInput < nSeedsOutput_){
                 etTree[iInput] = 0;
             } else {
-                ap_uint<eta_bit_length_ > inputEta = inputObjectValues[iInput].range(eta_high_, eta_low_);
-                ap_uint<phi_bit_length_ > inputPhi = inputObjectValues[iInput].range(phi_high_, phi_low_);
+                ap_uint<eta_code_bits_> inputEta = inputObjectValues[iInput].range(eta_high_ - eta_bits_padding_, eta_low_);
+                ap_uint<phi_code_bits_> inputPhi = inputObjectValues[iInput].range(phi_high_ - phi_bits_padding_, phi_low_);
                 ap_uint<et_bit_length_ > inputEt = inputObjectValues[iInput].range(et_high_, et_low_);
-                ap_uint<2*(eta_bit_length_ + phi_bit_length_)> deltaR2 = calcDeltaR2(seedEta, seedPhi, inputEta, inputPhi);
+                ap_uint<2*eta_code_bits_ + 1> deltaR2 = calcDeltaR2(seedEta, seedPhi, inputEta, inputPhi);
                 etTree[iInput] = (deltaR2 <= digitized_delta_R2_)
                                ? ap_uint<et_bit_length_ + 11>(inputEt)
                                : ap_uint<et_bit_length_ + 11>(0);

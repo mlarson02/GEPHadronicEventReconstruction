@@ -18,7 +18,7 @@ cwd = os.getcwd() + '/'
 comp_name = project_name
 
 # Define the directory path
-comp_dir = f'./w/{comp_name}'
+comp_dir = f'./w_2024.2_2/{comp_name}'
 
 # Delete the directory if it exists
 if os.path.exists(comp_dir):
@@ -26,13 +26,13 @@ if os.path.exists(comp_dir):
 
 # Initialize Vitis client and set workspace
 client = vitis.create_client()
-client.set_workspace(path='./w')
+client.set_workspace(path='./w_2024.2_2')
 
 # Create new HLS component with an empty template
 comp = client.create_hls_component(name=comp_name, cfg_file=['hls_config.cfg'], template='empty')
 
 # Modify config file
-cfg_path = f'./w/{comp_name}/hls_config.cfg'
+cfg_path = f'./w_2024.2_2/{comp_name}/hls_config.cfg'
 cfg = client.get_config_file(path=cfg_path)
 
 cfg.set_value(key='part', value='xcvp1802-vsva5601-2MP-e-S') #xcvc1902-vsva2197-2MP-e-S
@@ -65,7 +65,7 @@ cfg.set_values(section='hls', key='tb.file', values=[
 ])
 
 # Manually strip unwanted settings and add cosim waveform config
-cfg_path = f'./w/{comp_name}/hls_config.cfg'
+cfg_path = f'./w_2024.2_2/{comp_name}/hls_config.cfg'
 
 with open(cfg_path, 'r') as f:
     lines = f.readlines()
@@ -91,7 +91,7 @@ if not cosim_exists:
     filtered_lines.append('xsim.wave_debug = all\n')
     filtered_lines.append('xsim.dump = all\n')
 
-with open(cfg_path, 'w') as f:
+with open(cfg_path, 'w_2024.2_2') as f:
     f.writelines(filtered_lines)
 """
 # Run flow

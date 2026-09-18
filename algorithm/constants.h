@@ -44,11 +44,23 @@ constexpr unsigned int max_R_8b_lut_size_ = 325;
 const unsigned int lut_size_ = (eta_range_ * (phi_range_ / 2)); // rows of |deltaPhi| codes below pi
 #if !WRITE_LUT
 constexpr unsigned int padded_zeroes_length_ = 64 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;
-constexpr unsigned int padded_zeroes_length_32b_ = 128 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;
+constexpr unsigned int padded_zeroes_length_32b_ = 32 - et_bit_length_ - eta_bit_length_ - phi_bit_length_;
 constexpr unsigned int total_bits_input_ = padded_zeroes_length_32b_ + et_bit_length_ + eta_bit_length_ + phi_bit_length_;
 constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + et_bit_length_ + eta_bit_length_ + phi_bit_length_;
 typedef ap_uint<total_bits_input_> input; // need 32b input, 64b output!
 typedef ap_uint<total_bits_output_> output;
+
+// The eta/phi codes span eta_range_ / phi_range_, which need 7 and 6 bits; the TOB fields
+// they are packed into are 3 bits wider, and those high bits are always zero. Read/pack via
+// the full field, but size all arithmetic from (bit_length_ - bits_padding_).
+constexpr unsigned int eta_bits_padding_ = 3;
+constexpr unsigned int phi_bits_padding_ = 3;
+
+// Widths of the eta/phi codes themselves, as opposed to the padded TOB fields they ship in.
+// Size ALL arithmetic from these, never from *_bit_length_: the padding carries no information
+// and only inflates the multipliers, adders and comparators downstream.
+constexpr unsigned int eta_code_bits_ = eta_bit_length_ - eta_bits_padding_; // spans eta_range_
+constexpr unsigned int phi_code_bits_ = phi_bit_length_ - phi_bits_padding_; // spans phi_range_
 
 // MSB -> LSB word order is phi | eta | et, i.e. et occupies the LSBs and phi the MSBs
 constexpr unsigned int et_low_   = 0;
