@@ -43,15 +43,15 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     // Ensure leading and subleading seeds don't overlap within deltaR < 2 * jet radius.
     // If they do, search seeds 3–N for the highest-Et seed that is separated from the leading
     // seed by > 2R and swap it in as the subleading seed.
-    //std::cout << "seed 1 OR eta: " << seedValues[0].range(eta_high_, eta_low_) << " , phi: " << seedValues[0].range(phi_high_, phi_low_) << "\n";
-    //std::cout << "seed 2 OR eta: " << seedValues[1].range(eta_high_, eta_low_) << " , phi: " << seedValues[1].range(phi_high_, phi_low_) << "\n";
+    //std::cout << "seed 1 OR eta: " << seedValues[0].range(eta_high_ - eta_bits_padding_, eta_low_) << " , phi: " << seedValues[0].range(phi_high_ - phi_bits_padding_, phi_low_) << "\n";
+    //std::cout << "seed 2 OR eta: " << seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_) << " , phi: " << seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_) << "\n";
     // Restructured as compute-always-then-mask for deterministic (data-independent) latency: every
     // candidate check runs unconditionally, a priority encoder selects the first qualifying seed, and
     // the swap is applied via a masked write. Bit-identical to the original guarded-loop-with-break:
     // same "first non-empty seed separated from the leading seed by > 2R" selection, same single swap.
     bool orOverlap = passesTwoRCut(
-        seedValues[0].range(eta_high_, eta_low_), seedValues[0].range(phi_high_, phi_low_),
-        seedValues[1].range(eta_high_, eta_low_), seedValues[1].range(phi_high_, phi_low_)
+        seedValues[0].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[0].range(phi_high_ - phi_bits_padding_, phi_low_),
+        seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_)
     ); // leading & subleading overlap within 2 * rCut_
 
     // For each candidate seed (3..N): a valid swap target iff it is non-empty AND separated from the
@@ -60,10 +60,10 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     #pragma HLS ARRAY_PARTITION variable=orCand complete
     for(unsigned int iSeedOR = nSeedsOutput_; iSeedOR < nTotalSeeds_; iSeedOR++){
         #pragma HLS unroll
-        bool nonEmpty = !(seedValues[iSeedOR].range(et_high_, et_low_) == 0 && seedValues[iSeedOR].range(eta_high_, eta_low_) == 0 && seedValues[iSeedOR].range(phi_high_, phi_low_) == 0);
+        bool nonEmpty = !(seedValues[iSeedOR].range(et_high_, et_low_) == 0 && seedValues[iSeedOR].range(eta_high_ - eta_bits_padding_, eta_low_) == 0 && seedValues[iSeedOR].range(phi_high_ - phi_bits_padding_, phi_low_) == 0);
         orCand[iSeedOR] = nonEmpty && !passesTwoRCut(
-            seedValues[0].range(eta_high_, eta_low_), seedValues[0].range(phi_high_, phi_low_),
-            seedValues[iSeedOR].range(eta_high_, eta_low_), seedValues[iSeedOR].range(phi_high_, phi_low_)
+            seedValues[0].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[0].range(phi_high_ - phi_bits_padding_, phi_low_),
+            seedValues[iSeedOR].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[iSeedOR].range(phi_high_ - phi_bits_padding_, phi_low_)
         );
     }
 
@@ -82,19 +82,19 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     // Read both triplets first, then apply the swap under a single mask (a dynamic-index read/write on
     // the fully-partitioned seedValues array is a mux/demux -- fixed latency, not a control branch).
     ap_uint<et_bit_length_ > candEt  = seedValues[orSwapIdx].range(et_high_, et_low_);
-    ap_uint<eta_bit_length_> candEta = seedValues[orSwapIdx].range(eta_high_, eta_low_);
-    ap_uint<phi_bit_length_> candPhi = seedValues[orSwapIdx].range(phi_high_, phi_low_);
+    ap_uint<eta_bit_length_> candEta = seedValues[orSwapIdx].range(eta_high_ - eta_bits_padding_, eta_low_);
+    ap_uint<phi_bit_length_> candPhi = seedValues[orSwapIdx].range(phi_high_ - phi_bits_padding_, phi_low_);
     ap_uint<et_bit_length_ > subEt  = seedValues[1].range(et_high_, et_low_);
-    ap_uint<eta_bit_length_> subEta = seedValues[1].range(eta_high_, eta_low_);
-    ap_uint<phi_bit_length_> subPhi = seedValues[1].range(phi_high_, phi_low_);
+    ap_uint<eta_bit_length_> subEta = seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_);
+    ap_uint<phi_bit_length_> subPhi = seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_);
     if(doOrSwap){
         // Swap the (Et, eta, phi) triplet between the original subleading seed (slot 1) and the candidate
         seedValues[1].range(et_high_, et_low_)   = candEt;
-        seedValues[1].range(eta_high_, eta_low_) = candEta;
-        seedValues[1].range(phi_high_, phi_low_) = candPhi;
+        seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_) = candEta;
+        seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_) = candPhi;
         seedValues[orSwapIdx].range(et_high_, et_low_)   = subEt;
-        seedValues[orSwapIdx].range(eta_high_, eta_low_) = subEta;
-        seedValues[orSwapIdx].range(phi_high_, phi_low_) = subPhi;
+        seedValues[orSwapIdx].range(eta_high_ - eta_bits_padding_, eta_low_) = subEta;
+        seedValues[orSwapIdx].range(phi_high_ - phi_bits_padding_, phi_low_) = subPhi;
     }
 
 
@@ -108,8 +108,8 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     bool indicesofProtoSeeds[nSeedsOutput_][nSeedsDeltaR_] = {false};
     ap_int<4> indices[2] = {-1, -1};
     #pragma HLS bind_storage variable=indicesofProtoSeeds type=RAM_1P impl=lutram
-    //std::cout << "Seed 1 Eta, Phi: " << seedValues[0].range(eta_high_, eta_low_) << " , " << seedValues[0].range(phi_high_, phi_low_) << "\n";
-    //std::cout << "Seed 2 Eta, Phi: " << seedValues[1].range(eta_high_, eta_low_) << " , " << seedValues[1].range(phi_high_, phi_low_) << "\n";
+    //std::cout << "Seed 1 Eta, Phi: " << seedValues[0].range(eta_high_ - eta_bits_padding_, eta_low_) << " , " << seedValues[0].range(phi_high_ - phi_bits_padding_, phi_low_) << "\n";
+    //std::cout << "Seed 2 Eta, Phi: " << seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_) << " , " << seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_) << "\n";
     //std::cout << " ----------------- SEED POS OPT -----------------" << "\n";
     for (unsigned int iSeed = 0; iSeed < nSeedsOutput_; iSeed++){
         #pragma HLS unroll
@@ -118,12 +118,12 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         for (unsigned int iPreSeed = 0; iPreSeed < nSeedsDeltaR_; iPreSeed++){
             #pragma HLS unroll // fully unrolled for deterministic (feed-forward) latency
             //std::cout << "iPreSeed: " << iPreSeed << "\n";
-            //std::cout << "seed eta: " << seedValues[iSeed].range(eta_high_, eta_low_) << " , phi: " << seedValues[iSeed].range(phi_high_, phi_low_) << " , et: " << seedValues[iSeed].range(et_high_, et_low_) << "\n";
-            //std::cout << "pre seed eta: " << seedValues[iPreSeed + nSeedsOutput_].range(eta_high_, eta_low_) << " , phi: " << seedValues[iPreSeed + nSeedsOutput_].range(phi_high_, phi_low_) << " , et: " << seedValues[iPreSeed + nSeedsOutput_].range(et_high_, et_low_) << "\n";
+            //std::cout << "seed eta: " << seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_) << " , phi: " << seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) << " , et: " << seedValues[iSeed].range(et_high_, et_low_) << "\n";
+            //std::cout << "pre seed eta: " << seedValues[iPreSeed + nSeedsOutput_].range(eta_high_ - eta_bits_padding_, eta_low_) << " , phi: " << seedValues[iPreSeed + nSeedsOutput_].range(phi_high_ - phi_bits_padding_, phi_low_) << " , et: " << seedValues[iPreSeed + nSeedsOutput_].range(et_high_, et_low_) << "\n";
             if(seedValues[iPreSeed + nSeedsOutput_].range(et_high_, et_low_) == 0) continue;
             if (passesSearchRadius(
-                seedValues[iSeed].range(eta_high_, eta_low_), seedValues[iSeed].range(phi_high_, phi_low_),
-                seedValues[iPreSeed + nSeedsOutput_].range(eta_high_, eta_low_), seedValues[iPreSeed + nSeedsOutput_].range(phi_high_, phi_low_)
+                seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_),
+                seedValues[iPreSeed + nSeedsOutput_].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[iPreSeed + nSeedsOutput_].range(phi_high_ - phi_bits_padding_, phi_low_)
             )){
                 protoSeedCounter[iSeed]++;
                 indicesofProtoSeeds[iSeed][iPreSeed] = true;
@@ -216,13 +216,13 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         };
 
         // Convert eta/phi from unsigned digitized format to signed centered at 0
-        ap_int<eta_bit_length_ + 1> eta1 = seedValues[iSeed].range(eta_high_, eta_low_) - (1 << (eta_bit_length_ - 1));
-        ap_int<eta_bit_length_ + 1> eta2 = seedValues[candSeedIdx].range(eta_high_, eta_low_) - (1 << (eta_bit_length_ - 1));
+        ap_int<eta_bit_length_ + 1> eta1 = seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_) - (1 << (eta_bit_length_ - 1));
+        ap_int<eta_bit_length_ + 1> eta2 = seedValues[candSeedIdx].range(eta_high_ - eta_bits_padding_, eta_low_) - (1 << (eta_bit_length_ - 1));
         //std::cout << "eta 1 : " << eta1 << " and eta2 : " << eta2 << "\n";
 
-        //std::cout << "phi1: " << seedValues[iSeed].range(phi_high_, phi_low_) << " and phi2: " << seedValues[indices[iSeed] + nSeedsOutput_].range(phi_high_, phi_low_) << "\n";
-        ap_int<phi_bit_length_ + 2> phi1s = seedValues[iSeed].range(phi_high_, phi_low_) - (1 << (phi_bit_length_ - 1));
-        ap_int<phi_bit_length_ + 2> phi2s = seedValues[candSeedIdx].range(phi_high_, phi_low_) - (1 << (phi_bit_length_ - 1));
+        //std::cout << "phi1: " << seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) << " and phi2: " << seedValues[indices[iSeed] + nSeedsOutput_].range(phi_high_ - phi_bits_padding_, phi_low_) << "\n";
+        ap_int<phi_bit_length_ + 2> phi1s = seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) - (1 << (phi_bit_length_ - 1));
+        ap_int<phi_bit_length_ + 2> phi2s = seedValues[candSeedIdx].range(phi_high_ - phi_bits_padding_, phi_low_) - (1 << (phi_bit_length_ - 1));
         //std::cout << "phi1s: " << phi1s << " and phi2s: " << phi2s << "\n";
 
         // --- Shortest-arc phi midpoint ---
@@ -246,8 +246,8 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
 
         //std::cout << "eta_mid_digitized: " << eta_mid_digitized << " phi_mid_digitized: " << phi_mid_digitized << "\n";
         if(doShift){
-            seedValues[iSeed].range(eta_high_, eta_low_) = eta_mid_digitized;
-            seedValues[iSeed].range(phi_high_, phi_low_) = phi_mid_digitized;
+            seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_) = eta_mid_digitized;
+            seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) = phi_mid_digitized;
         }
     }
 
@@ -263,8 +263,8 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
 
         //std::cout << "----------" << "\n";
         //std::cout << "iSeed: " << iSeed << "\n";
-        //std::cout << "ORIGINAL seed eta: " << seedValuesForSubjets[iSeed].range(eta_high_, eta_low_) << " , phi: " << seedValuesForSubjets[iSeed].range(phi_high_, phi_low_) << " , et: " << seedValuesForSubjets[iSeed].range(et_high_, et_low_) << "\n";
-        //std::cout << "seed eta: " << seedValues[iSeed].range(eta_high_, eta_low_) << " , phi: " << seedValues[iSeed].range(phi_high_, phi_low_) << " , et: " << seedValues[iSeed].range(et_high_, et_low_) << "\n";
+        //std::cout << "ORIGINAL seed eta: " << seedValuesForSubjets[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_) << " , phi: " << seedValuesForSubjets[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) << " , et: " << seedValuesForSubjets[iSeed].range(et_high_, et_low_) << "\n";
+        //std::cout << "seed eta: " << seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_) << " , phi: " << seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) << " , et: " << seedValues[iSeed].range(et_high_, et_low_) << "\n";
 
         // compute-always-then-mask for deterministic latency: the Et accumulation and subjet count run
         // unconditionally, then both outputs are zeroed for an empty seed. Bit-identical to the previous
@@ -291,8 +291,8 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         for (unsigned int iInput = 0; iInput < maxObjectsConsidered_; ++iInput){
             #pragma HLS unroll
             etTree[iInput] = passesRCut(
-                seedValues[iSeed].range(eta_high_, eta_low_), seedValues[iSeed].range(phi_high_, phi_low_),
-                inputObjectValues[iInput].range(eta_high_, eta_low_), inputObjectValues[iInput].range(phi_high_, phi_low_)
+                seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_),
+                inputObjectValues[iInput].range(eta_high_ - eta_bits_padding_, eta_low_), inputObjectValues[iInput].range(phi_high_ - phi_bits_padding_, phi_low_)
             ) ? ap_uint<et_bit_length_ + 11>(inputObjectValues[iInput].range(et_high_, et_low_))
               : ap_uint<et_bit_length_ + 11>(0);
         }
@@ -314,8 +314,8 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
             if(seedValuesForSubjets[iSubjet].range(et_high_, et_low_) > subjet_et_threshold_){ // > 25 GeV nominally
                 //std::cout << " passes et threshold" << "\n";
                 if (passesRCut(
-                    seedValues[iSeed].range(eta_high_, eta_low_), seedValues[iSeed].range(phi_high_, phi_low_),
-                    seedValuesForSubjets[iSubjet].range(eta_high_, eta_low_), seedValuesForSubjets[iSubjet].range(phi_high_, phi_low_)
+                    seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_),
+                    seedValuesForSubjets[iSubjet].range(eta_high_ - eta_bits_padding_, eta_low_), seedValuesForSubjets[iSubjet].range(phi_high_ - phi_bits_padding_, phi_low_)
                 )){
                     //std::cout << "FOUND SUBJET" << "\n";
                     numSubjets = (numSubjets < ap_uint<num_subjets_length_>((1 << num_subjets_length_) - 1))
@@ -337,7 +337,7 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         outputJetValues[iSeed].range(padded_zeroes_high_, padded_zeroes_low_) = 0;
         outputJetValues[iSeed].range(num_subjets_high_, num_subjets_low_) = numSubjets;
         outputJetValues[iSeed].range(et_high_, et_low_) = outputJetEt;
-        outputJetValues[iSeed].range(eta_high_, eta_low_) = seedValues[iSeed].range(eta_high_, eta_low_);
-        outputJetValues[iSeed].range(phi_high_, phi_low_) = seedValues[iSeed].range(phi_high_, phi_low_);
+        outputJetValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_) = seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_);
+        outputJetValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_) = seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_);
     }
 }

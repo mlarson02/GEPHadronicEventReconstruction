@@ -15,15 +15,15 @@ base_constants = {
     "nTotalSeeds_": 10,
     "nSeedsInput_": 6,
     "nSeedsOutput_": 2,
-    "maxObjectsConsidered_": 128,
+    "maxObjectsConsidered_": 256,
     "et_granularity_": 0.25, # 250 MeV LSB = et_max_ / (1 << et_bit_length_)
     "subjet_et_threshold_": 200, # == 25 GeV 
     "r2Cut_": 1.21,
     "rCut_": 1.1,
     "rMergeCut_": 2.0,
     "et_bit_length_": 13,
-    "eta_bit_length_": 7,
-    "phi_bit_length_": 6,
+    "eta_bit_length_": 9,
+    "phi_bit_length_": 8,
     "num_subjets_length_": 2, # note: with latest format, have 36 free bits!
     "deltaRBits_": 8,
     # ---- digitization grid ----
@@ -287,6 +287,9 @@ constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + num_subjets_
 typedef ap_uint<total_bits_input_> input; // need 32b input, 64b output!
 typedef ap_uint<total_bits_output_> output;
 
+constexpr unsigned int eta_bits_padding_ = 3;
+constexpr unsigned int phi_bits_padding_ = 3;
+
 // MSB -> LSB word order is phi | eta | et, i.e. et occupies the LSBs and phi the MSBs
 constexpr unsigned int et_low_   = 0;
 constexpr unsigned int et_high_  = et_low_ + et_bit_length_ - 1;
@@ -350,7 +353,7 @@ if __name__ == "__main__":
     r2Cut_options = [1.21]
     #r2Cut_options = [1.44]
     #maxObjectsConsidered_options = [128, 256, 512, 1024]
-    maxObjectsConsidered_options = [128]
+    maxObjectsConsidered_options = [256]
     #maxObjectsConsidered_options = [128]
     rMergeCut_options = [2.0]
     #rMergeCut_options = [3.5]
@@ -421,7 +424,7 @@ if __name__ == "__main__":
                                 f"maxObj{maxObjectsConsidered}_"
                                 f"rMerge{rMergeCut_str}_"
                                 f"{signal_str}"
-                                "_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL_MODIFICATIONS_DETERMINISTIC_TREEFIX"
+                                "_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL_CSIM"
                             )
                             print(f"Launching HLS with project name: {file_suffix}")
 
@@ -437,7 +440,7 @@ if __name__ == "__main__":
                             print(f" Wrote {constsFilename}")
                             #run_lut_generator_via_root(str(REPO_ROOT / "algorithm" / "writeDeltaR2LUT_adv.cc"))
 
-                            subprocess.run(["vitis", "-s", "jet_tagger_hls_adv.py", file_suffix, "1"], check=True)
+                            subprocess.run(["vitis", "-s", "jet_tagger_hls_adv.py", file_suffix, "0"], check=True)
                             xml_report_path = os.path.join('w', file_suffix, file_suffix, 'syn', 'report', 'jet_tagger_top_csynth.xml')
                             print("xml_report_path,", xml_report_path)
                                     #resources, latency = extract_hls_report(xml_report_path)

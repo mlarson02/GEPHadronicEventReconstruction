@@ -17,14 +17,14 @@ int main() {
     std::vector<unsigned int > allOutputJetMergedIOSubLeading; 
 
     // FIXME add further configurability for which seeds, input objects are used!
-    const std::string seedFile = memPrintsPath_ + "GEPConeJetsCellsTowersSK/" + fileName_ + "_gepconejetscellstowerssk.dat";
+    const std::string seedFile = memPrintsPath_ + "GEPConeJetsCellsTowersEtaSK/" + fileName_ + "_gepconejetscellstowersetask.dat";
     //const std::string inputObjectFile = memPrintsPath_ + "CaloTopo_422/" + fileName_ + "_topo422.dat";
-    const std::string inputObjectFile = memPrintsPath_ + "GEPCellsTowersSK/" + fileName_ + "_gepcellstowerssk.dat";
+    const std::string inputObjectFile = memPrintsPath_ + "GEPCellsTowersEtaSK/" + fileName_ + "_gepcellstowersetask.dat";
     std::cout << "inputObjectFile: " << inputObjectFile << "\n";
     std::cout << " seed file: " << seedFile << "\n";
 
     // Call the function under test
-    std::string outputJetsFile = memPrintsPath_ + "largeRJets_SK_ValidateEmulation/" + fileName_ + "_largeR";
+    std::string outputJetsFile = memPrintsPath_ + "largeRJets_EtaSK_ValidateEmulation/" + fileName_ + "_largeR";
     outputJetsFile += kFileSuffix; 
     outputJetsFile += ".dat";
 

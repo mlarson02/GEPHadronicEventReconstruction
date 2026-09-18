@@ -10,10 +10,10 @@ int main() {
 
     input inputObjectValues[maxObjectsConsidered_];
 
-    const std::string inputObjectFile = memPrintsPath_ + "GEPConeJetsCellsTowersSK/" + fileName_ + "_gepconejetscellstowerssk.dat";
+    const std::string inputObjectFile = memPrintsPath_ + "GEPConeJetsCellsTowersEtaSK/" + fileName_ + "_gepconejetscellstowersetask.dat";
     std::cout << "inputObjectFile: " << inputObjectFile << "\n";
     // Call the function under test
-    std::string outputJetsFile = memPrintsPath_ + "largeRJets_SK_ValidateEmulation/" + fileName_ + "_largeR";
+    std::string outputJetsFile = memPrintsPath_ + "largeRJets_EtaSK_ValidateEmulation/" + fileName_ + "_largeR";
     
     outputJetsFile += kFileSuffix; 
     outputJetsFile += ".dat";

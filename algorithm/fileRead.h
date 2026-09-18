@@ -12,10 +12,9 @@
 #include <cmath>
 
 // Define constants used by testbench
-const std::string memPrintsPath_ = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/MemPrints_v2/";
-const std::string lutPath_ = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/LUTs/deltaR2Cut.dat";
+const std::string memPrintsPath_ = "/eos/user/m/mlarson/TransferMemPrintsLUTs/data/MemPrints_v3/";
 static inline uint32_t maskN(unsigned n) { return (n >= 32) ? 0xFFFFFFFFu : ((1u << n) - 1u); }
-const std::string kFileSuffix = "nSeeds2_r2Cut1p21_maxObj10_0p001sig_WTAConeJetsCellsTowers_ValidateEmulation_FINAL_MODIFIED_Resynth";
+const std::string kFileSuffix = "nSeeds2_r2Cut1p21_maxObj256_rMerge2p0_sig_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL_CSIM";
 constexpr bool signalBool_ = true;
 constexpr unsigned int jzSlice_ = 3;
 
