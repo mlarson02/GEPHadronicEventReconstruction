@@ -52,18 +52,19 @@ WRAPPER = Path(__file__).parent / "run_met_emulation_job.sh"
 # to SIGNAL_STRINGS if the dimuon-p_T turn-ons are wanted at this configuration too.
 SIGNALS        = [True, False]        # True -> the signal processes below, False -> JZ dijet background
 #SIGNAL_STRINGS = ["ZvvHbb"]
-SIGNAL_STRINGS = ["ttbar_dilep"]
+SIGNAL_STRINGS = ["ZvvHbb", "ttbar_semilep", "ttbar_dilep", "Zmumu"]
 #SIGNAL_STRINGS = ["Zmumu"]
 # EtaSK is selected by ETA_SK_OBJECTS=True; PU_SUPPRESSION must be True alongside it, since the
 # output tag is EtaSK either way and running both values would give two jobs writing the same
 # filename.
 PU_SUPPRESSION           = [True]
 ETA_SK_OBJECTS           = [True]     # EtaSK
-JET_ET_THRESHOLDS        = [0.0]      # no jet E_T threshold
-TOWER_ET_THRESHOLDS      = [2.0]      # no tower E_T threshold
-DO_JET_TOWER_OR          = [False]   # OR and the corresponding NoOR
-SCALE_FACTOR_PAIRS       = [(0.3, 1.0), (0.4, 1.0), (0.45, 1.0), (0.5, 1.0), (0.55, 1.0)]    # twrSF0p4_jetSF1
-
+JET_ET_THRESHOLDS        = [50.0]      # no jet E_T threshold
+TOWER_ET_THRESHOLDS      = [1.0]      # no tower E_T threshold
+DO_JET_TOWER_OR          = [True, False]   # OR and the corresponding NoOR
+SCALE_FACTOR_PAIRS       = [(0.4, 1.0), (0.5, 1.0), (0.6, 1.0), (1.0, 1.0)]    # twrSF0p4_jetSF1
+#SCALE_FACTOR_PAIRS       = [(0.3, 1.0), (1.0, 1.0)]
+#SCALE_FACTOR_PAIRS       = [()(1.0, 1.0)] 
 # --- GEP JwoJ MET ----------------------------------------------------------------------------
 # The one switch that turns this submission into a GEP JwoJ production. When True every job
 # additionally writes the GEPJwoJ* branches (see the algorithm block in metEmulation.cc) and its
@@ -76,11 +77,25 @@ SCALE_FACTOR_PAIRS       = [(0.3, 1.0), (0.4, 1.0), (0.45, 1.0), (0.5, 1.0), (0.
 # through SCALE_FACTOR_PAIRS above exactly as for the standard algorithm, and the _twrSF/_jetSF
 # tags keep carrying them. The hard-term E_T threshold is the only genuinely new parameter, so it
 # is the only one with its own grid and its own tag.
-USE_GEP_JWOJ                 = True
+USE_GEP_JWOJ                 = False
 # Tower E_T [GeV] above which a tower joins the hard term; everything else that survives the
 # tower E_T threshold is the soft term. Iterated ONLY when USE_GEP_JWOJ is True, so a standard
 # submission's job count is untouched no matter what is listed here.
-GEP_JWOJ_HARD_ET_THRESHOLDS  = [5.0, 7.5, 10.0, 12.5, 15.0, 20.0]
+#GEP_JWOJ_HARD_ET_THRESHOLDS  = [5.0, 7.5, 10.0, 12.5]
+GEP_JWOJ_HARD_ET_THRESHOLDS  = [10.0, 12.5, 15.0, 17.5]
+#GEP_JWOJ_HARD_ET_THRESHOLDS  = [15.0]
+# Side of the square tower block the hard-term threshold is applied to, in towers:
+#   1 -> 0.1 x 0.1 (single tower; the algorithm as it was before blocks existed)
+#   2 -> 0.2 x 0.2
+# Only these two are accepted. 3x3 is NOT supported: 3 divides neither axis of the tower grid
+# (phi 64 = 21x3 + 1, eta 98 = 32x3 + 2), so it would leave a one-tower-wide block at the phi
+# seam judged against the same threshold as its nine-tower neighbours -- a phi slice pushed
+# systematically into the soft term, i.e. a preferred MET direction. Supporting it means first
+# choosing how that seam is handled.
+#
+# Iterated ONLY when USE_GEP_JWOJ is True. A block size of 1 adds no filename tag, since that
+# configuration is bit-identical to the pre-block algorithm.
+GEP_JWOJ_BLOCK_SIZES         = [2]
 
 # --- Produced 08192026: the single point missing from the Z->mumu OR comparison --------------
 # EtaSK / jetEt15 / towerEt2 / NoOR / twrSF0p5 / jetSF1, for the Zmumu signal and the dijet
@@ -154,11 +169,13 @@ def fmt_float(v: float) -> str:
 
 def fmt_scale_factor_tag(v: float) -> str:
     """Filesystem-safe scale-factor tag, mirrors makeOutputMETFileName.
-    Assumes SF granularity of 0.1: 1.0 -> "1", 0.4 -> "0p4", 1.2 -> "1p2"."""
+    1.0 -> "1", 0.4 -> "0p4", 1.2 -> "1p2", 0.25 -> "0p25". Uses :g (6 significant
+    digits, same as the C++ stream default), not :.1f, which rounded 0.25 to "0p2"
+    and collided with 0.2."""
     int_v = int(v)
     if v == int_v:
         return str(int_v)
-    return f"{v:.1f}".replace(".", "p")
+    return f"{v:g}".replace(".", "p")
 
 
 def bool_str(b: bool) -> str:
@@ -245,12 +262,12 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
         "",
         # pileup is fixed for the whole submission, so it goes in the header rather
         # than the per-job ItemData.
-        f"arguments = $(SIG) $(PUSUP) $(SIGSTR) $(JETET) $(JTOR) $(TOWERET) $(ETASK) $(INFILE) $(FIDX) $(TWRSF) $(JETSF) {PILEUP} $(JWOJ) $(JWOJHARDET)",
+        f"arguments = $(SIG) $(PUSUP) $(SIGSTR) $(JETET) $(JTOR) $(TOWERET) $(ETASK) $(INFILE) $(FIDX) $(TWRSF) $(JETSF) {PILEUP} $(JWOJ) $(JWOJHARDET) $(JWOJBLOCK)",
         "log       = $(LOG)",
         "output    = $(OUT)",
         "error     = $(ERR)",
         "",
-        f"queue SIG, PUSUP, SIGSTR, JETET, JTOR, TOWERET, ETASK, INFILE, FIDX, TWRSF, JETSF, JWOJ, JWOJHARDET, LOG, OUT, ERR from {itemdata_path}",
+        f"queue SIG, PUSUP, SIGSTR, JETET, JTOR, TOWERET, ETASK, INFILE, FIDX, TWRSF, JETSF, JWOJ, JWOJHARDET, JWOJBLOCK, LOG, OUT, ERR from {itemdata_path}",
     ]
 
     data_lines = []
@@ -260,7 +277,7 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
             f"{j['jtor']}, {j['toweret']}, {j['etask']}, "
             f"{j['infile']}, {j['fidx']}, "
             f"{j['twrsf']}, {j['jetsf']}, "
-            f"{j['jwoj']}, {j['jwojhardet']}, "
+            f"{j['jwoj']}, {j['jwojhardet']}, {j['jwojblock']}, "
             f"{j['log']}, {j['stdout']}, {j['stderr']}"
         )
 
@@ -273,9 +290,10 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
     # reaches a filename or a tag, so the job count and every output name are exactly what they
     # were before the option existed.
     jwoj_hard_ets = GEP_JWOJ_HARD_ET_THRESHOLDS if USE_GEP_JWOJ else [0.0]
-    for pusup, jetet, jtor, toweret, etask, sfpair, jwojhardet in itertools.product(
+    jwoj_blocks   = GEP_JWOJ_BLOCK_SIZES if USE_GEP_JWOJ else [1]
+    for pusup, jetet, jtor, toweret, etask, sfpair, jwojhardet, jwojblock in itertools.product(
             PU_SUPPRESSION, JET_ET_THRESHOLDS, DO_JET_TOWER_OR,
-            TOWER_ET_THRESHOLDS, ETA_SK_OBJECTS, SCALE_FACTOR_PAIRS, jwoj_hard_ets):
+            TOWER_ET_THRESHOLDS, ETA_SK_OBJECTS, SCALE_FACTOR_PAIRS, jwoj_hard_ets, jwoj_blocks):
         twrsf, jetsf = sfpair
         for signal in SIGNALS:
             sig_list = SIGNAL_STRINGS if signal else ["BACKGROUND"]
@@ -291,6 +309,10 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                 # output ntuple it belongs to stay readable against each other.
                 if USE_GEP_JWOJ:
                     algo_tag += f"_GEPJwoJ_hardEt{fmt_float(jwojhardet)}"
+                    # Mirrors makeOutputMETFileName: no tag at 1x1, so that output keeps the
+                    # name it had before the block option existed.
+                    if jwojblock != 1:
+                        algo_tag += f"_blk{jwojblock}x{jwojblock}"
 
                 input_files = find_input_files(sigstr)
                 if not input_files:
@@ -330,6 +352,7 @@ def enumerate_jobs(log_dir: str, label: str) -> list[dict]:
                         "jetsf":   fmt_float(jetsf),
                         "jwoj":       bool_str(USE_GEP_JWOJ),
                         "jwojhardet": fmt_float(jwojhardet),
+                        "jwojblock":   str(jwojblock),
                         "log_dir": log_dir,
                         "log":     os.path.join(log_dir, f"{safe}.log"),
                         "stdout":  os.path.join(log_dir, f"{safe}.out"),
@@ -391,6 +414,13 @@ def main():
     if USE_GEP_JWOJ:
         args.label += "_GEPJwoJ"
         print(f"[GEP JwoJ] enabled: hard-term E_T thresholds {GEP_JWOJ_HARD_ET_THRESHOLDS} GeV")
+        print(f"[GEP JwoJ] block sizes {GEP_JWOJ_BLOCK_SIZES} "
+              f"({', '.join(f'{b}x{b} = {0.1*b:.1f}x{0.1*b:.1f}' for b in GEP_JWOJ_BLOCK_SIZES)})")
+        bad = [b for b in GEP_JWOJ_BLOCK_SIZES if b not in (1, 2)]
+        if bad:
+            print(f"[error] unsupported GEP JwoJ block size(s) {bad}: only 1 and 2 tile the "
+                  "tower grid exactly (see GEP_JWOJ_BLOCK_SIZES)")
+            sys.exit(1)
         print("[GEP JwoJ] hard coefficient = jetScaleFactor, soft coefficient = towerScaleFactor "
               "(from SCALE_FACTOR_PAIRS)")
         print("[GEP JwoJ] outputs gain a _GEPJwoJ_hardEt{X} tag and the GEPJwoJ* branches; the "

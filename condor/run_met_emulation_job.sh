@@ -15,10 +15,12 @@
 #   ${11} jetScaleFactor     (scalar weight on jet MET in totalMET sum, e.g. 0.4)
 #   ${12} pileup             (200 or 140; tags the output name r16130 / r16129. Default 200.)
 #   ${13} useGEPJwoJ         (true or false; writes the GEP JwoJ MET branches. Default false.)
-#   ${14} jwojHardEtThreshold(tower E_T [GeV] above which a tower joins the JwoJ hard term.
+#   ${14} jwojHardEtThreshold(block E_T [GeV] above which a tower block joins the JwoJ hard term.
 #                             Default 10.0. Ignored unless ${13} is true. The JwoJ hard/soft
 #                             coefficients are ${11}/${10} — jetScaleFactor and
 #                             towerScaleFactor — not separate arguments.)
+#   ${15} jwojBlockSize      (side of the JwoJ tower block, in towers: 1 or 2. Default 1.
+#                             Only sizes that tile the 64x98 tower grid exactly are accepted.)
 #
 # Ordering: when $8 is a `;`-separated list, the wrapper hadds the inputs in
 # the EXACT order given. The submit script provides them in sorted-fidx order,
@@ -39,13 +41,14 @@ JETSF="${11}"
 PILEUP="${12:-200}"
 USEJWOJ="${13:-false}"
 JWOJHARDET="${14:-10.0}"
+JWOJBLOCK="${15:-1}"
 
 echo "=== MET Emulation Condor job ==="
 echo "  signal=$SIGNAL  signalString=$SIGSTR  puSup=$PUSUP  etaSK=$ETASK  pileup=$PILEUP"
 echo "  jetEtThreshold=$JETET  doJetTowerOR=$JTOR  towerEtThreshold=$TOWERET"
 echo "  inputFile=$INFILE  fileIndex=$FIDX"
 echo "  towerScaleFactor=$TWRSF  jetScaleFactor=$JETSF"
-echo "  useGEPJwoJ=$USEJWOJ  jwojHardEtThreshold=$JWOJHARDET"
+echo "  useGEPJwoJ=$USEJWOJ  jwojHardEtThreshold=$JWOJHARDET  jwojBlockSize=$JWOJBLOCK"
 echo ""
 
 # --- ATLAS/ROOT environment setup ---
@@ -92,6 +95,6 @@ fi
 
 # --- Run emulation ---
 echo "Running emulation in: $JOBDIR"
-root -l -b -q "metEmulation.cc+(${SIGNAL}, ${PUSUP}, \"${SIGSTR}\", ${JETET}, ${JTOR}, ${TOWERET}, ${ETASK}, \"${EMU_INPUT}\", ${FIDX}, ${TWRSF}, ${JETSF}, ${PILEUP}, ${USEJWOJ}, ${JWOJHARDET})"
+root -l -b -q "metEmulation.cc+(${SIGNAL}, ${PUSUP}, \"${SIGSTR}\", ${JETET}, ${JTOR}, ${TOWERET}, ${ETASK}, \"${EMU_INPUT}\", ${FIDX}, ${TWRSF}, ${JETSF}, ${PILEUP}, ${USEJWOJ}, ${JWOJHARDET}, ${JWOJBLOCK})"
 
 echo "=== Job complete ==="

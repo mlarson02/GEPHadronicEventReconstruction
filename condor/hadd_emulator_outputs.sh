@@ -6,12 +6,12 @@
 #   emulator (default)
 #     Input:  {base}_file{N}.root  (emulator per-job outputs)
 #     Output: {base}.root
-#     DIR defaults to /data/larsonma/LargeRadiusJets/outputNTuplesDev_CondorSubmission_NewSamples/
+#     DIR defaults to /data/larsonma/LargeRadiusJets/outputNTuplesDev_CalibJets/
 #
 #   --met
 #     Input:  {base}_file{N}.root  (MET emulator per-job outputs)
 #     Output: {base}.root
-#     DIR defaults to /data/larsonma/GEPMET/outputNTuplesDev_METv2/
+#     DIR defaults to /data/larsonma/GEPMET/outputNTuplesDev_METv4_CalibJets/
 #
 #   --ntuples
 #     Input:  {base}_{NNNNNN}.root  (HERNTupler per-job outputs, 6-digit index)
@@ -80,8 +80,11 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="emulator"
-EMULATOR_DIR="/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples/"
-MET_DIR="/data/larsonma/GEPMET/outputNTuplesDev_METv2/"
+# Emulation outputs made from the JES-calibrated WTACone jets (use_calibrated_wtacone_jets_ in
+# jetTaggerEmulation.cc / metEmulation.cc). Uncalibrated productions:
+#   outputNTuplesDev_gjTowerSamples_towerEtCutFixed/ and outputNTuplesDev_METv3/
+EMULATOR_DIR="/data/larsonma/LargeRadiusJets/outputNTuplesDev_CalibJets/"
+MET_DIR="/data/larsonma/GEPMET/outputNTuplesDev_METv4_CalibJets/"
 NTUPLE_DIR="/data/larsonma/GEPHadronicEventReconstruction/ntuples/"
 NTUPLE_DIR_PU140="/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/"
 CALO_DIR="/data/larsonma/CaloShowerShapeTriggers/ntuples/"

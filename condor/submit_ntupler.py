@@ -21,14 +21,14 @@ Usage examples:
       --background --jz 3  --algo 3 \\
       --daod-dir /data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/QCD_Dijet/JZ3/<container>/ \\
       --gep-dir  /data/larsonma/GEPHadronicEventReconstruction/GEPOutputReaderNTuples/QCD_Dijet/JZ3/<container>/ \\
-      --output-dir /data/larsonma/GEPHadronicEventReconstruction/ntuples/QCD_Dijet_JZ3_v3/
+      --output-dir /data/larsonma/GEPHadronicEventReconstruction/ntuples/QCD_Dijet_JZ3_v4/
 
   # PU140 background JZ3 — point dirs at the _PU140 mirrors and pass --pu 140:
   python3 submit_ntupler.py \\
       --background --jz 3 --algo 3 --pu 140 \\
       --daod-dir /data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs_PU140/QCD_Dijet/JZ3/<container>/ \\
       --gep-dir  /data/larsonma/GEPHadronicEventReconstruction/GEPOutputReaderNTuples_PU140/QCD_Dijet/JZ3/<container>/ \\
-      --output-dir /data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/QCD_Dijet_JZ3_v3/
+      --output-dir /data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/QCD_Dijet_JZ3_v4/
 
   # Dry run — prints the .sub file without submitting:
   python3 submit_ntupler.py ... --dry-run

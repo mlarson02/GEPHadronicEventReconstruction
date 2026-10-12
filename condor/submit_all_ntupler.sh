@@ -3,6 +3,7 @@ set -e
 SCRIPT="$(dirname "$0")/submit_ntupler.py"
 ALGO=4
 PU=200
+JZ_ONLY=0
 EXTRA_ARGS=()
 
 usage() {
@@ -14,6 +15,8 @@ Usage: $(basename "$0") [--pu 140|200] [--algo N] [extra submit_ntupler.py args.
               PU140 reweighting constants in HERNTupler).
   --pu 200    Default: nominal PU200 directories.
   --algo N    Algorithm version (default: $ALGO).
+  --jz-only   Submit only the QCD dijet JZ0-JZ9 slices, skipping the signals
+              (e.g. the ntuples the GEP jet calibration LUTs are derived from).
 
 Any other argument is forwarded verbatim to submit_ntupler.py, e.g.
   $(basename "$0") --pu 140 --dry-run
@@ -25,6 +28,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --pu)     PU="$2";   shift 2 ;;
         --algo)   ALGO="$2"; shift 2 ;;
+        --jz-only) JZ_ONLY=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *)        EXTRA_ARGS+=("$1"); shift ;;
     esac
@@ -66,6 +70,10 @@ find_container() {
 
 submit() {
     local label="$1"; shift
+    if [ "$JZ_ONLY" = 1 ] && [ "$1" = "--signal" ]; then
+        echo "==> Skipping: $label  (--jz-only)"
+        return 0
+    fi
     echo "==> Submitting: $label  (PU${PU}, algo v${ALGO})"
     python3 "$SCRIPT" --pu "$PU" "$@" "${EXTRA_ARGS[@]}"
 }

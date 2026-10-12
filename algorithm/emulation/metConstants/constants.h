@@ -61,20 +61,21 @@ constexpr unsigned int sumET_high_  = sumET_low_ + et_bit_length_ - 1;
 // rather than landing on them. pi/2 is exactly half_pi_digitized_in_phi_ = 16
 // codes, so cos(phi) is this same table read 16 codes along.
 //
-// Two known divergences from the firmware trig module (trig.v), both to be
-// closed on the firmware side -- run dumpSinLUT.cc for the numbers:
+// This table now AGREES BIT-FOR-BIT with the firmware trig module (MET_B_Trig in
+// trig.v) on all 64 codes -- verified entry by entry against its quarter-wave
+// magnitude table. Two divergences were recorded here previously and are both
+// closed; they are written out because the note is easy to reintroduce by
+// misreading the firmware:
 //
-//  1. Index origin. trig.v reads the 6-bit phi code as *signed* (o_sin's sign bit
-//     is taken straight from i_index[5]), i.e. it assumes code 0 is phi = +pi/64
-//     and code 32 is phi = -pi + pi/64. This grid is unsigned from -pi, so the two
-//     numberings differ by a pi rotation and trig.v needs its index flipped
-//     (i_index ^ 6'd32) to line up. Left this way deliberately: the LRJ chain only
-//     ever uses deltaPhi, which a global rotation leaves untouched.
-//  2. Amplitude. The table currently in trig.v is round-to-nearest at an effective
-//     amplitude of ~4094.3, not 4096 -- 0.042% low, the signature of an
-//     uncompensated CORDIC gain. No scale reproduces it with truncation. Its
-//     entries therefore sit 0 to 2 LSB below this table until it is regenerated
-//     from round(4096 * sin).
+//  1. Index origin. trig.v was said to read the 6-bit code as signed, putting code
+//     0 at phi = +pi/64. It does not: its sign comes from phi[5], so codes 0..31
+//     are the negative-sine half-plane and code 0 is phi = -pi + pi/64, which is
+//     exactly phi_min_ here. No index flip is needed.
+//  2. Amplitude. The table was said to sit ~0.042% low, at an effective amplitude
+//     of ~4094.3, as if from an uncompensated CORDIC gain. It does not: it is
+//     round(4096 * sin) exactly. Its maximum entry is 4091 rather than 4096 only
+//     because the tower centres straddle pi/2 instead of landing on it -- the same
+//     reason no entry here is exactly full scale.
 inline std::array<int, phi_range_> makeSinLUT() {
     std::array<int, phi_range_> lut{};
     for (unsigned int iPhi = 0; iPhi < phi_range_; ++iPhi) {
@@ -84,3 +85,54 @@ inline std::array<int, phi_range_> makeSinLUT() {
     return lut;
 }
 static const std::array<int, phi_range_> sinLUT_ = makeSinLUT();
+
+// ---- half-granularity phi LUT, for even-sized GEP JwoJ blocks -----------------
+// An NxN block of towers is positioned at its geometric centre. For ODD N that
+// centre is the centre of the middle tower and sinLUT_ above already has it; for
+// EVEN N it falls on the CORNER where four towers meet, half a tower off every
+// entry sinLUT_ holds. This table supplies those half-tower positions.
+//
+// The index is a HALF-code h over phi_half_range_ = 2 * phi_range_ = 128 steps of
+// phi_granularity_ / 2:
+//
+//    h = 2k     -> the centre of tower k          (what sinLUT_[k] holds)
+//    h = 2k + 1 -> the boundary between towers k and k + 1
+//
+// so a block spanning tower codes [a, b] sits at h = a + b, integer for every
+// block size, and the parity of h alone says whether the centre is on a tower or
+// on a corner.
+//
+// Two properties this construction is chosen for, both checked by dumpSinLUT.cc:
+//
+//  1. Every EVEN entry is bit-identical to sinLUT_[h / 2]. Same expression, same
+//     scale, same rounding, evaluated at the same angle -- h * (granularity / 2)
+//     with h = 2k is k * granularity exactly. So an odd-sized block reads the
+//     value it would have read from sinLUT_, and only even-sized blocks ever
+//     touch an entry that did not exist before. 1x1 output is unchanged.
+//  2. pi/2 is exactly half_pi_digitized_in_phi_half_ = 32 half-codes, so cos is
+//     this same table read 32 along -- the direct analogue of sinLUT_'s 16, and
+//     exact to 0 LSB rather than approximate.
+//
+// Interpolating sinLUT_ instead was the obvious alternative and is wrong at a
+// level that matters: (sin a + sin b) / 2 = sin(midpoint) * cos(pi/64), i.e.
+// 0.120% low on every even-sized block, a systematic scale error on the hard term
+// rather than a rounding one.
+//
+// For firmware this is one extra address bit on the existing table, not a second
+// table: trig.v would index sin at half-tower resolution and the present
+// tower-centre entries remain its even addresses. The two divergences noted above
+// (index origin, amplitude) apply here unchanged.
+constexpr unsigned int phi_half_range_                = 2 * phi_range_;                // 128
+constexpr unsigned int half_pi_digitized_in_phi_half_ = 2 * half_pi_digitized_in_phi_; // 32, exactly pi/2
+constexpr unsigned int two_pi_digitized_in_phi_half_  = phi_half_range_ - 1;           // 127
+constexpr double phi_half_granularity_                = phi_granularity_ / 2;          // pi/64
+
+inline std::array<int, phi_half_range_> makeSinLUTHalf() {
+    std::array<int, phi_half_range_> lut{};
+    for (unsigned int iHalf = 0; iHalf < phi_half_range_; ++iHalf) {
+        const double phi = phi_min_ + iHalf * phi_half_granularity_;
+        lut[iHalf] = static_cast<int>(std::lround(std::sin(phi) * (1 << (sin_bit_length_ - 1))));
+    }
+    return lut;
+}
+static const std::array<int, phi_half_range_> sinLUTHalf_ = makeSinLUTHalf();

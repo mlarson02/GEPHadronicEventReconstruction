@@ -31,6 +31,10 @@ Usage:
                 BOTH pileups, which is what a PU140-vs-PU200 overlay needs
   --n-jobs N    background slices per config (default 1; >1 unproven, see splitPlan 5b)
   --label STR   study label: condor log dir + overlay output dir name
+  --production P  named tagger production (TAGGER_DIRS). Repeatable: one pair list then holds
+                several productions, each pair tagged JES=calib / JES=uncalib, e.g. the
+                before/after-calibration overlay:
+                    --production calibJets --production towerEtCutFixed
 
 Typical flows:
   compute everything available:   python3 submit_largeRJetCompute.py
@@ -64,7 +68,10 @@ PAIRS_TXT = Path(__file__).parent.parent / "analysis" / "largeRJetFilePairs.txt"
 # Every entry therefore needs its own state directory in STATE_DIRS below, and the two are
 # switched together via --production.
 TAGGER_DIRS = {
-    # Current: the input-tower E_T cut is a per-job parameter and is applied consistently at
+    # Current: seeded / fed with the JES-calibrated WTACone CellsTowers jets
+    # (use_calibrated_wtacone_jets_ in jetTaggerEmulation.cc and largeRJetAnalysisCore.h).
+    "calibJets": "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CalibJets",
+    # Uncalibrated WTACone jets. The input-tower E_T cut is a per-job parameter and is applied consistently at
     # every PU-suppression branch (see default_input_tower_et_cut_gev_ in jetTaggerEmulation.cc).
     "towerEtCutFixed": "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples_towerEtCutFixed",
     # Previous: _T2_ meant a 4 GeV cut on the EtaSK arm and 2 GeV on SK/NoSK. Kept so the old
@@ -72,12 +79,21 @@ TAGGER_DIRS = {
     "all": "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples",
 }
 STATE_DIRS = {
+    "calibJets":       "/data/larsonma/LargeRadiusJets/largeRJetIntermediateState_CalibJets",
     "towerEtCutFixed": "/data/larsonma/LargeRadiusJets/largeRJetIntermediateState_towerEtCutFixed",
     "all":             "/data/larsonma/LargeRadiusJets/largeRJetIntermediateState",
 }
-DEFAULT_PRODUCTION = "towerEtCutFixed"
+# The compute/plot jobs pick each pair's state directory from its tagger directory
+# (lrjProductions() in largeRJetAnalysisCore.h mirrors the two dicts above), so --production can
+# be repeated to put several productions in ONE pair list. This default must still match
+# largeRJetStateRegistry.h's default stateDir, used for directories missing from that table.
+DEFAULT_PRODUCTION = "calibJets"
 TAGGER_DIR = TAGGER_DIRS[DEFAULT_PRODUCTION]
 STATE_DIR  = Path(STATE_DIRS[DEFAULT_PRODUCTION])
+# JES calibration of each production's WTA cone jets, appended to every pair description so
+# --select / kPlotSelect can pick one arm of a before/after-calibration overlay. The "JES="
+# prefix is what keeps the tokens disjoint: a bare "calib" is a substring of "uncalib".
+JES_TOKENS = {"calibJets": "JES=calib", "towerEtCutFixed": "JES=uncalib", "all": "JES=uncalib"}
 
 # Signal samples to pair with each discovered configuration (only pairs whose signal
 # tagger output exists are kept, so listing a sample here is free).
@@ -106,13 +122,13 @@ BACKGROUND_TAG = "mc21_14TeV_jj_JZ_e8557_s4422"
 # ---------------------------------------------------------------------------
 
 
-def discover_configs(pu: int) -> list[str]:
+def discover_configs(pu: int, tagger_dir: str) -> list[str]:
     """Config suffixes (everything after '<BACKGROUND_TAG>_<rtag>_', .root included)
     of every merged background tagger output at this pileup."""
     rtag = RTAG_BY_PU[pu]
     prefix = f"{BACKGROUND_TAG}_{rtag}_"
     suffixes = []
-    for f in sorted(glob.glob(f"{TAGGER_DIR}/{prefix}*.root")):
+    for f in sorted(glob.glob(f"{tagger_dir}/{prefix}*.root")):
         name = Path(f).name
         if re.search(r"_file\d+\.root$", name):
             continue                      # per-file emulation chunk, not a merged output
@@ -138,25 +154,35 @@ def describe(suffix: str) -> str:
     return " ".join(fields) if fields else suffix
 
 
-def build_pairs(pu: int):
+def build_pairs(pu: int, tagger_dir: str, jes_token: str = ""):
     """(desc, sigNtuple, sigTagger, bkgNtuple, bkgTagger) per (config, signal) with an
-    existing signal tagger; deterministic order: config suffix, then SIGNAL_STRINGS."""
+    existing signal tagger; deterministic order: config suffix, then SIGNAL_STRINGS.
+    jes_token (JES_TOKENS) is appended to each description when given."""
     base, rtag = NTUPLE_BASE_BY_PU[pu], RTAG_BY_PU[pu]
     pairs, missing_sig = [], []
-    for suffix in discover_configs(pu):
-        bkg_tagger = f"{TAGGER_DIR}/{BACKGROUND_TAG}_{rtag}_{suffix}"
+    for suffix in discover_configs(pu, tagger_dir):
+        bkg_tagger = f"{tagger_dir}/{BACKGROUND_TAG}_{rtag}_{suffix}"
         bkg_ntuple = (f"{base}/QCD_Dijet_JZ*_v4/"
                       f"mc21_14TeV_jj_JZ*_e8557_s4422_{rtag}_DAOD_NTUPLE_GEP.root")
         for sig in SIGNAL_STRINGS:
             subdir, mc_tag = SAMPLES[sig]
-            sig_tagger = f"{TAGGER_DIR}/{mc_tag}_{rtag}_{suffix}"
+            sig_tagger = f"{tagger_dir}/{mc_tag}_{rtag}_{suffix}"
             if not Path(sig_tagger).exists():
                 missing_sig.append(f"{sig}: {Path(sig_tagger).name}")
                 continue
             sig_ntuple = f"{base}/{subdir}/{mc_tag}_{rtag}_DAOD_NTUPLE_GEP.root"
-            desc = f"sample={sig} PU{pu} {describe(suffix)}"
+            desc = f"sample={sig} PU{pu} {describe(suffix)}" + (f" {jes_token}" if jes_token else "")
             pairs.append((desc, sig_ntuple, sig_tagger, bkg_ntuple, bkg_tagger))
     return pairs, missing_sig
+
+
+def state_dir_for(bkg_tagger: str) -> Path:
+    """State directory of the production a background tagger output belongs to — the same
+    directory rule as lrjProductions() in largeRJetAnalysisCore.h. STATE_DIR otherwise."""
+    for name, d in TAGGER_DIRS.items():
+        if Path(bkg_tagger).parent == Path(d):
+            return Path(STATE_DIRS[name])
+    return STATE_DIR
 
 
 def select_pairs(pairs, selects):
@@ -242,35 +268,47 @@ def main():
     ap.add_argument("--label",  default=None)
     # Which jet-tagger production to discover configurations from. --production names one of
     # the known ones; --tagger-dir takes an arbitrary path and wins if both are given.
-    ap.add_argument("--production", choices=sorted(TAGGER_DIRS), default=None,
-                    help=f"named tagger production (default: the TAGGER_DIR set in this file)")
+    # Repeatable: each --production adds its tagger directory to the SAME pair list, e.g.
+    #   --production calibJets --production towerEtCutFixed
+    # for the before/after-calibration overlay. Descriptions carry JES=calib / JES=uncalib.
+    ap.add_argument("--production", choices=sorted(TAGGER_DIRS), action="append", default=None,
+                    help="named tagger production (default: the TAGGER_DIR set in this file);"
+                         " repeat to put several productions in one pair list")
     ap.add_argument("--tagger-dir", default=None, metavar="DIR",
                     help="explicit tagger output directory; overrides --production")
     args = ap.parse_args()
 
     global TAGGER_DIR, STATE_DIR
+    # (tagger directory, description token) for every production discovered into this list
     if args.tagger_dir:
         TAGGER_DIR = args.tagger_dir.rstrip("/")
+        sources = [(TAGGER_DIR, "")]
         print(f"[state] --tagger-dir given; state directory stays {STATE_DIR}."
               " Pass --production instead if this is a separate production, or its chunks will"
               " land on top of that one's.")
     elif args.production:
-        TAGGER_DIR = TAGGER_DIRS[args.production]
+        productions = list(dict.fromkeys(args.production))   # de-duplicated, order kept
+        sources = [(TAGGER_DIRS[p], JES_TOKENS.get(p, "")) for p in productions]
         # State is keyed on the tagger basename, which is identical across productions, so the
         # state directory has to follow or this production would read the other one's results.
-        STATE_DIR = Path(STATE_DIRS[args.production])
-        print(f"[state] using {STATE_DIR}")
-    if not Path(TAGGER_DIR).is_dir():
-        print(f"[error] tagger directory does not exist: {TAGGER_DIR}")
-        sys.exit(1)
-    print(f"[tagger] discovering configurations from {TAGGER_DIR}")
+        # Per pair via state_dir_for(); the jobs do the same in the core.
+        for p in productions:
+            print(f"[state] {p}: {STATE_DIRS[p]}")
+    else:
+        sources = [(TAGGER_DIR, JES_TOKENS.get(DEFAULT_PRODUCTION, ""))]
+    for tagger_dir, _tok in sources:
+        if not Path(tagger_dir).is_dir():
+            print(f"[error] tagger directory does not exist: {tagger_dir}")
+            sys.exit(1)
+        print(f"[tagger] discovering configurations from {tagger_dir}")
 
     label = args.label or f"{datetime.now():%Y%m%d_%H%M%S}"
     pu_list = [140, 200] if args.pu == "both" else [int(args.pu)]
     pairs, missing_sig = [], []
-    for _pu in pu_list:
-        _p, _m = build_pairs(_pu)
-        pairs += _p; missing_sig += _m
+    for tagger_dir, jes_token in sources:
+        for _pu in pu_list:
+            _p, _m = build_pairs(_pu, tagger_dir, jes_token)
+            pairs += _p; missing_sig += _m
     if missing_sig:
         print(f"[info] {len(missing_sig)} (config, signal) combination(s) skipped —"
               " no signal tagger output on disk. First few:")
@@ -293,7 +331,7 @@ def main():
         # Plot-run generation: check the state each selected pair needs is in place.
         missing = []
         for desc, _sn, _st, _bn, bt in pairs:
-            state = STATE_DIR / (Path(bt).name[:-5] + "__state.root")
+            state = state_dir_for(bt) / (Path(bt).name[:-5] + "__state.root")
             if not state.exists():
                 missing.append(str(state))
         if missing:
@@ -335,7 +373,10 @@ def main():
     sub_path = log_dir / f"largeRJetCompute_{label}.sub"
     sub_path.write_text(sub_text)
     subprocess.run(["condor_submit", str(sub_path)], check=True)
-    print("\nMonitor: condor_watch_q\nThen:    ./hadd_largeRJetState.sh"
+    # hadd_largeRJetState.sh merges one state directory per run (LRJ_STATE_DIR, default CalibJets)
+    hadd_cmds = [f"LRJ_STATE_DIR={d} ./hadd_largeRJetState.sh --skip-existing"
+                 for d in sorted({str(state_dir_for(pairs[i][4])) for i in compute_jobs})]
+    print("\nMonitor: condor_watch_q\nThen:    " + "\n         ".join(hadd_cmds) +
           "\nThen:    python3 submit_largeRJetCompute.py --pairs-only --select ..."
           " && cd ../analysis && root -b -l -q 'largeRJetPlot.C'")
 

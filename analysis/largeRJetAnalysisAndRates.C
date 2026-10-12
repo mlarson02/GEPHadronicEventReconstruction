@@ -10,6 +10,18 @@
 
 using namespace std;
 
+// Read the JES-calibrated WTACone CellsTowers jets (HERNTupler *CalibJetsTree, needs ntuples made with
+// apply_gep_jes_calibration_ = true), as in largeRJetAnalysisCore.h. The tagger file lists below are
+// NOT switched with it. The CalibJetsTree trees have no Ring*Et / TotalTobN branches, so their reads and
+// fills are commented out ("[no Ring/TobN in the CalibJetsTree trees]").
+const bool use_calibrated_wtacone_jets_ = true;
+
+// Name of a WTACone CellsTowers jet tree: the uncalibrated name as given, or its *CalibJetsTree counterpart
+inline std::string lrjWTAConeCellsTowersTreeName(const std::string& uncalibratedName) {
+    if (!use_calibrated_wtacone_jets_) return uncalibratedName;
+    return uncalibratedName.substr(0, uncalibratedName.size() - std::string("JetsTree").size()) + "CalibJetsTree";
+}
+
 // 6-color palette
 const int kP6Blue   = TColor::GetColor("#5790fc");
 const int kP6Yellow = TColor::GetColor("#ee941d");
@@ -592,17 +604,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* gepBasicClustersSKTreeSignal = (TTree*)signalInputFile->Get("gepBasicClustersSKTree"); if (gepBasicClustersSKTreeSignal) { gepBasicClustersSKTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersSKTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersSKTree"); if (gepCellsTowersSKTreeSignal) { gepCellsTowersSKTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersEtaSKTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersEtaSKTree"); if (gepCellsTowersEtaSKTreeSignal) { gepCellsTowersEtaSKTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersJetsTree"); if (gepWTAConeCellsTowersJetsTreeSignal) { gepWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersJetsTree").c_str()); if (gepWTAConeCellsTowersJetsTreeSignal) { gepWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeBasicClustersJetsTree"); if (gepWTAConeBasicClustersJetsTreeSignal) { gepWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersJetsTree"); if (gepLeadingWTAConeCellsTowersJetsTreeSignal) { gepLeadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersJetsTreeSignal) { gepLeadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepLeadingWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeBasicClustersJetsTree"); if (gepLeadingWTAConeBasicClustersJetsTreeSignal) { gepLeadingWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersJetsTree"); if (gepSubleadingWTAConeCellsTowersJetsTreeSignal) { gepSubleadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersJetsTreeSignal) { gepSubleadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepSubleadingWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeBasicClustersJetsTree"); if (gepSubleadingWTAConeBasicClustersJetsTreeSignal) { gepSubleadingWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersSKJetsTree"); if (gepWTAConeCellsTowersSKJetsTreeSignal) { gepWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersSKJetsTree").c_str()); if (gepWTAConeCellsTowersSKJetsTreeSignal) { gepWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeBasicClustersSKJetsTree"); if (gepWTAConeBasicClustersSKJetsTreeSignal) { gepWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersSKJetsTree"); if (gepLeadingWTAConeCellsTowersSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersSKJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepLeadingWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeBasicClustersSKJetsTree"); if (gepLeadingWTAConeBasicClustersSKJetsTreeSignal) { gepLeadingWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersSKJetsTree"); if (gepSubleadingWTAConeCellsTowersSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersSKJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepSubleadingWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeBasicClustersSKJetsTree"); if (gepSubleadingWTAConeBasicClustersSKJetsTreeSignal) { gepSubleadingWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gFexSRJTreeSignal = (TTree*)signalInputFile->Get("gFexSRJTree"); if (gFexSRJTreeSignal) { gFexSRJTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gFexLeadingSRJTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingSRJTree"); if (gFexLeadingSRJTreeSignal) { gFexLeadingSRJTreeSignal->SetCacheSize(30*1024*1024); }
@@ -653,9 +665,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* gFexLeadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingSRJSimTree"); if (gFexLeadingSRJSimTreeSignal) { gFexLeadingSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gFexSubleadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingSRJSimTree"); if (gFexSubleadingSRJSimTreeSignal) { gFexSubleadingSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
     // EtaSK WTA cone jet trees — signal
-    TTree* gepWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree"); if (gepWTAConeCellsTowersEtaSKJetsTreeSignal) { gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersEtaSKJetsTree"); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersEtaSKJetsTree"); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepWTAConeCellsTowersEtaSKJetsTreeSignal) { gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
 
     TTree* jetTaggerLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerLRJsTree"); if (jetTaggerLRJsBack) { jetTaggerLRJsBack->SetCacheSize(30*1024*1024); }
     TTree* jetTaggerLeadingLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerLeadingLRJsTree"); if (jetTaggerLeadingLRJsBack) { jetTaggerLeadingLRJsBack->SetCacheSize(30*1024*1024); }
@@ -670,17 +682,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* gepBasicClustersSKTreeBack = (TTree*)backgroundInputFile->Get("gepBasicClustersSKTree"); if (gepBasicClustersSKTreeBack) { gepBasicClustersSKTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersSKTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersSKTree"); if (gepCellsTowersSKTreeBack) { gepCellsTowersSKTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersEtaSKTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersEtaSKTree"); if (gepCellsTowersEtaSKTreeBack) { gepCellsTowersEtaSKTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersJetsTree"); if (gepWTAConeCellsTowersJetsTreeBack) { gepWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersJetsTree").c_str()); if (gepWTAConeCellsTowersJetsTreeBack) { gepWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeBasicClustersJetsTree"); if (gepWTAConeBasicClustersJetsTreeBack) { gepWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersJetsTree"); if (gepLeadingWTAConeCellsTowersJetsTreeBack) { gepLeadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersJetsTreeBack) { gepLeadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepLeadingWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeBasicClustersJetsTree"); if (gepLeadingWTAConeBasicClustersJetsTreeBack) { gepLeadingWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersJetsTree"); if (gepSubleadingWTAConeCellsTowersJetsTreeBack) { gepSubleadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersJetsTreeBack) { gepSubleadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepSubleadingWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeBasicClustersJetsTree"); if (gepSubleadingWTAConeBasicClustersJetsTreeBack) { gepSubleadingWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersSKJetsTree"); if (gepWTAConeCellsTowersSKJetsTreeBack) { gepWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersSKJetsTree").c_str()); if (gepWTAConeCellsTowersSKJetsTreeBack) { gepWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeBasicClustersSKJetsTree"); if (gepWTAConeBasicClustersSKJetsTreeBack) { gepWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersSKJetsTree"); if (gepLeadingWTAConeCellsTowersSKJetsTreeBack) { gepLeadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersSKJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersSKJetsTreeBack) { gepLeadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepLeadingWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeBasicClustersSKJetsTree"); if (gepLeadingWTAConeBasicClustersSKJetsTreeBack) { gepLeadingWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersSKJetsTree"); if (gepSubleadingWTAConeCellsTowersSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersSKJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepSubleadingWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeBasicClustersSKJetsTree"); if (gepSubleadingWTAConeBasicClustersSKJetsTreeBack) { gepSubleadingWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gFexSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexSRJTree"); if (gFexSRJTreeBack) { gFexSRJTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gFexLeadingSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingSRJTree"); if (gFexLeadingSRJTreeBack) { gFexLeadingSRJTreeBack->SetCacheSize(30*1024*1024); }
@@ -731,9 +743,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* gFexLeadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingSRJSimTree"); if (gFexLeadingSRJSimTreeBack) { gFexLeadingSRJSimTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gFexSubleadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingSRJSimTree"); if (gFexSubleadingSRJSimTreeBack) { gFexSubleadingSRJSimTreeBack->SetCacheSize(30*1024*1024); }
     // EtaSK WTA cone jet trees — background
-    TTree* gepWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree"); if (gepWTAConeCellsTowersEtaSKJetsTreeBack) { gepWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersEtaSKJetsTree"); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersEtaSKJetsTree"); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepWTAConeCellsTowersEtaSKJetsTreeBack) { gepWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
 
     std::vector<double>* mcEventWeightsValuesSignal = nullptr;
     double* sumOfWeightsForSampleValuesSignal = nullptr;
@@ -1678,24 +1690,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Eta", &gepWTAConeCellsTowersEtaSKJetsEtaValuesSignal);
     gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Phi", &gepWTAConeCellsTowersEtaSKJetsPhiValuesSignal);
     gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("NConstituents", &gepWTAConeCellsTowersEtaSKJetsNConstituentsValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring0Et", &gepWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring1Et", &gepWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring2Et", &gepWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring3Et", &gepWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring4Et", &gepWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("TotalTobN", &gepWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring0Et", &gepWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring1Et", &gepWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring2Et", &gepWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring3Et", &gepWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring4Et", &gepWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("TotalTobN", &gepWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal);
 
     // === gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal ===
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Et", &gepLeadingWTAConeCellsTowersEtaSKJetspTValuesSignal);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Eta", &gepLeadingWTAConeCellsTowersEtaSKJetsEtaValuesSignal);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Phi", &gepLeadingWTAConeCellsTowersEtaSKJetsPhiValuesSignal);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("NConstituents", &gepLeadingWTAConeCellsTowersEtaSKJetsNConstituentsValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring0Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring1Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring2Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring3Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring4Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("TotalTobN", &gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring0Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring1Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring2Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring3Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring4Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("TotalTobN", &gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal);
 
     // === gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal ===
     gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Et", &gepSubleadingWTAConeCellsTowersEtaSKJetspTValuesSignal);
@@ -2123,24 +2135,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Eta", &gepWTAConeCellsTowersEtaSKJetsEtaValuesBack);
     gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Phi", &gepWTAConeCellsTowersEtaSKJetsPhiValuesBack);
     gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("NConstituents", &gepWTAConeCellsTowersEtaSKJetsNConstituentsValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring0Et", &gepWTAConeCellsTowersEtaSKJetsRing0EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring1Et", &gepWTAConeCellsTowersEtaSKJetsRing1EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring2Et", &gepWTAConeCellsTowersEtaSKJetsRing2EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring3Et", &gepWTAConeCellsTowersEtaSKJetsRing3EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring4Et", &gepWTAConeCellsTowersEtaSKJetsRing4EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("TotalTobN", &gepWTAConeCellsTowersEtaSKJetsTotalTobNValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring0Et", &gepWTAConeCellsTowersEtaSKJetsRing0EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring1Et", &gepWTAConeCellsTowersEtaSKJetsRing1EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring2Et", &gepWTAConeCellsTowersEtaSKJetsRing2EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring3Et", &gepWTAConeCellsTowersEtaSKJetsRing3EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring4Et", &gepWTAConeCellsTowersEtaSKJetsRing4EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("TotalTobN", &gepWTAConeCellsTowersEtaSKJetsTotalTobNValuesBack);
 
     // === gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack ===
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Et", &gepLeadingWTAConeCellsTowersEtaSKJetspTValuesBack);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Eta", &gepLeadingWTAConeCellsTowersEtaSKJetsEtaValuesBack);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Phi", &gepLeadingWTAConeCellsTowersEtaSKJetsPhiValuesBack);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("NConstituents", &gepLeadingWTAConeCellsTowersEtaSKJetsNConstituentsValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring0Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring1Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring2Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring3Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring4Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("TotalTobN", &gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring0Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring1Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring2Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring3Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring4Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("TotalTobN", &gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesBack);
 
     // === gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack ===
     gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Et", &gepSubleadingWTAConeCellsTowersEtaSKJetspTValuesBack);
@@ -5075,12 +5087,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // EtaSK WTA cone jets — signal kinematic distributions
         if (gepLeadingWTAConeCellsTowersEtaSKJetspTValuesSignal->size() > 0) {
             sig_h_leading_WTA_coneEtaSK_cellstowers_pT->Fill(gepLeadingWTAConeCellsTowersEtaSKJetspTValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring0Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring1Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring2Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring3Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring4Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_TotalTobN->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring0Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring1Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring2Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring3Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring4Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_TotalTobN->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal->at(0));
         }
         if (gepSubleadingWTAConeCellsTowersEtaSKJetspTValuesSignal->size() > 0)
             sig_h_subleading_WTA_coneEtaSK_cellstowers_pT->Fill(gepSubleadingWTAConeCellsTowersEtaSKJetspTValuesSignal->at(0));

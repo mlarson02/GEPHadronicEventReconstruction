@@ -159,12 +159,30 @@ struct ProcLabelOverride {
     ~ProcLabelOverride() { gProcLabel = saved; }
 };
 
-const int   nColors = 7;
-int cols[nColors] = { kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan};
+// Sixteen entries so a 16-config multi-file overlay does not wrap round. Past the first six this
+// follows the same order as the black-first mcols arrays in the multi-file helpers, with kBlack
+// moved to the end of the first twelve since those lead with it. The last four are the Petroff
+// entries least like the first twelve; every mcols array ends with the same four.
+const int   nColors = 16;
+int cols[nColors] = { kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan,
+                      kP10Brown, kP10Ash, kP10Yellow, kP8Pink, kP8Blue, kBlack,
+                      kP6Grape, kP8Azure, kP6Red, kP6Violet };
 
 // Skip background events with passHSTP == false (HSTP filter removes high-energy
 // pileup transients that are not modelled correctly in dijet MC).
 const bool applyHSTPFilter = true;
+
+// Use the JES-calibrated WTACone CellsTowers jets: read the HERNTupler *CalibJetsTree trees and the MET
+// emulation outputs made from them (metEmulation.cc with use_calibrated_wtacone_jets_ = true). Switch
+// together with metEmulation.cc.
+const bool use_calibrated_wtacone_jets_ = true;
+const std::string met_emulation_dir_ = use_calibrated_wtacone_jets_ ? "/data/larsonma/GEPMET/outputNTuplesDev_METv4_CalibJets/"
+                                                                    : "/data/larsonma/GEPMET/outputNTuplesDev_METv3/";
+
+// Input tree of the WTACone CellsTowers jets of one PU-suppression variant ("", "SK" or "EtaSK")
+std::string wtaConeCellsTowersJetsTreeName(const std::string& variant) {
+    return "gepWTAConeCellsTowers" + variant + (use_calibrated_wtacone_jets_ ? "CalibJetsTree" : "JetsTree");
+}
 
 // Disable every input branch this macro never reads, so GetEntry stops decompressing data that
 // is thrown away (see DisableUnusedBranches in chainSource.h). Purely a read-time optimization:
@@ -183,11 +201,22 @@ const bool printIOProgress   = true;
 const Long64_t progressEvery = 10000;   // events between progress lines
 
 // --- Rate normalization after the HSTP filter ----------------------------------
-// HERNTupler normalizes the per-event weights so that the sum over the UNFILTERED sample is
-// its targetRate (30 MHz). The HSTP filter above then removes ~99% of that weight — almost
-// all of JZ0, which alone is 95.4% of the target, plus 79% of JZ1 — and nothing puts it back,
-// so the weighted background sums to ~323 kHz instead of 30 MHz (measured on the v4 PU200
-// ntuples with checkHSTPNormalization.C, 2026-08-12).
+// HERNTupler runs in luminosity mode (useRateNormalization = false), so the per-event weights
+// carry the physical collision rate sigma x L_inst rather than being normalized to a target. The
+// HSTP filter removes ~99% of the total weight — almost all of JZ0, plus most of JZ1 — taking the
+// background from 6028 MHz before the filter to 64.77 MHz after it (PU200, measured 2026-09-18
+// from the [rate] and JZ-diagnostic lines of a nominal run).
+//
+// That surviving 64.77 MHz is a COLLISION rate, and a collision rate may legitimately exceed the
+// 30.9 MHz crossing rate: at mu = 200 there are 200 collisions per crossing. So the rescale below
+// is not restoring weight the filter removed — it is a DOWNSCALE, x0.477, that forces a collision
+// rate to equal a crossing rate. Converting properly is what the binomial correction does, and on
+// these ntuples it lands at 29.15 MHz at threshold 0 on its own, i.e. within 6% of the crossing
+// rate without being told to (see useBinomialRates).
+//
+// An earlier version of this note quoted ~323 kHz here and described the rescale as restoring
+// weight the HSTP filter removed. That was measured under rate-normalization mode and does not
+// describe the current ntuples; the sign of the correction is opposite.
 //
 // This is corrected once, at the histogram level, immediately after the background loop has
 // filled them: every weighted background histogram is scaled so that its rate at threshold 0 —
@@ -209,6 +238,81 @@ const Long64_t progressEvery = 10000;   // events between progress lines
 const double targetTotalRateHz = kCrossingRateHz;
 // false = leave every histogram with the normalization the weights carry as filled.
 const bool normalizeRateToTarget = true;
+
+// --- Rate estimate from JZ0 + JZ1 alone, no HSTP filter ------------------------------------
+// true = the background sample behind every rate this macro quotes is the JZ0 and JZ1 slices
+// with the HSTP filter NOT applied, in place of all JZ slices with it applied. JZ2-9 are dropped
+// outright. The rescale to targetTotalRateHz (30.9 MHz) is the normalization above, unchanged —
+// each weighted background histogram scaled by its own integral — so normalizeRateToTarget has
+// to stay true for the curves to start at the crossing rate.
+//
+// The selection is made in keepBackgroundEvent below, which every background loop that applied
+// the HSTP filter calls instead. The rate curves, the 20/40/60/80 kHz thresholds, the turn-ons
+// and rate-vs-efficiency curves built on them, the rate-vs-mu curves, the per-JZ-slice curves
+// and the background distributions therefore all follow it, and the all-JZ curve of the
+// JZ0-vs-AllJZ rate comparison becomes the JZ0 + JZ1 one (labelled by rateSampleName). Left
+// alone: the JZ0-only histograms, the JZ-slice diagnostic table, and the truth-jet comparison
+// plots, which carry their own background definitions — JZ0 + JZ1 among them whatever this is.
+//
+// With this on the plots go to <outputDir>_JZ0JZ1/ and <overlayDir>_JZ0JZ1/ (see main), so a
+// run in this mode does not overwrite the nominal plots.
+const bool use_jz0_jz1_rates_ = true;
+
+// Background event selection for the rate sample: JZ0 + JZ1 with no HSTP filter when
+// use_jz0_jz1_rates_ is set, otherwise all JZ slices with the HSTP filter (if applyHSTPFilter).
+// Events the HSTP filter rejects can carry an empty eventWeights vector, and the loops read
+// at(0) straight after this, so the JZ0 + JZ1 branch drops those as well.
+bool keepBackgroundEvent(bool passHSTP, int jzSlice, const std::vector<double>* weights) {
+    if (use_jz0_jz1_rates_)
+        return (jzSlice == 0 || jzSlice == 1) && weights && !weights->empty();
+    return !applyHSTPFilter || passHSTP;
+}
+
+// Legend name of the background sample the rates are estimated from.
+std::string rateSampleName() {
+    if (use_jz0_jz1_rates_) return "JZ0+JZ1 (no HSTP)";
+    return applyHSTPFilter ? "All JZ slices (HSTP filtered)" : "All JZ slices";
+}
+
+// --- Truth-jet binomial per-crossing correction as the default rate definition ----------------
+// true = every background rate this macro quotes is a per-crossing rate rather than a collision
+// rate: the rate curves, the 20/40/60/80 kHz thresholds, the trigger-item rates, the 2D
+// rate-vs-efficiency scans, the H_T curve, the per-JZ-slice curves, and — through the thresholds —
+// every turn-on curve. The correction itself is built and documented next to h_binomialCorr in
+// the background loop; here it only decides whether the corrected histograms replace the
+// collision-rate ones downstream.
+//
+// Two steps, in this order:
+//   1. the binomial correction converts collision rate to per-crossing rate by re-weighting each
+//      event by c(E_T^lead truth jet) <= 1, i.e. by how saturated a crossing at that jet activity
+//      already is. This is the physics step, and it does most of the work on its own: 64.77 MHz
+//      of surviving collision rate comes out as 29.15 MHz per crossing (PU200), within 6% of the
+//      30.9 MHz crossing rate without being told to aim for it.
+//   2. a single rescale afterwards pins threshold 0 at exactly targetTotalRateHz, i.e. each
+//      back_hwBin_* is normalized by its OWN integral, the same treatment the collision-rate
+//      histograms get. On these ntuples that is a x1.06 top-up.
+// The order matters and step 2 is deliberately NOT the factor the collision-rate counterpart
+// received (x0.477 here). Applying that one instead would compound a downscale meant to turn a
+// collision rate into a crossing rate with a correction that has already done exactly that, and
+// would land the curves near 13.9 MHz — a factor two under the crossing rate.
+//
+// Falls back to the collision-rate histograms automatically when the truth AntiKt4 WZ-dressed
+// jets are missing from a file pair, since the correction cannot be built without them.
+// Set false to go back to collision-rate curves everywhere.
+const bool useBinomialRates = false;
+
+// Whether the truth-jet plots (leading jet E_T by rank, truth-jet MET, jet multiplicity vs
+// threshold, and the TOB-MET-vs-truth-jet-MET correlations) carry the binomial-corrected curve
+// alongside the JZ0-only and all-JZ ones.
+//
+// Independent of useBinomialRates above, which decides whether the correction becomes the default
+// for the RATE curves. These plots are a different question: c(E_T) re-weights the event
+// population by each event's own leading hard-scatter jet E_T, so on a truth-jet canvas it tilts
+// the sample towards hard-scatter-rich events rather than correcting a rate. That is worth seeing
+// as a diagnostic of what the correction does to the population, but it is not a per-crossing jet
+// multiplicity and can crowd the comparison the plots are actually for. Set true to draw it.
+const bool overlayTruthJetBinomial = false;
+
 const unsigned int analysisPileup = 200;   // selects L_inst for the sigma x L overlay curve
 
 // Variable bin edges for turn-on histograms [GeV]:
@@ -841,8 +945,9 @@ void drawEffVsThresholdMulti(std::vector<TH1F*>& sigs,
     TLegend leg(0.38, legTop - legH, 0.88, legTop);
     leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
 
-    int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
-    const int nMcols = 8;
+    int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown,
+                    kP10Ash, kP10Yellow, kP8Pink, kP8Blue, kP6Grape, kP8Azure, kP6Red, kP6Violet };
+    const int nMcols = 16;
     std::vector<TGraph*> graphs;
     for (unsigned int i = 0; i < sigs.size(); i++) {
         TGraph* g = makeEffVsThresholdGraph(sigs[i], mcols[i % nMcols]);
@@ -926,10 +1031,11 @@ void drawRateVsThresholdMulti(const std::vector<TH1F*>& backs_weighted,
     TLegend leg(0.52, legTop - legH, 0.90, legTop);
     leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.030);
 
-    int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
-    const int nMcols = 8;
-    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47 };
-    const int nStyles = 8;
+    int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown,
+                    kP10Ash, kP10Yellow, kP8Pink, kP8Blue, kP6Grape, kP8Azure, kP6Red, kP6Violet };
+    const int nMcols = 16;
+    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45, 39, 41, 48, 49, 24, 25 };
+    const int nStyles = 16;
     std::vector<TGraphErrors*> graphs;
     for (unsigned int i = 0; i < backs_weighted.size(); i++) {
         TGraphErrors* g = makeRateGraph(backs_weighted[i], mcols[i % nMcols], mkstyles[i % nStyles]);
@@ -1200,8 +1306,9 @@ void drawMultiplicityOverlay(std::vector<TH1F*> sigs, std::vector<TH1F*> backs,
     // the bins are ~6% wide, so bin-centre weighting costs well under a percent.
     auto meanLabel = [](TH1F* h) { return std::string(Form(", #LTN#GT = %.4g", h->GetMean())); };
 
-    const int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
-    const int nMcols = 8;
+    const int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown,
+                          kP10Ash, kP10Yellow, kP8Pink, kP8Blue, kP6Grape, kP8Azure, kP6Red, kP6Violet };
+    const int nMcols = 16;
     bool first = true;
     auto drawSet = [&](std::vector<TH1F*>& hs, const char* suffix, Style_t lineStyle) {
         for (unsigned int i = 0; i < hs.size(); i++) {
@@ -1367,10 +1474,13 @@ void drawMultVsThresholdOverlay(const std::vector<TGraphErrors*>& sigGraphs,
     // than the canvas actually needs and a caller who has looked at the plot can say so.
     if (yMaxCap > 0.0) yHi = yMaxCap;
 
-    const int     mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
-    const Style_t mkFilled[] = { 20, 21, 22, 23, 29, 33, 34, 47 };
-    const Style_t mkOpen[]   = { 24, 25, 26, 32, 30, 27, 28, 46 };
-    const int nMcols = 8;
+    const int     mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown,
+                                 kP10Ash, kP10Yellow, kP8Pink, kP8Blue, kP6Grape, kP8Azure, kP6Red, kP6Violet };
+    // ROOT has no filled or open shapes left past the first twelve, so the last four of each set
+    // use the four-squares markers and the line markers (*, x, +)
+    const Style_t mkFilled[] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45, 39, 41, 48, 49, 3, 5 };
+    const Style_t mkOpen[]   = { 24, 25, 26, 32, 30, 27, 28, 46, 42, 44, 37, 40, 35, 36, 38, 2 };
+    const int nMcols = 16;
 
     bool first = true;
     auto drawSet = [&](const std::vector<TGraphErrors*>& gs, const char* suffix,
@@ -1492,10 +1602,13 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
                        double /*legX1*/ = 0.45, double /*legY1*/ = 0.15,
                        const std::string& xLabel = "Truth MET_{NonInt} [GeV]") {
     if (effs.empty()) return;
-    int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan};
-    // Seven entries, matching mcols: both are indexed with i % 7 below, and the widest overlays
-    // (all seven MET types) reach index 6.
-    const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33, 34 };
+    int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan,
+                        kP10Brown, kP10Ash, kP10Yellow, kP8Pink, kP8Blue, kP6Grape, kP8Azure, kP6Red, kP6Violet };
+    // Sixteen entries, matching mcols: both are indexed with i % nMcols below. The per-algorithm
+    // overlays (all seven MET types) reach index 6; the multi-file per-config turn-ons run up to
+    // sixteen configs.
+    const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45, 39, 41, 48, 49, 24, 25 };
+    const int nMcols = 16;
 
     std::vector<TurnOnCurve> curves;
     for (unsigned int i = 0; i < effs.size(); i++) {
@@ -1505,7 +1618,7 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
             lbl += Form(" (thr=%.1f GeV)", thresholds[i]);
         TurnOnCurve tc;
         tc.h = effs[i]; tc.label = lbl;
-        tc.color = mcols[i % 7]; tc.marker = mkstyles[i % 7];
+        tc.color = mcols[i % nMcols]; tc.marker = mkstyles[i % nMcols];
         curves.push_back(tc);
     }
 
@@ -1567,9 +1680,10 @@ void drawProfileOverlay(const std::vector<TProfile*>& profs,
                         double xTitleSize = 0.033) {
     if (profs.empty()) return;
     int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet,
-                    kP10Orange, kP10Cyan, kP10Brown, kGray+2, kP10Yellow };
-    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45 };
-    const int nStyles = 10;
+                    kP10Orange, kP10Cyan, kP10Brown, kGray+2, kP10Yellow, kP8Pink, kP8Blue,
+                    kP6Grape, kP8Azure, kP6Red, kP6Violet };
+    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45, 39, 41, 48, 49, 24, 25 };
+    const int nStyles = 16;
 
     TCanvas c("c", "", 700, 600);
     // Slightly deeper bottom margin than the other helpers: the offset that keeps the shrunken
@@ -1833,9 +1947,10 @@ void drawResidualProfileOverlay(const std::vector<TProfile*>& profs,
                                 double legX1 = 0.20, double legY1 = 0.66) {
     if (profs.empty()) return;
     int mcols[] = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet,
-                    kP10Orange, kP10Cyan, kP10Brown, kGray+2, kP10Yellow };
-    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45 };
-    const int nStyles = 10;
+                    kP10Orange, kP10Cyan, kP10Brown, kGray+2, kP10Yellow, kP8Pink, kP8Blue,
+                    kP6Grape, kP8Azure, kP6Red, kP6Violet };
+    const Style_t mkstyles[] = { 20, 21, 22, 23, 29, 33, 34, 47, 43, 45, 39, 41, 48, 49, 24, 25 };
+    const int nStyles = 16;
 
     TCanvas c("c", "", 700, 600);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
@@ -1909,9 +2024,10 @@ void drawRateVsEffOverlay(std::vector<TGraph*> graphs,
                           double minRateHz = kRateVsEffMinRateHz) {
     if (graphs.empty()) return;
     ProcLabelOverride procLbl(signalName);   // process name goes top-right, not in the legend
-    int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown };
-    const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33, 20, 21 };
-    const int nStyles = 8;
+    int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan, kP10Brown,
+                        kP10Ash, kP10Yellow, kP8Pink, kP8Blue, kP6Grape, kP8Azure, kP6Red, kP6Violet };
+    const Style_t  mkstyles[] = { 20, 21, 22, 23, 29, 33, 20, 21, 22, 23, 29, 33, 20, 21, 22, 23 };
+    const int nStyles = 16;
 
     // Work on copies: the callers own their graphs and reuse them (the per-file rate-vs-eff
     // outputs are drawn on several canvases), so the cut must not be baked into the originals.
@@ -2186,7 +2302,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                    std::vector<std::pair<std::string, std::string>> backgroundFiles,
                    std::vector<std::string> labels,
                    std::string outputDir,
-                   std::string signalName = "", std::string overlayDir = "multiFileOverlay_MET/",
+                   std::string signalName = "", std::string overlayDir = "multiFileOverlays/multiFileOverlay_MET/",
                    std::vector<std::string> signalNames = {}) {
     // signalName    : process name for the multi-file overlays (all configs), drawn in the
     //                 top-right label strip. Background-only overlays override it to "QCD dijet".
@@ -2437,17 +2553,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                           (labels[fileIt].find("SK")   != std::string::npos);
         // Tower MET is meaningless when Overlap Removal is on — drop it from GEP algo-comparison plots.
         bool hasOverlapRemoval = signalFiles[fileIt].second.find("_OR_") != std::string::npos;
-        TTree* gepWTAConeCellsTowersJetsTreeSig  = isSKConfig
-            ? (TTree*)sigF->Get("gepWTAConeCellsTowersSKJetsTree")
-            : (TTree*)sigF->Get("gepWTAConeCellsTowersJetsTree");
-        TTree* gepWTAConeCellsTowersJetsTreeBack = isSKConfig
-            ? (TTree*)backF->Get("gepWTAConeCellsTowersSKJetsTree")
-            : (TTree*)backF->Get("gepWTAConeCellsTowersJetsTree");
+        const std::string wtaConeJetsTreeName = wtaConeCellsTowersJetsTreeName(isSKConfig ? "SK" : "");
+        TTree* gepWTAConeCellsTowersJetsTreeSig  = (TTree*)sigF->Get(wtaConeJetsTreeName.c_str());
+        TTree* gepWTAConeCellsTowersJetsTreeBack = (TTree*)backF->Get(wtaConeJetsTreeName.c_str());
         bool hasWTAConeJets = (gepWTAConeCellsTowersJetsTreeSig  != nullptr) &&
                               (gepWTAConeCellsTowersJetsTreeBack != nullptr);
         if (hasWTAConeJets)
-            std::cout << "  Using jet tree: "
-                      << (isSKConfig ? "gepWTAConeCellsTowersSKJetsTree" : "gepWTAConeCellsTowersJetsTree") << "\n";
+            std::cout << "  Using jet tree: " << wtaConeJetsTreeName << "\n";
         else
             std::cout << "  WTA-cone jet tree not found — jet-level event-property plots skipped\n";
 
@@ -2733,6 +2845,28 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             inTimeAntiKt4TruthJetsTreeSig->SetBranchAddress("Et",  &inTimeAntiKt4TruthJetsEtValuesSig);
             inTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Et", &inTimeAntiKt4TruthJetsEtValuesBack);
         }
+
+        // --- Branch variables: truth jet phi, background only ---
+        // Only the truth-jet MET plots need phi, and only for the background, so it is addressed
+        // here rather than alongside Et above. Both trees are checked for the branch rather than
+        // assumed: SetBranchAddress on a tree that does not carry it leaves the pointer null and
+        // prints a warning, and an ntuple produced before HERNTupler wrote Phi would hit that.
+        std::vector<double>* truthAntiKt4WZDressedJetsPhiValuesBack = nullptr;
+        std::vector<double>* inTimeAntiKt4TruthJetsPhiValuesBack    = nullptr;
+        const bool hasTruthWZPhi =
+            hasTruthAntiKt4WZDressed && truthAntiKt4WZDressedJetsTreeBack->GetBranch("Phi");
+        const bool hasInTimePhi =
+            hasInTimeAntiKt4TruthJets && inTimeAntiKt4TruthJetsTreeBack->GetBranch("Phi");
+        if (hasTruthWZPhi)
+            truthAntiKt4WZDressedJetsTreeBack->SetBranchAddress("Phi", &truthAntiKt4WZDressedJetsPhiValuesBack);
+        if (hasInTimePhi)
+            inTimeAntiKt4TruthJetsTreeBack->SetBranchAddress("Phi", &inTimeAntiKt4TruthJetsPhiValuesBack);
+        // The MET is a vector sum over BOTH collections, so a missing phi on either one would
+        // silently drop that collection's recoil and bias the result low. Require both.
+        const bool hasTruthJetMET = hasTruthWZPhi && hasInTimePhi;
+        if (!hasTruthJetMET)
+            std::cout << "  Truth jet Phi not available on both collections — truth-jet MET"
+                      << " plots skipped\n";
 
         // --- GEP input-object collections for the multiplicity plots (optional) ---
         // The jet and tower collections at all three pileup-suppression settings, from the input
@@ -3078,6 +3212,133 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_hw_jMET_JZ0->Sumw2();     back_hw_JetMET_JZ0->Sumw2();
         back_hw_TowerMET_JZ0->Sumw2();
         back_hw_gMET_JwoJAOD_JZ0->Sumw2(); back_hw_gMET_NCAOD_JZ0->Sumw2(); back_hw_gMET_RmsAOD_JZ0->Sumw2();
+
+        // ===================================================================================
+        // Truth-jet plots (background only): three background definitions, side by side
+        // ===================================================================================
+        // The rate plots above compare two ways of defining the QCD background; these compare the
+        // same definitions on truth-level jet quantities, where the answer does not depend on any
+        // emulation. Three weightings, indexed by iW everywhere below:
+        //
+        //   0  JZ0 only, HSTP requirement dropped     — the unsliced sample, no JZ enhancement
+        //   1  all JZ slices, HSTP filtered           — the sample everything downstream uses
+        //   2  as 1, times the binomial correction    — the same events reweighted by
+        //                                               c(E_T^lead truth HS jet), i.e. the
+        //                                               per-crossing saturation factor that
+        //                                               back_hwBin_* carries
+        //   3  JZ0 + JZ1, HSTP requirement dropped    — the use_jz0_jz1_rates_ sample. Filled
+        //                                               for the leading-jet E_T and truth-jet
+        //                                               MET plots only, not for the
+        //                                               multiplicity or the 2D correlations
+        //
+        // Weighting 2 uses exactly the same per-event factor the back_hwBin_* histograms get, from
+        // the same binomialWeight lookup, so these canvases say whether that correction moves the
+        // truth-jet population the way the MET rate curves imply it should.
+        //
+        // Every quantity here is built on the MERGED truth collection: the hard scatter's AntiKt4
+        // WZ-dressed truth jets and the in-time pileup overlay's AntiKt4 truth jets taken
+        // together. At PU 140-200 a pileup jet routinely outranks the hard-scatter jets, so
+        // ranking or summing within either collection alone would not describe the event.
+        const int nTruthJetWgt = 4;
+        const char* truthJetWgtShort[nTruthJetWgt] = { "JZ0", "AllJZ", "AllJZBin", "JZ01" };
+        const int truthJetWgtJZ01 = 3;
+
+        // --- Leading truth-or-pileup jet E_T by rank ---
+        // Filled with the event weight and normalized to unit area at draw time, so what the
+        // plots show is whether the JZ-enriched, HSTP-filtered sample reproduces the weighted jet
+        // spectrum JZ0 alone gives — the question the rate normalization rests on.
+        //
+        // Ranges fall with rank because the spectra do: 400 GeV for the two leading jets, 300 for
+        // the 3rd, 100 for the 4th through 7th, 50 for the 8th through 10th. Values above a
+        // histogram's range are clamped into its last bin rather than dropped, which keeps every
+        // curve normalized over the same population.
+        //
+        // The bin width narrows with the range so every canvas gets 50-80 bins: a fixed 5 GeV
+        // would leave the 50 GeV plots with ten bins, too coarse to see a shape difference in.
+        // The y axis title is built from the width per plot rather than hardcoded, so it always
+        // states the width actually used.
+        const int nLeadJetRanks = 10;
+        const double leadJetEtMax[nLeadJetRanks] = {
+            400.0, 400.0, 300.0, 100.0, 100.0, 100.0, 100.0, 50.0, 50.0, 50.0
+        };
+        const double leadJetEtBinWidth[nLeadJetRanks] = {
+            5.0,   5.0,   5.0,   2.0,   2.0,   2.0,   2.0,   1.0,  1.0,  1.0
+        };
+        TH1F* back_hw_leadJetEt[nTruthJetWgt][nLeadJetRanks] = {};
+        for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+            for (int iR = 0; iR < nLeadJetRanks; ++iR) {
+                const int nB = (int)(leadJetEtMax[iR] / leadJetEtBinWidth[iR] + 0.5);
+                back_hw_leadJetEt[iW][iR] =
+                    new TH1F(Form("back_hw_leadJetEt_%s_r%d_%s",
+                                  truthJetWgtShort[iW], iR + 1, tag.c_str()), "",
+                             nB, 0.0, leadJetEtMax[iR]);
+                back_hw_leadJetEt[iW][iR]->SetDirectory(0);
+                back_hw_leadJetEt[iW][iR]->Sumw2();
+            }
+        }
+
+        // --- Truth-jet MET ---
+        // The MET the truth jets alone account for: E_x = -Sum(E_T cos phi),
+        // E_y = -Sum(E_T sin phi) over EVERY jet in both truth collections, with no E_T threshold
+        // and no eta acceptance imposed here. That makes it the jet-level recoil the emulated MET
+        // is trying to reconstruct, which is the quantity the JZ-slice reweighting has to get
+        // right if the emulated MET rate built on top of it is to mean anything.
+        const double truthJetMETMax = 300.0, truthJetMETBinWidth = 5.0;
+        const int    nTruthJetMETBins = (int)(truthJetMETMax / truthJetMETBinWidth + 0.5);
+        TH1F* back_hw_truthJetMET[nTruthJetWgt] = {};
+        for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+            back_hw_truthJetMET[iW] =
+                new TH1F((std::string("back_hw_truthJetMET_") + truthJetWgtShort[iW]
+                          + "_" + tag).c_str(), "",
+                         nTruthJetMETBins, 0.0, truthJetMETMax);
+            back_hw_truthJetMET[iW]->SetDirectory(0);
+            back_hw_truthJetMET[iW]->Sumw2();
+        }
+
+        // --- Truth-jet multiplicity vs E_T threshold ---
+        // The truth-jet counterpart of the GEP tower/jet multiplicity-vs-threshold profiles: at
+        // each threshold, the weighted average number of truth jets clearing it. Bins are CENTRED
+        // on the threshold points, the same convention back_prof_nJetsVsThr uses, so
+        // Fill(threshold, n) lands each threshold in its own bin and the bin centre reads it back
+        // exactly. The range runs further than the GEP jets' 50 GeV because these carry no
+        // trigger-level E_T floor.
+        const int    nTruthJetThrPts = 41;     // 0, 2.5, ... 100 GeV
+        const double truthJetThrStep = 2.5;
+        const double truthJetThrMax  = truthJetThrStep * (nTruthJetThrPts - 1);
+        const double truthJetThrLo   = -0.5 * truthJetThrStep;
+        const double truthJetThrHi   = truthJetThrMax + 0.5 * truthJetThrStep;
+        TProfile* back_prof_truthJetNVsThr[nTruthJetWgt] = {};
+        for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+            back_prof_truthJetNVsThr[iW] =
+                new TProfile((std::string("back_prof_truthJetNVsThr_") + truthJetWgtShort[iW]
+                              + "_" + tag).c_str(), "",
+                             nTruthJetThrPts, truthJetThrLo, truthJetThrHi);
+            back_prof_truthJetNVsThr[iW]->SetDirectory(0);
+        }
+        // Reused across events rather than reallocated per fill, as in the GEP multiplicity pass.
+        std::vector<double> truthJetThrCounts;
+
+        // --- TOB MET vs truth-jet MET, one 2D per MET type per weighting ---
+        // How well each trigger MET flavour tracks the truth-jet recoil, on the QCD dijet
+        // background. x = truth-jet MET, y = TOB MET — the same axis convention as the existing
+        // back_h2_*_TOBMet_vs_truthMET correlations, which put truth on x, so the two families
+        // read the same way. Uniform 5 GeV bins on both axes over the truth-jet MET range, rather
+        // than the variable binning those use: the linear fit and profile drawn on top of these
+        // are easier to read against an even grid, and 300 GeV already covers the background.
+        //
+        // A 2D cannot overlay three weightings on one canvas, so each weighting gets its own.
+        TH2F* back_h2_TOBMETvsTruthJetMET[nTruthJetWgt][nMETTypes] = {};
+        for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+            for (int iA = 0; iA < nMETTypes; ++iA) {
+                back_h2_TOBMETvsTruthJetMET[iW][iA] = new TH2F(
+                    (std::string("back_h2_TOBMETvsTruthJetMET_") + truthJetWgtShort[iW]
+                     + "_" + metTypeShort[iA] + "_" + tag).c_str(), "",
+                    nTruthJetMETBins, 0.0, truthJetMETMax,
+                    nTruthJetMETBins, 0.0, truthJetMETMax);
+                back_h2_TOBMETvsTruthJetMET[iW][iA]->SetDirectory(0);
+                back_h2_TOBMETvsTruthJetMET[iW][iA]->Sumw2();
+            }
+        }
 
         // 2D histograms for combined gFEX + GEP selection (x = gFEX MET, y = GEP MET), 10 GeV bins 0-600
         const int n2D = 60; const double lo2D = 0.0, hi2D = 600.0;
@@ -3820,6 +4081,41 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                    h_binomialCorr->GetBinContent(h_binomialCorr->FindBin(50.0)),
                    h_binomialCorr->GetBinContent(h_binomialCorr->FindBin(100.0)),
                    h_binomialCorr->GetBinContent(h_binomialCorr->FindBin(200.0)));
+
+            // --- The correction itself, as a plot -------------------------------------
+            // Four sampled values in the log are not enough to judge a curve that has to
+            // run from ~0 at threshold 0 up to 1 in the tail, so draw the two rates it is
+            // built from and let the ratio panel BE c(E_T): with refIndex 0 the panel
+            // divides every curve by R_coll, which is exactly the definition used in the
+            // loop above. Nothing is recomputed for the plot, so the picture cannot drift
+            // from the weights actually applied.
+            //
+            // Drawn whatever useBinomialRates is set to. The correction is built either
+            // way, and this is the plot to look at before deciding to switch the flag on.
+            {
+                const std::string binDir = outputDir + "binomialCorrection/";
+                gSystem->mkdir(binDir.c_str(), true);
+                std::vector<TH1*> binCurves = { hTruthColl, hTruthBX };
+                // Plain ASCII "PU", never a latex mu glyph: those render broken in these
+                // plots. Subscripts via _{} are fine, it is the special characters that
+                // are not.
+                std::vector<std::string> binLabels = {
+                    "Collision rate R_{coll}",
+                    Form("Per-crossing rate R_{BX} (PU = %.0f, f_{BX} = %.1f MHz)",
+                         binomialPileup, kCrossingRateHz / 1e6)
+                };
+                // kBlack for the reference curve, one Petroff colour for the other.
+                const std::vector<Int_t> binCols = { kBlack, kP10Blue };
+                DrawRateCurvesWithRatio(binCurves, binLabels, binCols,
+                                        /*refIndex=*/0, /*refShortName=*/"R_{coll}",
+                                        "Leading truth jet E_{T} [GeV]", "Rate [MHz]",
+                                        "Binomial correction c(E_{T})",
+                                        TString((binDir + tag + "_BinomialCorrection.pdf").c_str()),
+                                        /*yScale=*/1e-6, /*xMax=*/200.0, /*yMin=*/1e-3,
+                                        /*ratioMin=*/0.0, /*ratioMax=*/1.2,
+                                        /*algoLabelTopRight=*/true);
+            }
+
             delete hTruthColl; delete hTruthBX;
         } else {
             std::cout << "  Truth AntiKt4 WZ-dressed jets not found — binomial per-crossing"
@@ -3898,7 +4194,155 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 }
             }
 
-            if (applyHSTPFilter && !passHSTPValuesBack) continue;
+            // Truth-jet fills — leading-jet E_T by rank, truth-jet MET, and multiplicity vs
+            // threshold — for both background definitions. All three read the same merged
+            // collection, so they share one pass over it here rather than three.
+            //
+            // Placed before the HSTP filter: the JZ0 curves have to see the events the filter
+            // rejects, and the all-JZ curves apply the filter themselves below rather than
+            // relying on the continue. The GetEntry calls are repeated further down the loop for
+            // the binomial weight; a second call on the same entry is a no-op read from the
+            // tree's cache.
+            if (haveWeight && (hasTruthAntiKt4WZDressed || hasInTimeAntiKt4TruthJets)) {
+                std::vector<double> mergedJetEt;
+                // Running vector sum for the truth-jet MET, accumulated over the same two
+                // collections in the same pass. Every jet enters, with no E_T or eta cut.
+                double truthJetMEx = 0.0, truthJetMEy = 0.0;
+                // Et and Phi come off the same tree and are filled together by HERNTupler, so they
+                // are the same length; the min() is what keeps a truncated entry from reading past
+                // the end of the shorter one rather than a case expected to trigger.
+                auto addCollection = [&](const std::vector<double>* et,
+                                         const std::vector<double>* phi) {
+                    if (!et) return;
+                    mergedJetEt.insert(mergedJetEt.end(), et->begin(), et->end());
+                    if (!hasTruthJetMET || !phi) return;
+                    const size_t n = std::min(et->size(), phi->size());
+                    for (size_t iJ = 0; iJ < n; ++iJ) {
+                        truthJetMEx -= et->at(iJ) * std::cos(phi->at(iJ));
+                        truthJetMEy -= et->at(iJ) * std::sin(phi->at(iJ));
+                    }
+                };
+                if (hasTruthAntiKt4WZDressed) {
+                    truthAntiKt4WZDressedJetsTreeBack->GetEntry(iEvt);
+                    addCollection(truthAntiKt4WZDressedJetsEtValuesBack,
+                                  truthAntiKt4WZDressedJetsPhiValuesBack);
+                }
+                if (hasInTimeAntiKt4TruthJets) {
+                    inTimeAntiKt4TruthJetsTreeBack->GetEntry(iEvt);
+                    addCollection(inTimeAntiKt4TruthJetsEtValuesBack,
+                                  inTimeAntiKt4TruthJetsPhiValuesBack);
+                }
+                // Only the top nLeadJetRanks entries are needed, and these vectors run to tens of
+                // jets at PU 200, so rank the leading few rather than sorting the whole thing.
+                const int nRank = std::min((int)mergedJetEt.size(), nLeadJetRanks);
+                std::partial_sort(mergedJetEt.begin(), mergedJetEt.begin() + nRank,
+                                  mergedJetEt.end(),
+                                  [](double a, double b) { return a > b; });
+
+                // --- The three weightings, as an active flag and a weight each ---
+                // Index order matches truthJetWgtShort: JZ0-only, all-JZ, all-JZ binomial,
+                // JZ0 + JZ1 (no HSTP).
+                //
+                // The binomial factor is looked up on the leading HARD-SCATTER truth jet, not on
+                // the leading jet of the merged collection: c(E_T) was built against the
+                // AntiKt4TruthDressedWZ spectrum in the pre-pass above, so feeding it a pileup
+                // jet's E_T would read the curve at a point it was never derived for. The lookup
+                // mirrors the pre-pass exactly — the dedicated leading-jet tree when it exists,
+                // the maximum of the full vector otherwise — so weighting 2 carries the same
+                // factor per event that back_hwBin_* does.
+                const bool passHSTPHere = (!applyHSTPFilter || passHSTPValuesBack);
+                double etLeadTruthHS = 0.0;
+                if (hasTruthAntiKt4WZDressed) {
+                    if (leadingTruthAntiKt4WZDressedJetsTreeBack) {
+                        leadingTruthAntiKt4WZDressedJetsTreeBack->GetEntry(iEvt);
+                        if (leadingTruthAntiKt4WZDressedJetsEtValuesBack &&
+                            !leadingTruthAntiKt4WZDressedJetsEtValuesBack->empty())
+                            etLeadTruthHS = leadingTruthAntiKt4WZDressedJetsEtValuesBack->at(0);
+                    } else if (truthAntiKt4WZDressedJetsEtValuesBack &&
+                               !truthAntiKt4WZDressedJetsEtValuesBack->empty()) {
+                        etLeadTruthHS = *std::max_element(truthAntiKt4WZDressedJetsEtValuesBack->begin(),
+                                                          truthAntiKt4WZDressedJetsEtValuesBack->end());
+                    }
+                }
+                // Weighting 2 is switched off outright when the caller asked for it to be left out,
+                // and when the correction could not be built at all: in the latter case
+                // binomialWeight would return 1.0 and the curve would be an exact duplicate of
+                // weighting 1, which reads on the canvas as agreement rather than as absence.
+                // Gating the FILL rather than the draw also keeps the per-event work off the loop.
+                const bool   wgtActive[nTruthJetWgt] = {
+                    sampleJZSliceBack == 0,
+                    passHSTPHere,
+                    passHSTPHere && overlayTruthJetBinomial && h_binomialCorr != nullptr,
+                    sampleJZSliceBack == 0 || sampleJZSliceBack == 1
+                };
+                const double wgtValue[nTruthJetWgt] = {
+                    wPre, wPre, wPre * binomialWeight(etLeadTruthHS), wPre
+                };
+
+                // An event with fewer than nLeadJetRanks jets fills only the ranks it has: the
+                // alternative, filling the missing ranks at zero, would put a spike at the origin
+                // whose height is a jet multiplicity rather than anything about the E_T spectrum.
+                for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+                    if (!wgtActive[iW]) continue;
+                    for (int iR = 0; iR < nRank; ++iR)
+                        back_hw_leadJetEt[iW][iR]->Fill(
+                            clampVal(back_hw_leadJetEt[iW][iR], mergedJetEt[iR]), wgtValue[iW]);
+                }
+
+                // Truth-jet multiplicity vs threshold. Bucket each jet by the highest threshold
+                // it still clears, then suffix-sum: one pass over the collection covers all 41
+                // thresholds, rather than 41 passes over the collection. Events with no truth jet
+                // fill zero at every threshold, which is the correct average to contribute.
+                truthJetThrCounts.assign(nTruthJetThrPts, 0.0);
+                for (double et : mergedJetEt) {
+                    if (et <= 0.0) continue;
+                    int k = (int)(et / truthJetThrStep);
+                    if (k >= nTruthJetThrPts) k = nTruthJetThrPts - 1;   // clears every threshold
+                    truthJetThrCounts[k] += 1.0;
+                }
+                for (int k = nTruthJetThrPts - 2; k >= 0; --k)
+                    truthJetThrCounts[k] += truthJetThrCounts[k + 1];
+                for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+                    if (!wgtActive[iW]) continue;
+                    if (iW == truthJetWgtJZ01) continue;   // leading-jet and truth-jet MET plots only
+                    for (int k = 0; k < nTruthJetThrPts; ++k)
+                        back_prof_truthJetNVsThr[iW]->Fill(k * truthJetThrStep,
+                                                           truthJetThrCounts[k], wgtValue[iW]);
+                }
+
+                // Truth-jet MET, and the TOB MET vs truth-jet MET correlations built on it.
+                // Filled for every event, including those with no truth jet at all: those have a
+                // genuine MET of zero and belong in the first bin, unlike the leading-jet ranks
+                // above where a missing jet is a missing measurement.
+                if (hasTruthJetMET) {
+                    const double truthJetMET =
+                        std::sqrt(truthJetMEx * truthJetMEx + truthJetMEy * truthJetMEy);
+                    // jFEX MET is not among the trees loaded at the top of this loop, and the
+                    // block that does load it sits after the HSTP filter. The 2D fills below need
+                    // it on every event, filtered or not.
+                    jFexMETTreeBack->GetEntry(iEvt);
+                    const double backMETByTypeTruthJet[nMETTypes] = {
+                        back_gMET, back_gMET_NC, back_gMET_Rms, back_jMET,
+                        back_JetMet, back_TowerMet, back_TotalMET, back_GEPJwoJMET
+                    };
+                    const double truthJetMETCl = clampVal(back_hw_truthJetMET[0], truthJetMET);
+                    for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+                        if (!wgtActive[iW]) continue;
+                        back_hw_truthJetMET[iW]->Fill(truthJetMETCl, wgtValue[iW]);
+                        if (iW == truthJetWgtJZ01) continue;   // no 2D correlations for JZ0 + JZ1
+                        for (int iA = 0; iA < nMETTypes; ++iA) {
+                            if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                            TH2F* h2 = back_h2_TOBMETvsTruthJetMET[iW][iA];
+                            const double yMaxH2 = h2->GetYaxis()->GetXmax();
+                            h2->Fill(truthJetMETCl,
+                                     std::min(backMETByTypeTruthJet[iA], yMaxH2 - 1e-9),
+                                     wgtValue[iW]);
+                        }
+                    }
+                }
+            }
+
+            if (!keepBackgroundEvent(passHSTPValuesBack, sampleJZSliceBack, eventWeightsValuesBack)) continue;
             double w = eventWeightsValuesBack->at(0);
             if (hasNPrimaryVertices && nPrimaryVerticesBack >= 0) {
                 back_h_nPrimaryVertices->Fill(clampVal(back_h_nPrimaryVertices, nPrimaryVerticesBack));
@@ -4104,12 +4548,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // in the weights cancels, so this is unaffected by HERNTupler's useRateNormalization
         // setting — only the as-filled scale moves with that, not the normalized one.
         //
+        // The binomial per-crossing histograms (back_hwBin_*) are scaled here too, but each by the
+        // factor its COLLISION-rate counterpart received rather than by its own integral — see the
+        // useBinomialRates note at the top for why. That keeps the HSTP recovery while leaving the
+        // saturation intact, so those curves start below targetTotalRateHz at threshold 0.
+        //
         // NOT scaled here: the JZ0-only histograms (back_hw_*_JZ0), which drawJZ0Comparison
-        // normalizes itself and compares against the as-filled all-JZ curve;
-        // back_hw_nPrimaryVertices, which is a distribution rather than a rate; and the
-        // binomial per-crossing histograms (back_hwBin_*), which are absolute per-crossing rates
-        // — rescaling those to targetTotalRateHz at threshold 0 would erase the saturation they
-        // exist to show. They are the per-crossing counterpart of the as-filled curve.
+        // normalizes itself and compares against the as-filled all-JZ curve; and
+        // back_hw_nPrimaryVertices, which is a distribution rather than a rate.
         std::map<TH1*, double> appliedRateScale;   // histogram -> factor applied, for undoing it
         auto normalizeRateHist = [&](TH1* h) -> double {
             if (!h) return 1.0;
@@ -4150,6 +4596,80 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             if (back_h_TowerMET_jz[jz]) back_h_TowerMET_jz[jz]->Scale(sc_TowerMET);
         }
 
+        // --- Binomial per-crossing correction becomes the default rate (see useBinomialRates) ---
+        // Two steps:
+        //   1. normalize back_hwBin_X by its OWN integral so its rate at threshold 0 is
+        //      targetTotalRateHz — the same treatment back_hw_X got, applied after the per-event
+        //      correction has already converted collision rate to per-crossing rate. Deliberately
+        //      not the factor back_hw_X received: that one is a downscale doing the same job the
+        //      binomial correction has already done properly, and compounding them lands the
+        //      curves a factor two under the crossing rate;
+        //   2. swap the corrected contents into the back_hw_X pointer itself, keeping a detached
+        //      clone of the collision-rate version behind it.
+        // The swap is what makes this the default everywhere without touching another line: every
+        // threshold, rate curve, rate-vs-efficiency scan and turn-on downstream reads back_hw_X by
+        // pointer, so they all pick up the corrected contents. collisionTwin is how the few places
+        // that genuinely want the collision rate — the JZ0-vs-AllJZ comparison plots and the first
+        // trigger-item block — get it back.
+        //
+        // TODO: these still carry the COLLISION rate, because no binomial counterpart is filled
+        // for them yet. Each needs a back_hwBin* twin filled with wBin in the background loop
+        // before it can join the swap below:
+        //   * back_hw2_{JwoJ,NC,Rms}_{Jet,Tower} — the six 2D combined rate-vs-efficiency scans
+        //     behind MakeRateVsEff_ScanRMin. The 1D rate-vs-efficiency curves are already
+        //     corrected; only the 2D combined scans are not.
+        //   * back_hw_SumJetET — the H_T rate curve (Rate_SumJetET.pdf and its multi-file overlay).
+        //   * back_h_*_jz[] — the per-JZ-slice rate curves. Until these are done, the slices in
+        //     JZSlices/*_JZSlices_Rate.pdf no longer sum to the corrected total, and the slice
+        //     contribution percentages printed below are collision-rate fractions.
+        std::map<TH1*, TH1*> collisionTwin;   // back_hw_X -> detached collision-rate clone
+        const bool binomialRatesActive = useBinomialRates && h_binomialCorr;
+        auto adoptBinomial = [&](TH1F* hColl, TH1F* hBin) {
+            if (!hColl || !hBin) return;
+            const double binScale = normalizeRateHist(hBin);   // by its own integral
+            if (!binomialRatesActive) return;
+            TH1F* keep = (TH1F*)hColl->Clone((std::string(hColl->GetName()) + "_collision").c_str());
+            keep->SetDirectory(nullptr);
+            // The clone inherits the COLLISION factor, which is what drawJZ0Comparison divides out
+            // to recover the as-filled curve. hColl itself now holds binomial contents, so its
+            // entry has to move to the binomial factor or that recovery would use the wrong one.
+            appliedRateScale[keep]  = appliedRateScale.count(hColl) ? appliedRateScale[hColl] : 1.0;
+            appliedRateScale[hColl] = binScale;
+            collisionTwin[hColl] = keep;
+            hColl->Reset("ICES");     // contents, errors and stats; binning and name survive
+            hColl->Add(hBin);
+        };
+        adoptBinomial(back_hw_gMET,     back_hwBin_gMET);
+        adoptBinomial(back_hw_gMET_NC,  back_hwBin_gMET_NC);
+        adoptBinomial(back_hw_gMET_Rms, back_hwBin_gMET_Rms);
+        adoptBinomial(back_hw_jMET,     back_hwBin_jMET);
+        adoptBinomial(back_hw_JetMET,   back_hwBin_JetMET);
+        adoptBinomial(back_hw_TowerMET, back_hwBin_TowerMET);
+        adoptBinomial(back_hw_TotalMET, back_hwBin_TotalMET);
+        if (hasGEPJwoJ) adoptBinomial(back_hw_GEPJwoJMET, back_hwBin_GEPJwoJMET);
+        adoptBinomial(back_hw_gMET_JwoJAOD, back_hwBin_gMET_JwoJAOD);
+        adoptBinomial(back_hw_gMET_NCAOD,   back_hwBin_gMET_NCAOD);
+        adoptBinomial(back_hw_gMET_RmsAOD,  back_hwBin_gMET_RmsAOD);
+
+        // Collision-rate version of a histogram that may have been swapped, for the places that
+        // want to show both. Returns the argument unchanged when the swap did not happen.
+        auto collisionHist = [&](TH1F* h) -> TH1F* {
+            auto it = collisionTwin.find(h);
+            return it != collisionTwin.end() ? (TH1F*)it->second : h;
+        };
+
+        if (useBinomialRates && !h_binomialCorr)
+            std::cout << "  [binomial] useBinomialRates = true but the correction could not be"
+                      << " built for this file pair — falling back to collision-rate curves\n";
+        else if (binomialRatesActive)
+            printf("  [binomial] per-crossing correction is the default rate: back_hw_* now carry"
+                   " c(E_T) x w, HSTP-recovered. gFEX JwoJ at threshold 0 = %.4g MHz"
+                   " (collision rate %.4g MHz, saturation ratio %.4g)\n",
+                   back_hw_gMET->Integral() / 1e6,
+                   collisionHist(back_hw_gMET)->Integral() / 1e6,
+                   collisionHist(back_hw_gMET)->Integral() > 0.0
+                       ? back_hw_gMET->Integral() / collisionHist(back_hw_gMET)->Integral() : 0.0);
+
         if (rateAtZero <= 0.0)
             std::cout << "  [rate] WARNING: weighted background integral is zero — rate plots will be empty\n";
         else if (normalizeRateToTarget)
@@ -4158,11 +4678,17 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         else
             std::cout << "  [rate] rate at threshold 0 = " << rateAtZero / 1e3 << " kHz;"
                       << " normalizeRateToTarget = false, using the weights as filled\n";
+        std::cout << "  [rate] background sample: " << rateSampleName() << "\n";
 
+        // back_hwBin_gMET has already had the HSTP recovery factor applied by this point, so this
+        // is the fully corrected per-crossing rate and the ceiling check below is a real one: a
+        // per-crossing rate cannot exceed the crossing rate itself. Before the recovery factor was
+        // applied here the surviving sample sat far below the ceiling and the warning could never
+        // have fired, whatever the correction did.
         if (h_binomialCorr) {
             const double binRateAtZero = back_hwBin_gMET->Integral();
-            printf("  [binomial] per-crossing rate at threshold 0 = %.4g MHz (gFEX JwoJ)\n",
-                   binRateAtZero / 1e6);
+            printf("  [binomial] per-crossing rate at threshold 0 = %.4g MHz (gFEX JwoJ,"
+                   " HSTP-recovered)\n", binRateAtZero / 1e6);
             if (binRateAtZero > kCrossingRateHz)
                 printf("  [binomial] WARNING: that is above the %.1f MHz crossing rate — the"
                        " correction is not doing what it should\n", kCrossingRateHz / 1e6);
@@ -4209,9 +4735,12 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                       << " a value well below that means only part of each slice was ntupled)\n"
                       << "  Total rate after  HSTP = " << totWHSTP * 1e-3 << " kHz\n";
             // Cross-check against the histograms feeding the rate curves (bin 1 = threshold 0).
-            printf("  Rate at threshold 0: all-JZ gFEX JwoJ = %.4g kHz (after the x%.4g rescale),"
-                   " JZ0-only no-HSTP = %.4g kHz (never rescaled)\n",
-                   back_hw_gMET->Integral() * 1e-3, rateToTargetScale,
+            // The all-JZ number is quoted from the collision-rate histogram whether or not the
+            // binomial swap happened, so it stays comparable with the Sum(w) totals just above —
+            // those are collision-rate sums and the corrected curve would not match them.
+            printf("  Rate at threshold 0: all-JZ gFEX JwoJ = %.4g kHz (collision rate, after the"
+                   " x%.4g rescale), JZ0-only no-HSTP = %.4g kHz (never rescaled)\n",
+                   collisionHist(back_hw_gMET)->Integral() * 1e-3, rateToTargetScale,
                    back_hw_gMET_JZ0->Integral() * 1e-3);
             std::cout << "  =========================================================\n\n";
         }
@@ -4350,17 +4879,86 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                                 thr_GEPJwoJMET_60kHz, thr_GEPJwoJMET_80kHz);
 
         // --- Estimated background rate for fixed-threshold trigger items (kHz) ---
-        // gXEJWOJ = gFEX XE (JwoJ), jXE = jFEX XE; number = fixed MET threshold [GeV].
+        // gXEJWOJ = gFEX XE (JwoJ), jXE = jFEX XE, and the number in the ITEM NAME is the menu
+        // label, not the cut. Each item cuts at a lower ACTUAL MET threshold, so the rate has to be
+        // evaluated there: quoting the rate at 110 GeV for an item that fires at 55 GeV understates
+        // it by orders of magnitude. The mapping below is the Run 4 menu one (ATR-28679 for the
+        // gXEJWOJ 70 point); keep it in step with the emulation's threshold table.
+        //   gXEJWOJ  110 -> 55,  100 -> 50
+        //   jXE      110 -> 52,  100 -> 48
         {
             auto rateAtThr_kHz = [](TH1F* hw, double thrGeV) {
                 const int binLo = hw->FindFixBin(thrGeV);
                 return hw->Integral(binLo, hw->GetNbinsX() + 1) / 1e3; // Hz -> kHz
             };
-            std::cout << "  Trigger item rates [kHz]:\n"
-                      << "                    gXEJWOJ110: " << rateAtThr_kHz(back_hw_gMET, 110.0) << "\n"
-                      << "                    gXEJWOJ100: " << rateAtThr_kHz(back_hw_gMET, 100.0) << "\n"
-                      << "                    jXE110:     " << rateAtThr_kHz(back_hw_jMET, 110.0) << "\n"
-                      << "                    jXE100:     " << rateAtThr_kHz(back_hw_jMET, 100.0) << "\n";
+            const int nTrigItems = 4;
+            const char*  itemName[nTrigItems]   = { "gXEJWOJ110", "gXEJWOJ100", "jXE110", "jXE100" };
+            const double itemThrGeV[nTrigItems] = {  55.0,         50.0,         52.0,     48.0    };
+            const bool   itemIsJFex[nTrigItems] = {  false,        false,        true,     true    };
+            // One printer for every variant below, so the item list and its thresholds are stated
+            // once. scG / scJ are applied on top for the variants whose histogram is not already
+            // normalized (the JZ0-only one); they are 1.0 everywhere else.
+            auto printItems = [&](const std::string& header, TH1F* hG, TH1F* hJ,
+                                  double scG = 1.0, double scJ = 1.0) {
+                std::cout << header;
+                for (int i = 0; i < nTrigItems; ++i) {
+                    TH1F* h          = itemIsJFex[i] ? hJ : hG;
+                    const double sc  = itemIsJFex[i] ? scJ : scG;
+                    if (!h) continue;
+                    printf("                    %-12s %10.4g   (MET > %.0f GeV)\n",
+                           (std::string(itemName[i]) + ":").c_str(),
+                           rateAtThr_kHz(h, itemThrGeV[i]) * sc, itemThrGeV[i]);
+                }
+            };
+
+            // Headline numbers: whatever back_hw_* currently means, which with useBinomialRates
+            // on is the per-crossing rate and is what every threshold and turn-on below uses.
+            printItems(std::string("  Trigger item rates [kHz]")
+                       + (binomialRatesActive ? " [binomial per-crossing, the default]" : "") + ":\n",
+                       back_hw_gMET, back_hw_jMET);
+
+            // Collision-rate counterpart, i.e. what the block above printed before the binomial
+            // correction became the default. Only worth printing once the swap has happened —
+            // without it collisionHist returns the same histogram and the rows would repeat.
+            if (binomialRatesActive)
+                printItems("  Trigger item rates [kHz], collision rate (no binomial correction):\n",
+                           collisionHist(back_hw_gMET), collisionHist(back_hw_jMET));
+
+            // Same items estimated from JZ0 alone with the HSTP requirement dropped — the
+            // cross-check for how much the HSTP-filtered, JZ-enriched sample above moves these
+            // numbers. back_hw_*_JZ0 are never rescaled upstream, so the normalization that the
+            // all-JZ histograms already carry is applied here instead, the same way
+            // drawJZ0Comparison does it: scale so the rate at threshold 0 is targetTotalRateHz.
+            // With normalizeRateToTarget = false both blocks are as filled, so no scale is applied
+            // to either and the two remain comparable.
+            auto jz0Scale = [&](TH1F* hw) {
+                const double atZero = hw->Integral();
+                return (normalizeRateToTarget && atZero > 0.0) ? targetTotalRateHz / atZero : 1.0;
+            };
+            const double scJZ0_gMET = jz0Scale(back_hw_gMET_JZ0);
+            const double scJZ0_jMET = jz0Scale(back_hw_jMET_JZ0);
+            printItems(Form("  Trigger item rates [kHz], JZ0 only (no HSTP), from %.4g / %.4g MHz at"
+                            " threshold 0 for gFEX / jFEX, scaled by %.5g / %.5g:\n",
+                            back_hw_gMET_JZ0->Integral() / 1e6, back_hw_jMET_JZ0->Integral() / 1e6,
+                            scJZ0_gMET, scJZ0_jMET),
+                       back_hw_gMET_JZ0, back_hw_jMET_JZ0, scJZ0_gMET, scJZ0_jMET);
+
+            // The binomial per-crossing numbers. Identical to the headline block when
+            // useBinomialRates is on — printed anyway so the rate definition behind the headline is
+            // stated explicitly in the log, and so the numbers are still available when the flag is
+            // off. back_hwBin_* has already been normalized to targetTotalRateHz at threshold 0 by
+            // this point, so this needs no scale of its own.
+            if (h_binomialCorr) {
+                // Plain "mu" rather than kMu: that constant is a ROOT latex glyph for plot labels
+                // and would come out as markup on a terminal.
+                printItems(Form("  Trigger item rates [kHz], binomial per-crossing correction"
+                                " (mu = %.0f, f_BX = %.1f MHz):\n",
+                                binomialPileup, kCrossingRateHz / 1e6),
+                           back_hwBin_gMET, back_hwBin_jMET);
+            } else {
+                std::cout << "  Trigger item rates [kHz], binomial: truth AntiKt4 WZ-dressed jets"
+                          << " not available, correction not built\n";
+            }
         }
 
         // --- Per-JZ-slice contributions to jFEX MET above a fixed threshold ---
@@ -4678,7 +5276,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             gNomRmsBack->GetEntry(iEvt);
             metTruthTreeBack->GetEntry(iEvt);
             eventInfoTreeBack->GetEntry(iEvt);
-            if (applyHSTPFilter && !passHSTPValuesBack) continue;
+            if (!keepBackgroundEvent(passHSTPValuesBack, sampleJZSliceBack, eventWeightsValuesBack)) continue;
             if (hasWTAConeJets) gepWTAConeCellsTowersJetsTreeBack->GetEntry(iEvt);
             if (hasTruthAntiKt4WZDressed) truthAntiKt4WZDressedJetsTreeBack->GetEntry(iEvt);
             if (hasInTimeAntiKt4TruthJets) inTimeAntiKt4TruthJetsTreeBack->GetEntry(iEvt);
@@ -4885,7 +5483,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     swMult.Continue();
                 }
                 eventInfoTreeBack->GetEntry(iEvt);
-                if (applyHSTPFilter && !passHSTPValuesBack) continue;
+                if (!keepBackgroundEvent(passHSTPValuesBack, sampleJZSliceBack, eventWeightsValuesBack)) continue;
                 if (!eventWeightsValuesBack || eventWeightsValuesBack->empty()) continue;
                 const double w = eventWeightsValuesBack->at(0);
                 for (int iV = 0; iV < nPUSup; ++iV) {
@@ -5297,6 +5895,12 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // (background only — the guard inside the block below labels these QCD dijet)
         // hAllJZ is the HSTP-filtered sum over every JZ slice, and hJZ0 the JZ0 events with the
         // HSTP requirement dropped.
+        // This block is deliberately the one place that keeps working in COLLISION rate: it exists
+        // to compare normalization choices against each other, so the call sites below pass
+        // collisionHist(back_hw_X) rather than back_hw_X. With useBinomialRates on those two differ
+        // — back_hw_X holds the corrected contents by this point — and passing the corrected one
+        // would make the "as filled" and "binomial" curves the same histogram up to a constant,
+        // collapsing the comparison the plot is for.
         {
             BkgProcLabel bkgProc;
             // One plot per MET type, four curves:
@@ -5305,15 +5909,16 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             //   * JZ0 alone with the HSTP requirement dropped, normalized the same way,
             //   * all JZ slices (HSTP filtered) as filled, i.e. the collision rate the weights
             //     actually carry, for reference against the two normalized curves,
-            //   * the same events with the truth-jet binomial correction applied per event, i.e.
-            //     the per-crossing counterpart of the as-filled curve (see the block that builds
-            //     h_binomialCorr). Drawn only when the truth jets were available.
+            //   * the same events with the truth-jet binomial correction applied per event (see
+            //     the block that builds h_binomialCorr). Drawn only when the truth jets were
+            //     available. This one now carries the HSTP recovery factor as well, so it is the
+            //     per-crossing counterpart of the NORMALIZED curve, not of the as-filled one, and
+            //     sits just below it by the saturation ratio rather than a factor ~100 under.
             // The as-filled JZ0 curve is deliberately not drawn: it sits ~180x above the
             // normalized ones, which no single ratio panel can span.
             auto drawJZ0Comparison = [&](TH1F* hAllJZ, TH1F* hJZ0, TH1F* hAllJZBinomial,
                                          const std::string& algoName, const std::string& fileStem) {
                 if (!hAllJZ || !hJZ0) return;
-                const std::string hstpSuffix = applyHSTPFilter ? " (HSTP filtered)" : "";
                 const std::vector<Int_t> jz0Cols = { kBlack, kP10Red, kP10Blue, kP10Green };
 
                 TH1* cumAll = MakeCumulativeRateHist(hAllJZ, (std::string(hAllJZ->GetName()) + "_cumAll").c_str());
@@ -5342,31 +5947,33 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 // Scale factors go to the log, not the legend — the factor on its own is
                 // unreadable, and the number worth having is where each curve started.
                 printf("  [norm] %-20s %-28s from %10.4g MHz at threshold 0, scaled by %.5g\n",
-                       algoName.c_str(), ("All JZ" + hstpSuffix).c_str(), allAtZeroAsFilled / 1e6,
+                       algoName.c_str(), rateSampleName().c_str(), allAtZeroAsFilled / 1e6,
                        allAtZeroAsFilled > 0.0 ? targetTotalRateHz / allAtZeroAsFilled : 1.0);
                 printf("  [norm] %-20s %-28s from %10.4g MHz at threshold 0, scaled by %.5g\n",
                        algoName.c_str(), "JZ0 only (no HSTP)", jz0AtZero / 1e6,
                        jz0AtZero > 0.0 ? targetTotalRateHz / jz0AtZero : 1.0);
 
                 std::vector<std::string> normLabels;
-                normLabels.push_back("All JZ slices" + hstpSuffix + ", normalized");
+                normLabels.push_back(rateSampleName() + ", normalized");
                 normLabels.push_back("JZ0 only (no HSTP), normalized");
-                normLabels.push_back("All JZ slices" + hstpSuffix + ", not scaled");
+                normLabels.push_back(rateSampleName() + ", not scaled");
 
-                // Per-crossing curve: the as-filled events re-weighted by c(E_T^lead truth jet).
+                // Per-crossing curve: the same events re-weighted by c(E_T^lead truth jet) and
+                // carrying the HSTP recovery factor, so it is directly comparable with the
+                // normalized all-JZ curve rather than with the as-filled one.
                 if (h_binomialCorr && hAllJZBinomial) {
                     TH1* cumBin = MakeCumulativeRateHist(hAllJZBinomial,
                                                          (std::string(hAllJZBinomial->GetName()) + "_cumBin").c_str());
                     if (cumBin) {
                         normCurves.push_back(cumBin);
-                        normLabels.push_back(Form("All JZ slices%s, binomial correction"
-                                                  " (%s=%.0f, f_{BX}=%.1f MHz)",
-                                                  hstpSuffix.c_str(), kMu.c_str(), binomialPileup,
-                                                  kCrossingRateHz / 1e6));
+                        // Pileup and crossing rate used to be quoted in parentheses here; the
+                        // entry is long enough without them and they rendered broken.
+                        normLabels.push_back(rateSampleName() + ", binomial correction");
                         printf("  [binomial] %-20s %-28s %10.4g MHz at threshold 0"
-                               " (as filled %10.4g MHz)\n",
+                               " (normalized collision rate %10.4g MHz, as filled %10.4g MHz)\n",
                                algoName.c_str(), "All JZ, per crossing",
-                               cumBin->GetBinContent(1) / 1e6, allAtZeroAsFilled / 1e6);
+                               cumBin->GetBinContent(1) / 1e6, targetTotalRateHz / 1e6,
+                               allAtZeroAsFilled / 1e6);
                     }
                 }
 
@@ -5378,20 +5985,269 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                                         /*yScale=*/1e-3, /*xMax=*/200.0, /*yMin=*/1e-3,
                                         /*ratioMin=*/0.0, /*ratioMax=*/3.0);
             };
-            drawJZ0Comparison(back_hw_gMET,     back_hw_gMET_JZ0,     back_hwBin_gMET,     "gFEX JwoJ",     "gFEX_MET");
-            drawJZ0Comparison(back_hw_gMET_NC,  back_hw_gMET_NC_JZ0,  back_hwBin_gMET_NC,  "gFEX NoiseCut", "gFEX_NoiseCut_MET");
-            drawJZ0Comparison(back_hw_gMET_Rms, back_hw_gMET_Rms_JZ0, back_hwBin_gMET_Rms, "gFEX Rms",      "gFEX_RMS_MET");
-            drawJZ0Comparison(back_hw_jMET,     back_hw_jMET_JZ0,     back_hwBin_jMET,     "jFEX",          "jFEX_MET");
-            drawJZ0Comparison(back_hw_JetMET,   back_hw_JetMET_JZ0,   back_hwBin_JetMET,   "GEP Jet MET",   "GEP_JetMET");
+            drawJZ0Comparison(collisionHist(back_hw_gMET),     back_hw_gMET_JZ0,     back_hwBin_gMET,     "gFEX JwoJ",     "gFEX_MET");
+            drawJZ0Comparison(collisionHist(back_hw_gMET_NC),  back_hw_gMET_NC_JZ0,  back_hwBin_gMET_NC,  "gFEX NoiseCut", "gFEX_NoiseCut_MET");
+            drawJZ0Comparison(collisionHist(back_hw_gMET_Rms), back_hw_gMET_Rms_JZ0, back_hwBin_gMET_Rms, "gFEX Rms",      "gFEX_RMS_MET");
+            drawJZ0Comparison(collisionHist(back_hw_jMET),     back_hw_jMET_JZ0,     back_hwBin_jMET,     "jFEX",          "jFEX_MET");
+            drawJZ0Comparison(collisionHist(back_hw_JetMET),   back_hw_JetMET_JZ0,   back_hwBin_JetMET,   "GEP Jet MET",   "GEP_JetMET");
             if (!hasOverlapRemoval)
-                drawJZ0Comparison(back_hw_TowerMET, back_hw_TowerMET_JZ0, back_hwBin_TowerMET, "GEP Tower MET", "GEP_TowerMET");
-            drawJZ0Comparison(back_hw_TotalMET, back_hw_TotalMET_JZ0, back_hwBin_TotalMET, "GEP Total MET", "GEP_TotalMET");
+                drawJZ0Comparison(collisionHist(back_hw_TowerMET), back_hw_TowerMET_JZ0, back_hwBin_TowerMET, "GEP Tower MET", "GEP_TowerMET");
+            drawJZ0Comparison(collisionHist(back_hw_TotalMET), back_hw_TotalMET_JZ0, back_hwBin_TotalMET, "GEP Total MET", "GEP_TotalMET");
             if (hasGEPJwoJ)
-                drawJZ0Comparison(back_hw_GEPJwoJMET, back_hw_GEPJwoJMET_JZ0, back_hwBin_GEPJwoJMET, "GEP JwoJ MET", "GEP_JwoJMET");
+                drawJZ0Comparison(collisionHist(back_hw_GEPJwoJMET), back_hw_GEPJwoJMET_JZ0, back_hwBin_GEPJwoJMET, "GEP JwoJ MET", "GEP_JwoJMET");
             if (hasGFexSimMET) {
-                drawJZ0Comparison(back_hw_gMET_JwoJAOD, back_hw_gMET_JwoJAOD_JZ0, back_hwBin_gMET_JwoJAOD, "gFEX JwoJ (AOD)",     "gFEX_MET_AOD");
-                drawJZ0Comparison(back_hw_gMET_NCAOD,   back_hw_gMET_NCAOD_JZ0,   back_hwBin_gMET_NCAOD,   "gFEX NoiseCut (AOD)", "gFEX_NoiseCut_MET_AOD");
-                drawJZ0Comparison(back_hw_gMET_RmsAOD,  back_hw_gMET_RmsAOD_JZ0,  back_hwBin_gMET_RmsAOD,  "gFEX Rms (AOD)",      "gFEX_RMS_MET_AOD");
+                drawJZ0Comparison(collisionHist(back_hw_gMET_JwoJAOD), back_hw_gMET_JwoJAOD_JZ0, back_hwBin_gMET_JwoJAOD, "gFEX JwoJ (AOD)",     "gFEX_MET_AOD");
+                drawJZ0Comparison(collisionHist(back_hw_gMET_NCAOD),   back_hw_gMET_NCAOD_JZ0,   back_hwBin_gMET_NCAOD,   "gFEX NoiseCut (AOD)", "gFEX_NoiseCut_MET_AOD");
+                drawJZ0Comparison(collisionHist(back_hw_gMET_RmsAOD),  back_hw_gMET_RmsAOD_JZ0,  back_hwBin_gMET_RmsAOD,  "gFEX Rms (AOD)",      "gFEX_RMS_MET_AOD");
+            }
+        }
+
+        // --- Truth-jet plots: JZ0-only vs all-JZ ---
+        // Three families, all on the merged truth collection (hard scatter + in-time pileup) and
+        // all comparing the same two background definitions as points with their statistical
+        // errors over a ratio panel against JZ0:
+        //   * leading jet E_T at each of the ten ranks,
+        //   * the MET those jets account for,
+        //   * the average jet multiplicity above an E_T threshold.
+        //
+        // The first two are scaled to unit area first, which is the point of the comparison: the
+        // two definitions carry wildly different total weight
+        // (JZ0 alone is ~180x the HSTP-filtered all-JZ sum before either is scaled), so only the
+        // shapes are comparable, and the weights still set the shape within each curve.
+        //
+        // Sumw2 was on from booking, so the bin errors are the weighted stat. errors — sqrt(Sum
+        // w^2), not sqrt(N) — which is the quantity that matters here: a JZ0 bin holding one event
+        // of enormous weight has a large error however tall it is, and that is exactly the case
+        // these plots have to make visible. Scale() carries those errors through unchanged
+        // relative to the contents, so normalizing does not distort the precision.
+        //
+        // These histograms are never touched by the rate normalization above, so no factor has to
+        // be undone before normalizing here.
+        if (hasTruthAntiKt4WZDressed || hasInTimeAntiKt4TruthJets) {
+            BkgProcLabel bkgProc;   // background only
+            const char* leadJetRankNames[nLeadJetRanks] = {
+                "Leading",     "Subleading",  "3rd leading", "4th leading", "5th leading",
+                "6th leading", "7th leading", "8th leading", "9th leading", "10th leading"
+            };
+            const std::string hstpSuffix = applyHSTPFilter ? " (HSTP filtered)" : "";
+            // Short names for the log lines, full names for the legends — the legend entries also
+            // carry per-curve statistics, so the definition part has to stay compact.
+            const std::string truthJetWgtName[nTruthJetWgt] = {
+                "JZ0 only (no HSTP)",
+                "JZ0-9" + hstpSuffix,
+                "JZ0-9" + hstpSuffix + ", binomial",
+                "JZ0+JZ1 (no HSTP)"
+            };
+            const std::vector<Int_t> truthJetCols = { kBlack, kP10Red, kP10Blue, kP10Violet };
+            // Weighted median, from the histogram's own cumulative. Both this and GetMean are
+            // scale invariant, so it does not matter whether they are read before or after the
+            // unit-area normalization; they are read before it only to sit next to the Sum(w)
+            // printout, which is not.
+            auto weightedMedian = [](TH1F* h) -> double {
+                double q[1] = {0.0}, p[1] = {0.5};
+                return h->GetQuantiles(1, q, p) == 1 ? q[0] : h->GetMean();
+            };
+
+            // One canvas overlaying the three weightings. Shared by the ten leading-jet ranks and
+            // by the truth-jet MET below, which differ only in what is on the x axis. NOTE: this
+            // normalizes the histograms in place, so one passed here must not be wanted at its
+            // original scale afterwards. quantityName only labels the log line.
+            auto drawTruthJetOverlay = [&](TH1F* const hists[nTruthJetWgt],
+                                           const std::string& quantityName,
+                                           const std::string& xTitle,
+                                           const std::string& fileStem,
+                                           double xMax) {
+                std::vector<TH1*>        curves;
+                std::vector<std::string> labels;
+                std::vector<Int_t>       cols;
+                std::string              refShort;   // names the denominator on the ratio axis
+                for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+                    TH1F* h = hists[iW];
+                    // An empty weighting is dropped rather than skipping the whole canvas: the
+                    // binomial curve is absent whenever it was switched off or the correction
+                    // could not be built, and the other two are still worth drawing either way.
+                    // A weighting that was deliberately switched off is not worth a line per
+                    // canvas, so only an unexpectedly empty one is reported.
+                    if (!h || h->Integral() <= 0.0) {
+                        if (!(iW == 2 && !overlayTruthJetBinomial))
+                            std::cout << "  [truthJet] " << quantityName << ": "
+                                      << truthJetWgtName[iW] << " is empty — curve dropped\n";
+                        continue;
+                    }
+                    // Read before normalizing: unit-area scaling leaves mean and median alone but
+                    // wipes out the Sum(w) the curve started from, which is what says how much
+                    // weight is behind the shape.
+                    const double mean = h->GetMean(), med = weightedMedian(h);
+                    printf("  [truthJet] %-28s %-34s: mean = %6.2f, median = %6.2f GeV"
+                           " (Sum(w) = %9.4g)\n",
+                           quantityName.c_str(), truthJetWgtName[iW].c_str(),
+                           mean, med, h->Integral());
+                    normalizeHist(h);
+                    // Statistics ride in the legend entry rather than in a separate text block,
+                    // so each number stays next to the marker whose curve it describes.
+                    curves.push_back(h);
+                    labels.push_back(Form("%s: mean %.1f, median %.1f GeV",
+                                          truthJetWgtName[iW].c_str(), mean, med));
+                    cols.push_back(truthJetCols[iW]);
+                    // The ratio denominator is whichever curve survived first, normally JZ0. Named
+                    // from that curve rather than hardcoded so a dropped JZ0 does not leave the
+                    // ratio axis claiming a denominator that is not on the canvas.
+                    if (refShort.empty()) refShort = truthJetWgtShort[iW];
+                }
+                if (curves.empty()) return;
+
+                const std::string yTitle  = Form("Fraction of Events / %.4g GeV",
+                                                 curves[0]->GetBinWidth(1));
+                const std::string outPath = std::string(jzDir.Data()) + fileStem
+                                          + "_JZ0_vs_AllJZ.pdf";
+                // JZ0 is the denominator, matching the rate plots above. Where JZ0 runs out of
+                // statistics the ratio simply has no points, which reads as the honest statement
+                // that JZ0 cannot say anything up there — the high-E_T tails of the softer ranks.
+                // No algoLabel: the x axis already names the plot, and the top-right strip is
+                // taken by the QCD dijet process label.
+                //
+                // useBinCenters on: these are differential spectra, not rate-vs-threshold curves.
+                // xMax is passed explicitly rather than left to auto-range so the main pad and the
+                // ratio pad share an x axis. The legend is widened to the left and compacted to
+                // the top of the pad at a smaller text size: the entries carry a mean and a median
+                // each, so they are long, and there are only two or three of them.
+                DrawRateCurvesWithRatio(curves, labels, cols,
+                                        /*refIndex=*/0, /*refShortName=*/refShort,
+                                        xTitle, yTitle,
+                                        /*algoLabel=*/"",
+                                        TString(outPath.c_str()),
+                                        /*yScale=*/1.0, /*xMax=*/xMax, /*yMin=*/1e-8,
+                                        /*ratioMin=*/0.0, /*ratioMax=*/3.0,
+                                        /*algoLabelTopRight=*/false,
+                                        /*useBinCenters=*/true, /*legX1=*/0.24,
+                                        /*legRowHeight=*/0.045, /*legTextSize=*/0.026,
+                                        /*legTopNDC=*/0.82);
+            };
+
+            for (int iR = 0; iR < nLeadJetRanks; ++iR) {
+                const std::string rankName = leadJetRankNames[iR];
+                TH1F* hists[nTruthJetWgt] = { back_hw_leadJetEt[0][iR],
+                                              back_hw_leadJetEt[1][iR],
+                                              back_hw_leadJetEt[2][iR],
+                                              back_hw_leadJetEt[3][iR] };
+                drawTruthJetOverlay(hists,
+                                    rankName + " jet E_{T}",
+                                    rankName + " truth or in-time pileup jet E_{T} [GeV]",
+                                    "LeadingJetEt_Rank" + std::to_string(iR + 1),
+                                    leadJetEtMax[iR]);
+            }
+
+            // Truth-jet MET on the same footing: the magnitude of the negative vector sum over
+            // every jet in both truth collections, no threshold applied.
+            if (hasTruthJetMET)
+                drawTruthJetOverlay(back_hw_truthJetMET, "Truth jet MET",
+                                    "Truth jet MET (HS + in-time pileup) [GeV]",
+                                    "TruthJetMET", truthJetMETMax);
+
+            // --- Truth-jet multiplicity vs E_T threshold ---
+            // Not routed through drawTruthJetOverlay: these are TProfiles, whose bin content is
+            // already an average count and must NOT be normalized to unit area the way the
+            // spectra above are. Everything else matches — points with errors, ratio against JZ0.
+            // A TProfile IS a TH1, so DrawRateCurvesWithRatio reads GetBinContent as the mean and
+            // GetBinError as the error ON that mean, which is the statistical uncertainty wanted.
+            {
+                std::vector<TH1*>        multCurves;
+                std::vector<std::string> multLabels;
+                std::vector<Int_t>       multCols;
+                std::string              multRefShort;
+                for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+                    TProfile* p = back_prof_truthJetNVsThr[iW];
+                    if (!p || p->GetEntries() <= 0) continue;
+                    // Mean and median say nothing useful about a curve whose x axis is a
+                    // threshold, so the legend carries the count at threshold 0 instead — the
+                    // total truth-jet multiplicity each definition gives.
+                    const double nAt0 = p->GetBinContent(1);
+                    printf("  [truthJet] %-28s %-34s: <N> at threshold 0 = %6.2f\n",
+                           "Truth jet multiplicity", truthJetWgtName[iW].c_str(), nAt0);
+                    multCurves.push_back(p);
+                    multLabels.push_back(Form("%s: #LTN#GT = %.1f at 0 GeV",
+                                              truthJetWgtName[iW].c_str(), nAt0));
+                    multCols.push_back(truthJetCols[iW]);
+                    if (multRefShort.empty()) multRefShort = truthJetWgtShort[iW];
+                }
+                if (!multCurves.empty())
+                    DrawRateCurvesWithRatio(multCurves, multLabels, multCols,
+                                            /*refIndex=*/0, /*refShortName=*/multRefShort,
+                                            "Truth jet E_{T} threshold [GeV]",
+                                            "#LTN truth jets#GT above threshold",
+                                            /*algoLabel=*/"",
+                                            TString((std::string(jzDir.Data())
+                                                     + "TruthJetMultiplicity_vs_Threshold"
+                                                     + "_JZ0_vs_AllJZ.pdf").c_str()),
+                                            /*yScale=*/1.0, /*xMax=*/truthJetThrMax,
+                                            /*yMin=*/1e-4,
+                                            /*ratioMin=*/0.0, /*ratioMax=*/3.0,
+                                            /*algoLabelTopRight=*/false,
+                                            /*useBinCenters=*/true, /*legX1=*/0.24,
+                                            /*legRowHeight=*/0.045, /*legTextSize=*/0.026,
+                                            /*legTopNDC=*/0.82);
+                else
+                    std::cout << "  [truthJet] multiplicity vs threshold: every profile is empty"
+                              << " — plot skipped\n";
+            }
+
+            // --- TOB MET vs truth-jet MET, one canvas per MET type per weighting ---
+            // The 2D counterpart of the overlays above: a correlation cannot put three weightings
+            // on one canvas, so each gets its own, named by weighting in the file stem. Drawn with
+            // the same recipe as the existing back_h2_*_TOBMet_vs_truthMET plots — unit-normalized
+            // COLZ, the ProfileX on top, a linear fit to it, and the y = x line to read the fit
+            // against — so the two families can be compared directly.
+            if (hasTruthJetMET) {
+                const std::string tjDir = std::string(jzDir.Data()) + "TruthJetMETCorrelation/";
+                gSystem->mkdir(tjDir.c_str(), true);
+                for (int iW = 0; iW < nTruthJetWgt; ++iW) {
+                    for (int iA = 0; iA < nMETTypes; ++iA) {
+                        if (!hasGEPJwoJ && iA == gepJwoJMETTypeIdx) continue;
+                        if (hasOverlapRemoval && iA == towerMETTypeIdx) continue;
+                        TH2F* h2 = back_h2_TOBMETvsTruthJetMET[iW][iA];
+                        if (!h2 || h2->Integral() <= 0.0) continue;
+                        h2->Scale(1.0 / h2->Integral());
+                        h2->SetMinimum(1e-14);
+                        h2->GetXaxis()->SetTitle("Truth jet MET (HS + in-time pileup) [GeV]");
+                        h2->GetYaxis()->SetTitle((std::string(metTypeLabel[iA]) + " MET [GeV]").c_str());
+
+                        TCanvas cTJ(("cTJCorr_" + std::string(h2->GetName())).c_str(), "", 700, 600);
+                        cTJ.SetLogz();
+                        cTJ.SetRightMargin(0.15); cTJ.SetLeftMargin(0.14);
+                        cTJ.SetBottomMargin(0.14); cTJ.SetTicks(1, 1);
+                        h2->Draw("COLZ");
+
+                        const double xmaxTJ = h2->GetXaxis()->GetXmax();
+                        const double ymaxTJ = h2->GetYaxis()->GetXmax();
+                        const double rTJ    = h2->GetCorrelationFactor(1, 2);
+                        TProfile* profTJ = h2->ProfileX((std::string(h2->GetName())+"_pfx").c_str(), 1, -1, "s");
+                        profTJ->SetMarkerStyle(20); profTJ->SetMarkerSize(0.5);
+                        profTJ->SetMarkerColor(kBlack); profTJ->SetLineColor(kBlack);
+                        TF1* fitTJ = new TF1((std::string("lfTJ_")+h2->GetName()).c_str(), "pol1", 0, xmaxTJ);
+                        profTJ->Fit(fitTJ, "QN");
+                        fitTJ->SetLineColor(kP10Blue); fitTJ->SetLineWidth(2);
+                        fitTJ->Draw("SAME"); profTJ->Draw("SAME");
+
+                        const double rngTJ = std::min(xmaxTJ, ymaxTJ);
+                        TLine diagTJ(0, 0, rngTJ, rngTJ);
+                        diagTJ.SetLineColor(kP10Red); diagTJ.SetLineStyle(2); diagTJ.SetLineWidth(2);
+                        diagTJ.Draw("SAME");
+
+                        TLegend legTJ(0.16, 0.58, 0.61, 0.88);
+                        legTJ.SetBorderSize(0); legTJ.SetFillStyle(0); legTJ.SetTextSize(0.028);
+                        legTJ.AddEntry((TObject*)nullptr, truthJetWgtName[iW].c_str(), "");
+                        legTJ.AddEntry(&diagTJ, "TOB MET = Truth jet MET", "l");
+                        legTJ.AddEntry(fitTJ, Form("Fit: y = %.3f x + %.1f GeV",
+                                                   fitTJ->GetParameter(1), fitTJ->GetParameter(0)), "l");
+                        legTJ.AddEntry((TObject*)nullptr, Form("r = %.4f", rTJ), "");
+                        legTJ.Draw();
+
+                        cTJ.cd(); DrawATLASLabel();
+                        cTJ.SaveAs((tjDir + "back_" + metTypeShort[iA] + "_TOBMet_vs_truthJetMET_"
+                                    + truthJetWgtShort[iW] + ".pdf").c_str());
+                        delete profTJ; delete fitTJ;
+                    }
+                }
             }
         }
 
@@ -7285,7 +8141,10 @@ void metAnalysisAndRates() {
     const std::string sigInputTtbarDilepPU140   = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
     const std::string sigInputZmumuPU140 = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/Zmumu_v4/mc21_14TeV_Zmumu_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
     const std::string backInputPU140 = "/data/larsonma/GEPHadronicEventReconstruction/ntuples_PU140/QCD_Dijet_JZ*_v4/mc21_14TeV_jj_JZ*_e8557_s4422_r16129_DAOD_NTUPLE_GEP.root";
-    const std::string emuDir    = "/data/larsonma/GEPMET/outputNTuplesDev_METv3/";
+    const std::string emuDir    = met_emulation_dir_;
+    // MET emulation made from the uncalibrated WTACone jets (use_calibrated_wtacone_jets_ = false),
+    // for overlaying against the calibrated outputs in emuDir
+    const std::string emuDirNoCalib = "/data/larsonma/GEPMET/outputNTuplesDev_METv3/";
 
     // The trailing _twrSF{x}_jetSF{y} tag encodes the (tower, jet) scale factors
     // applied in the totalMET sum (see makeOutputMETFileName). Compare 1,1 vs 1,0p4
@@ -7344,9 +8203,149 @@ void metAnalysisAndRates() {
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
 
+        // JES-calibrated WTACone jets 09262026 - ZvvHbb PU 140, EtaSK, jet coefficient 1:
+        // jet E_T threshold 0 / 15 x tower E_T threshold 0 / 2, each as the OR x tower coefficient
+        // square (NoOR / OR x 1 / 0.4)
+        // Calib vs NoCalib overlay: only configs with an uncalibrated PU140 output in emuDirNoCalib
+        // are active. The full scan is kept below, commented out, for when those exist.
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"     },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"       },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"     },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"     },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"       },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"     },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"    },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"      },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"    },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"    },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"      },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"    },
+        // Calibrated-jet E_T threshold scan 09262026 (PU 140, EtaSK, NoOR, TC1 / JC1, jet E_T
+        // threshold on CALIBRATED E_T): does a higher calibrated threshold recover the uncalibrated
+        // J15 performance? Tower E_T threshold 2 is compared against the NoCalib references below;
+        // tower E_T threshold 0 has no NoCalib reference at PU 140, so it is left for a separate run.
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt20_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt25_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt30_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt35_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt40_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt45_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt55_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt20_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt25_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt30_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt35_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt40_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        // The same two configurations before the calibration (outputs from 2026-09-25)
+        //{ sigInputPU140, emuDirNoCalib + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputPU140, emuDirNoCalib + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
 
-        // First GEP JwoJ studies - hard Et threshold scan
+        // PU 200 calib + OR studies
+        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+
+        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },*/
+
+
+        // 2x2 gBlock studies - ZvvHbb PU 200
+        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },*/
+
+
+        // First GEP JwoJ studies - hard Et threshold scan ZvvHbb PU 200
+        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
+
+        /*{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
+
+        // First GEP JwoJ studies - hard Et threshold scan ttbar semilep PU 200
+        /*{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
+
+        // First GEP JwoJ studies - hard Et threshold scan ttbar dilep PU 200
+        /*{ sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
+
+
+        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt15.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt20.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
@@ -7354,7 +8353,7 @@ void metAnalysisAndRates() {
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt20.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
         { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt15.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt20.root"   },
+        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt20.root"   },*/
 
         // PU suppression comparison studies for nominal configuration [PU 140]:
         //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
@@ -7370,6 +8369,15 @@ void metAnalysisAndRates() {
         // RateVsMu_MET*.pdf matched-pair block keys on.
         //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        //{ sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+
+        //{ sigInputZmumu,      emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        //{ sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputTtbarSemilep,      emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ sigInputTtbarDilep,      emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
 
         // "Ideal scenario" 08282026 — the algorithm extensions that each helped on their own,
         // applied together: EtaSK pileup suppression, J15/T2 jet and tower E_T thresholds, jet
@@ -7571,8 +8579,119 @@ void metAnalysisAndRates() {
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
 
-        // First GEP JwoJ studies - hard Et threshold scan
+        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+
+        // JES-calibrated WTACone jets 09262026 - PU 140, parallel to the ZvvHbb block in signalFiles
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"     },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"       },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"     },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"     },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"       },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"     },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"    },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"      },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"    },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"    },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"      },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"    },
+        // Calibrated-jet E_T threshold scan 09262026 (PU 140, EtaSK, NoOR, TC1 / JC1, jet E_T
+        // threshold on CALIBRATED E_T): does a higher calibrated threshold recover the uncalibrated
+        // J15 performance? Tower E_T threshold 2 is compared against the NoCalib references below;
+        // tower E_T threshold 0 has no NoCalib reference at PU 140, so it is left for a separate run.
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt20_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt25_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt30_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt35_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt40_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt45_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt55_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt20_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt25_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt30_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt35_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt40_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+        // The same two configurations before the calibration (outputs from 2026-09-25)
+        //{ backInputPU140, emuDirNoCalib + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInputPU140, emuDirNoCalib + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+
+        // PU 200 calib + OR studies
+
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
+
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },*/
+
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
+
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
+
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },*/
+
+        // 2x2 gBlock studies - PU 200
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },*/
+
+        // First GEP JwoJ studies - hard Et threshold scan - PU 200
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
+
+        // First GEP JwoJ studies - hard Et threshold scan - PU 140
+        /*{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
+        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
+
+        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt15.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt20.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
@@ -7580,7 +8699,7 @@ void metAnalysisAndRates() {
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt20.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
         { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt15.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt20.root"   },
+        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt20.root"   },*/
 
 
         // PU suppression comparison studies for nominal configuration [PU 140]:
@@ -7594,6 +8713,16 @@ void metAnalysisAndRates() {
         // PU 200 vs. 140 EtaSK rates, nominal (jetEt0_towerEt0) — one entry per signal entry above.
         //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
+        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+
+        // PU 200 signal comparison
+        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
 
         // "Ideal scenario" 08282026 — matches the six signal entries above. The same dijet
         // background file within each pileup scenario, so the shared-background overlay is
@@ -7762,16 +8891,101 @@ void metAnalysisAndRates() {
         //"PU140",
         //"PU200"
 
-        //"Nominal_ZvvHbb_PU200"
-        "T2_TC0.3_HTH10",
-        "T2_TC0.3_HTH15",
+        //"Nominal_Zmumu_PU200",
+
+        //"Nominal_ZvvHbb_PU200",
+        //"Nominal_ttsemilep_PU200",
+        //"Nominal_ttdilep_PU200",
+        //"Nominal_ZvvHbb_PU200",
+        //"Nominal_ZvvHbb_PU200_T2_J15_TC0.4",
+        //"Nominal_ZvvHbb_PU200_T2_J15",
+        /*"T2_TC0.3_HTH15",
         "T2_TC0.3_HTH20",
-        "T2_TC0.4_HTH10",
+        "T2_TC0.3_HTH25",
+        "T2_TC0.3_HTH30",
         "T2_TC0.4_HTH15",
         "T2_TC0.4_HTH20",
-        "T2_TC0.5_HTH10",
+        "T2_TC0.4_HTH25",
+        "T2_TC0.4_HTH30",
         "T2_TC0.5_HTH15",
         "T2_TC0.5_HTH20",
+        "T2_TC0.5_HTH25",
+        "T2_TC0.5_HTH30",*/
+
+        // JES-calibrated WTACone jets 09262026, ZvvHbb PU 140 — parallel to the signal block above
+        //"J0_T0_NoOR_TC1",
+        //"J0_T0_OR_TC1",
+        //"J0_T0_NoOR_TC0.4",
+        //"J0_T0_OR_TC0.4",
+        //"J0_T2_NoOR_TC1_Calib",
+        //"J0_T2_OR_TC1",
+        //"J0_T2_NoOR_TC0.4",
+        //"J0_T2_OR_TC0.4",
+        //"J15_T0_NoOR_TC1",
+        //"J15_T0_OR_TC1",
+        //"J15_T0_NoOR_TC0.4",
+        //"J15_T0_OR_TC0.4",
+        //"J15_T2_NoOR_TC1_Calib",
+        //"J15_T2_OR_TC1",
+        //"J15_T2_NoOR_TC0.4",
+        //"J15_T2_OR_TC0.4",
+        // Calibrated-jet E_T threshold scan 09262026 — parallel to the signal block above
+        //"J20_T2_NoOR_TC1_Calib",
+        //"J25_T2_NoOR_TC1_Calib",
+        //"J30_T2_NoOR_TC1_Calib",
+        //"J35_T2_NoOR_TC1_Calib",
+        //"J40_T2_NoOR_TC1_Calib",
+        //"J45_T2_NoOR_TC1_Calib",
+        //"J50_T2_NoOR_TC1_Calib",
+        //"J55_T2_NoOR_TC1_Calib",
+        //"J60_T2_NoOR_TC1_Calib",
+        //"J20_T0_NoOR_TC1_Calib",
+        //"J25_T0_NoOR_TC1_Calib",
+        //"J30_T0_NoOR_TC1_Calib",
+        //"J35_T0_NoOR_TC1_Calib",
+        //"J40_T0_NoOR_TC1_Calib",
+        // The same two configurations before the calibration
+        //"J0_T2_NoOR_TC1_NoCalib",
+        //"J15_T2_NoOR_TC1_NoCalib",
+
+        /*"J40_T2_OR_TC0.3_Calib",
+        "J45_T2_OR_TC0.3_Calib",
+        "J50_T2_OR_TC0.3_Calib",
+        "J55_T2_OR_TC0.3_Calib",
+        "J60_T2_OR_TC0.3_Calib",*/
+
+        "J60_T2_NoOR_Calib",
+
+        //"J40_T2_OR_TC0.4_Calib",
+        /*"J45_T2_OR_TC0.4_Calib",
+        "J50_T2_OR_TC0.4_Calib",
+        "J55_T2_OR_TC0.4_Calib",
+        "J60_T2_OR_TC0.4_Calib",
+
+        "J40_T2_OR_TC0.5_Calib",
+        "J45_T2_OR_TC0.5_Calib",
+        "J50_T2_OR_TC0.5_Calib",
+        "J55_T2_OR_TC0.5_Calib",
+        "J60_T2_OR_TC0.5_Calib",
+
+        "J40_T2_OR_TC0.6_Calib",
+        "J45_T2_OR_TC0.6_Calib",
+        "J50_T2_OR_TC0.6_Calib",
+        "J55_T2_OR_TC0.6_Calib",
+        "J60_T2_OR_TC0.6_Calib",*/
+
+        /*"T2_TC0.35_HTH10",
+        "T2_TC0.35_HTH12.5",
+        "T2_TC0.35_HTH15",
+        "T2_TC0.35_HTH17.5",
+        "T2_TC0.4_HTH10",
+        "T2_TC0.4_HTH12.5",
+        "T2_TC0.4_HTH15",
+        "T2_TC0.4_HTH17.5",
+        "T2_TC0.45_HTH10",
+        "T2_TC0.45_HTH12.5",
+        "T2_TC0.45_HTH15",
+        "T2_TC0.45_HTH17.5",*/
 
         // Z->mumu Overlap Removal comparison 08192026 — parallel to the signal block above.
         /*"NoOR_TC0.3_JC1",
@@ -7874,12 +9088,35 @@ void metAnalysisAndRates() {
     //std::string overlayDir = "multiFileOverlay_MET_Nominal_ProcessComparison_PU140_200/";   // "Nominal" process comparison block above
     //std::string overlayDir = "multiFileOverlay_MET_Nominal_EtaSK_PU140_200Comparison/";   // PU140 vs PU200 nominal block above
     //std::string overlayDir = "multiFileOverlay_MET_ORComparison_ZvvHbb_PU200/";
-    //std::string overlayDir = "multiFileOverlay_MET_EtaSK_PU200_nominal_verbose_JFEXFIX/";
-    std::string overlayDir = "multiFileOverlay_MET_GEPJwoJ_HardThresholdScan/";
+    //std::string overlayDir = "multiFileOverlay_MET_Nominal_EtaSK_PU140_200Comparison/";
+    //std::string overlayDir = "multiFileOverlay_MET_GEPJwoJ_HardThresholdScan_ZvvHbb_PU200_Scan2/";
+    //std::string overlayDir = "multiFileOverlay_MET_CalibJets_J0J15_T0T2_ORxCoeff_ZvvHbb_PU140/";   // JES-calibrated jets full scan
+    //std::string overlayDir = "multiFileOverlay_MET_CalibVsNoCalib_J0T2_J15T2_NoOR_TC1_ZvvHbb_PU140/";   // Calib vs NoCalib block above
+    std::string overlayDir = "multiFileOverlay_MET_CalibJetEtScan_vsNoCalib_OR_ZvvHbb_PU200/";   // calibrated jet E_T threshold scan above
 
     //mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root
     //std::string overlayDir = "multiFileOverlay_MET_RateVsPileup_ZmumuPUComparison/";   // rate vs mu study above
     //std::string overlayDir = "multiFileOverlay_MET_Nominal_PUSupComparison_PU200/";   // nominal PU-suppression block above
+
+    // Every multi-file overlay lands under this one directory instead of straight into analysis/,
+    // which had accumulated ~25 multiFileOverlay_MET_* directories at the top level. The overlayDir
+    // values above stay bare leaf names, so switching study is still a matter of moving which line
+    // is commented out; the prefix is applied once, here. The mkdir calls that consume overlayDir
+    // are recursive, so the base directory does not need creating separately.
+    const std::string overlayBaseDir = "multiFileOverlays/";
+    overlayDir = overlayBaseDir + overlayDir;
+
+    // Rates from JZ0 + JZ1 (use_jz0_jz1_rates_) get their own directories, so a run in that mode
+    // does not overwrite the nominal all-JZ, HSTP-filtered plots.
+    if (use_jz0_jz1_rates_) {
+        auto withJZ01Suffix = [](const std::string& dir) {
+            const std::string stem = (!dir.empty() && dir.back() == '/') ? dir.substr(0, dir.size() - 1) : dir;
+            return stem + "_JZ0JZ1/";
+        };
+        outputDir  = withJZ01Suffix(outputDir);
+        overlayDir = withJZ01Suffix(overlayDir);
+    }
+
     gSystem->mkdir(outputDir.c_str(), true);
 
     analyze_files(signalFiles, backgroundFiles, labels, outputDir, signalName, overlayDir, signalNames);

@@ -145,24 +145,51 @@ const std::string kSeedMid =
     "_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gepWTAConeCellsTowersJets";
 
 const std::vector<std::string> kPlotSelect =
-// ACTIVE: the same input-object comparison at PU140 (r16129), while the PU200 samples are
-// temporarily off disk. ggF HH->4b, seeded-cone only (rMerge_0.001 = d_search disabled), v3,
-// towers in, cone-jet seeds.
+// ACTIVE: BEFORE vs AFTER JES CALIBRATION, v2 nominal at PU200 (r16130) — ggF HH->4b and ttbar
+// all-had, each from the uncalibrated (towerEtCutFixed) and the calibrated (CalibJets) production;
+// d_search disabled, 8 IOs, WTA cone jets as input objects AND seeds, EtaSK, 2 GeV input-tower cut,
+// subjet E_T 25 GeV, v2 — 4 pairs. NEEDS a pair list holding BOTH productions:
+//     cd ../condor && python3 submit_largeRJetCompute.py --pairs-only --pu both \
+//         --production calibJets --production towerEtCutFixed
+// Nothing here pins the production, which is what lets both arms in; the legends append
+// ", calibrated" / ", uncalibrated" (overlayMixesCalibration in the core). For one arm only add
+// "JES=calib" or "JES=uncalib" (the bare "calib" would match both). With that list, the other
+// selections below pick up BOTH productions wherever a configuration exists in both — add
+// "JES=calib" to them, or build the list with one --production.
+{ "sample=ggF_hh_bbbb|sample=ttbar_allhad", "r16130", "rMerge_0.001", "_IOs_8_",
+  "_IO_gepWTAConeCellsTowersJets", "Seed_gepWTAConeCellsTowersJets_EtaSK_T2_subjetEt25GeV", "_v2.root" };
+// JES-CALIBRATED WTA CONE JETS (CalibJets production), PU140 (r16129) — ggF HH->4b and ttbar
+// all-had, each at both d_search values; WTA cone-jet seeds, EtaSK, 2 GeV input-tower cut,
+// subjet E_T 25 GeV, 256 IOs, towers in, v3 — 4 pairs, sharing the two background state files
+// (rMerge_0.001 / rMerge_2). For one process only, drop the other alternative from the first entry.
+/*{ "sample=ggF_hh_bbbb|sample=ttbar_allhad", "r16129", "rMerge_0.001|rMerge_2", "_IOs_256_",
+  "_IO_gepCellsTowers", "Seed_gepWTAConeCellsTowersJets_EtaSK_T2_subjetEt25GeV", "_v3.root" };*/
+// SEEDING COMPARISON — gFEX SRJ vs WTA cone jets vs jFEX SRJ, each with its own
+// subjet E_T threshold (gFEX 25 GeV, WTA cone 25 GeV, jFEX 40 GeV). ggF HH->4b, PU200
+// (r16130), towers in, EtaSK, 2 GeV input-tower cut, d_search = 2, 256 IOs, v3 — 3 pairs.
 //
-// PU140 does NOT carry the same grid as PU200, so this is not the 7-arm selection with the
-// r-tag swapped — that would silently keep only 3 of its arms. Everything that exists at
-// PU140 under the rest of this selection, verified against the pair list on 2026-09-11:
-//     IOs=128  EtaSK T0      IOs=256  EtaSK T0
-//     IOs=128  EtaSK T2      IOs=256  EtaSK T2
-//     IOs=128  SK    T2
-// i.e. 5 pairs, all with merged state. There is NO _SK_T0_ and no _NoSK_ of any kind at
-// PU140, so the NoSK/SK-at-T0 arms of the PU200 study cannot be reproduced here without
-// running the emulator for them first.
-// The OR alternatives are mutually exclusive because each needs the underscore immediately
-// before its tag: "_SK_T2_" does not match "_EtaSK_T2_" (an 'a' precedes SK).
-{ "sample=ggF_hh_bbbb", "r16129", "rMerge_0.001",
-           "_IO_gepCellsTowers", "Seed_gepWTAConeCellsTowersJets", "_v3.root",
-           "_EtaSK_T0_|_EtaSK_T2_|_SK_T2_" };
+// Seed and threshold are pinned TOGETHER in one contiguous substring per alternative, which
+// is what lets the threshold differ per seed — a separate "subjetEt.." entry would apply one
+// value to all three, and jFEX's 30/35/40/45 GeV variants would all match. The tower-cut tag
+// sits between the PU-suppression tag and the threshold in the filename
+// ("..._Seed_jFEXSRJ_EtaSK_T2_subjetEt40GeV_..."), so each alternative carries "_T2_" in the
+// middle; "Seed_jFEXSRJ_EtaSK_subjetEt40GeV" is contiguous in no filename and matches nothing.
+// Each alternative already contains "_EtaSK_", so a separate PU-suppression entry is redundant.
+// "rMerge_2" is NOT redundant: the WTA cone and jFEX arms also exist at rMerge_0.001 with
+// identical seed/threshold tags, which would double the overlay.
+/*{ "sample=ggF_hh_bbbb", "r16130", "rMerge_2", "_IOs_256_", "_IO_gepCellsTowers", "_v3.root",
+           "Seed_gFEXSRJ_EtaSK_T2_subjetEt25GeV"
+           "|Seed_gepWTAConeCellsTowersJets_EtaSK_T2_subjetEt25GeV"
+           "|Seed_jFEXSRJ_EtaSK_T2_subjetEt40GeV" };*/
+// For both processes (6 pairs, 2 samples x 3 seeds) replace the first entry with
+// "sample=ggF_hh_bbbb|sample=ttbar_allhad".
+// d_search comparison at fixed jFEX SRJ seeding, PU200 (r16130). ggF HH->4b, towers
+// in, jFEX small-R jet seeds, EtaSK, 2 GeV input-tower cut, subjet Et 40 GeV, 256 IOs, v3 —
+// 2 pairs, differing only in rMerge (0.001 = d_search disabled vs 2).
+// Verified against the 56-pair list on 2026-09-21: keeps pairs 14 and 44.
+// The OR alternatives are mutually exclusive because no file is at both d_search values.
+/*{ "sample=ggF_hh_bbbb", "r16130", "rMerge_2|rMerge_0.001",
+           "_IO_gepCellsTowers", "Seed_jFEXSRJ_EtaSK_T2_subjetEt40GeV", "_v3.root" };*/
 // PU200 version of the same study, 7 arms: the 2 GeV input-tower cut (_T2_ applied / _T0_
 // removed) crossed with the PU suppression (NoSK / SK / EtaSK) and the input-object count
 // (128 / 256). Restore this once the PU200 samples are back.
@@ -227,22 +254,16 @@ const std::vector<std::string> kPlotSelect =
 //         { "sample=ggF_hh_bbbb", "r16130", "_EtaSK_", "_IO_gepCellsTowers",
 //           "Seed_gepWTAConeCellsTowersJets", "_v3.root", "_IOs_128_|_IOs_256_" }
 //
-// (2) SEEDING: gFEX vs jFEX vs WTA cone  [6 pairs: 2 samples x 3 seeds, PU200]
-//     v3, d_search = 2, IOs = 128, EtaSK, with a PER-SEED subjet E_T threshold:
-//     jFEX at 40 GeV, cone and gFEX at 25 GeV.
-//     The seed name and its threshold are ADJACENT in the tagger filename
-//     ("Seed_jFEXSRJ_EtaSK_subjetEt40GeV"), so one OR-group can pin a different
-//     threshold per seed — which a separate "subjetEt.." entry could not do, since that
-//     would apply the same value to all three. This also makes the _EtaSK_ entry
-//     redundant (each alternative already contains it).
-//     Without the pairing, jFEX's four subjetEt variants (25/30/35/40) all match and the
-//     selection returns 12 pairs with four indistinguishable jFEX curves.
-//     PU200 only — at PU140 the only EtaSK seed available is the WTA cone one.
-//         { "sample=ggF_hh_bbbb|sample=ttbar_allhad", "r16130", "_IOs_128_",
-//           "rMerge_2", "_v3.root",
-//           "Seed_gepWTAConeCellsTowersJets_EtaSK_subjetEt25GeV"
-//           "|Seed_gFEXSRJ_EtaSK_subjetEt25GeV"
-//           "|Seed_jFEXSRJ_EtaSK_subjetEt40GeV" }
+// (2) SEEDING: gFEX vs WTA cone vs jFEX  — this is now the ACTIVE selection above, at one
+//     process. For both processes [6 pairs: 2 samples x 3 seeds, PU200] use:
+//         { "sample=ggF_hh_bbbb|sample=ttbar_allhad", "r16130", "rMerge_2", "_IOs_256_",
+//           "_IO_gepCellsTowers", "_v3.root",
+//           "Seed_gFEXSRJ_EtaSK_T2_subjetEt25GeV"
+//           "|Seed_gepWTAConeCellsTowersJets_EtaSK_T2_subjetEt25GeV"
+//           "|Seed_jFEXSRJ_EtaSK_T2_subjetEt40GeV" }
+//     The 2026-08-25 form of this mode pinned IOs = 128 and omitted the tower-cut tag
+//     ("Seed_jFEXSRJ_EtaSK_subjetEt40GeV") — neither is a substring of anything in the
+//     current production, so it matched NOTHING.
 //
 // (3) SEEDED-CONE-ONLY (d_search disabled): v2 vs v3  [2 pairs, ggF, PU200]
 //     v2 = 8 IOs, cone jets as BOTH input objects and seeds.
@@ -289,7 +310,9 @@ const std::vector<std::string> kPlotSelect =
 //const std::string kPlotOverlayDir = "seededConeOnly_v2_vs_v3_PU200";
 //const std::string kPlotOverlayDir = "Zprime";
 //const std::string kPlotOverlayDir = "towerCut_T2_vs_T0_IOs256_ggF_PU200";
-const std::string kPlotOverlayDir = "inputObjects_towerCut_PUsup_IOs_ggF_PU140";
+//const std::string kPlotOverlayDir = "calibCompare_PU140";
+const std::string kPlotOverlayDir = "calibBeforeAfter_v2_nominal_PU200";
+//const std::string kPlotOverlayDir = "09212026_ggF_really_MidpointSeeding_CompPU200";
 //const std::string kPlotOverlayDir = "inputObjects_towerCut_PUsup_IOs_ggF_PU200";
 
 // =========================================================================================
@@ -308,19 +331,36 @@ const std::string kPlotOverlayDir = "inputObjects_towerCut_PUsup_IOs_ggF_PU140";
 // gFEXSRJ, then gepWTAConeCellsTowersJets, then jFEXSRJ. That is rarely the reading order
 // you want, which is what this exists to fix.
 //
-// Current: the 7-arm input-object comparison. Baseline (_T2_, cut applied) first so it owns
+// Current: the before/after-calibration comparison — per process, uncalibrated ("before")
+// then calibrated ("after"), so the two arms of one process are adjacent and the uncalibrated
+// ggF curve owns the axes. Sample and production are pinned together by spanning the end of
+// the tagger directory into the start of the signal filename (both are in the matched text).
+const std::vector<std::string> kPlotOrder = {
+    "towerEtCutFixed/mc21_14TeV_HHbbbb",
+    "CalibJets/mc21_14TeV_HHbbbb",
+    "towerEtCutFixed/mc21_14TeV_ttbar",
+    "CalibJets/mc21_14TeV_ttbar"
+};
+// The seeding comparison, in the order the seeds are named in the study —
+// gFEX (25 GeV) -> WTA cone (25 GeV) -> jFEX (40 GeV). gFEX is drawn first, so it owns the
+// axes and takes the first palette colour. Only these three pairs survive the selection, so
+// the bare seed names are unambiguous and no threshold or tower-cut tag is needed here.
+/*const std::vector<std::string> kPlotOrder = {
+    "Seed_gFEXSRJ",
+    "Seed_gepWTAConeCellsTowersJets",
+    "Seed_jFEXSRJ"
+};*/
+// The 7-arm input-object comparison. Baseline (_T2_, cut applied) first so it owns
 // the axes and takes the first palette colour, then the six _T0_ arms in order of increasing
 // pileup suppression — NoSK, SK, EtaSK — with 128 IOs before 256 within each. The IO count
 // and the PU-suppression tag are not adjacent in the filename, so each entry spans kSeedMid.
-// PU140 order: the cut-applied (_T2_) arms first so one of them owns the axes and the first
-// palette colour, then the _T0_ arms, with 128 IOs before 256 within each group.
-const std::vector<std::string> kPlotOrder = {
+/*const std::vector<std::string> kPlotOrder = {
     "IOs_128" + kSeedMid + "_EtaSK_T2_",
     "IOs_256" + kSeedMid + "_EtaSK_T2_",
     "IOs_128" + kSeedMid + "_SK_T2_",
     "IOs_128" + kSeedMid + "_EtaSK_T0_",
     "IOs_256" + kSeedMid + "_EtaSK_T0_"
-};
+};*/
 // PU200 order for the 7-arm study — restore alongside the PU200 selection above.
 /*const std::vector<std::string> kPlotOrder = {
     "IOs_128" + kSeedMid + "_EtaSK_T2_",

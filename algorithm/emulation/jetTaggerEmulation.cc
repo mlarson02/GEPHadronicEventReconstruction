@@ -45,8 +45,28 @@ constexpr double default_input_tower_et_cut_gev_ = 0.0;
 // name says 2 GeV, so the two cannot be mixed in one study and must not overwrite each other.
 // Switch this and submit_largeRJetCompute.py's TAGGER_DIRS/STATE_DIR together — state files are
 // keyed on the tagger BASENAME alone, which is identical between the two productions.
-const std::string output_ntuple_dir_ =
-    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples_towerEtCutFixed/";
+//
+// use_calibrated_wtacone_jets_: seed / input with the JES-calibrated WTACone CellsTowers jets
+// (HERNTupler *CalibJetsTree, needs ntuples made with apply_gep_jes_calibration_ = true) instead of
+// the uncalibrated ones, written to their own directory. Switch together with metEmulation.cc,
+// largeRJetAnalysisCore.h (lrj_tagger_dir_), largeRJetStateRegistry.h and the condor scripts
+// (submit_largeRJetCompute.py --production, hadd_largeRJetState.sh, hadd_emulator_outputs.sh).
+// This constant is only the DEFAULT: jetTaggerEmulation's useCalibratedWTAConeJets argument picks the
+// production per call (condor: submit_jet_tagger_emulation.py --uncalib), so re-running the uncalibrated
+// jets does not mean flipping it while queued jobs are still copying this file.
+const bool use_calibrated_wtacone_jets_ = true;
+
+// Output directory of each production: calibrated, or the uncalibrated (pre-calibration) one
+std::string outputNTupleDir(bool calibrated) {
+    return calibrated ? "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CalibJets/"
+                      : "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples_towerEtCutFixed/";
+}
+const std::string output_ntuple_dir_ = outputNTupleDir(use_calibrated_wtacone_jets_);
+
+// Input tree of the WTACone CellsTowers jets of one PU-suppression variant ("", "SK" or "EtaSK")
+std::string wtaConeCellsTowersJetsTreeName(const std::string& variant, bool calibrated = use_calibrated_wtacone_jets_) {
+    return "gepWTAConeCellsTowers" + variant + (calibrated ? "CalibJetsTree" : "JetsTree");
+}
 
 // Function for processing provided number of loops with JetTagger algorithm,
 // then writing output large radius jets to a new TTree & text files
@@ -54,10 +74,12 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         bool useSKObjects, bool enableEtWeightedMidpoint, bool minEtSeedPosOptimization,
         double minEtSeedPosOptimizationCut, double subjetEtThreshold, // Both in GeV --> converted to digitized 125 MeV units later
         bool useEtaSKObjects = false,
-        double inputTowerEtThreshold = default_input_tower_et_cut_gev_ // [GeV]; 0 = no cut
+        double inputTowerEtThreshold = default_input_tower_et_cut_gev_, // [GeV]; 0 = no cut
+        bool useCalibratedWTAConeJets = use_calibrated_wtacone_jets_ // false = the uncalibrated *JetsTree trees
     ){
         std::cout << "inputobjecttype: " << inputObjectType << "\n";
         std::cout << "useSKObjects: " << useSKObjects << "\n";
+        std::cout << "WTACone jet trees: " << wtaConeCellsTowersJetsTreeName("", useCalibratedWTAConeJets) << " (+ SK / EtaSK)\n";
     // Input-tower E_T cut, derived once: whether to cut at all, and the threshold in the same
     // digitized units the EtaSK tower values carry. Both are used in the gepCellsTowers branch
     // of the input selection below.
@@ -220,10 +242,16 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     TTree* gepCellsTowersTree = (TTree*)inputFile->Get("gepCellsTowersTree");
     TTree* gepBasicClustersSKTree = (TTree*)inputFile->Get("gepBasicClustersSKTree");
     TTree* gepCellsTowersSKTree = (TTree*)inputFile->Get("gepCellsTowersSKTree");
-    TTree* gepWTAConeCellsTowersJetsTree = (TTree*)inputFile->Get("gepWTAConeCellsTowersJetsTree");
-    TTree* gepWTAConeCellsTowersSKJetsTree = (TTree*)inputFile->Get("gepWTAConeCellsTowersSKJetsTree");
+    TTree* gepWTAConeCellsTowersJetsTree = (TTree*)inputFile->Get(wtaConeCellsTowersJetsTreeName("", useCalibratedWTAConeJets).c_str());
+    TTree* gepWTAConeCellsTowersSKJetsTree = (TTree*)inputFile->Get(wtaConeCellsTowersJetsTreeName("SK", useCalibratedWTAConeJets).c_str());
     TTree* gepCellsTowersEtaSKTree = (TTree*)inputFile->Get("gepCellsTowersEtaSKTree");
-    TTree* gepWTAConeCellsTowersEtaSKJetsTree = (TTree*)inputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree");
+    TTree* gepWTAConeCellsTowersEtaSKJetsTree = (TTree*)inputFile->Get(wtaConeCellsTowersJetsTreeName("EtaSK", useCalibratedWTAConeJets).c_str());
+    if (!gepWTAConeCellsTowersJetsTree || !gepWTAConeCellsTowersSKJetsTree || !gepWTAConeCellsTowersEtaSKJetsTree) {
+        std::cerr << "Error: " << wtaConeCellsTowersJetsTreeName("", useCalibratedWTAConeJets) << " (or its SK / EtaSK variant) not found in "
+                  << inputNTuplePath << (useCalibratedWTAConeJets ? " -- calibrated jets need ntuples made with apply_gep_jes_calibration_ = true" : "")
+                  << std::endl;
+        return;
+    }
     // jFEX/gFEX SRJ seeds are always taken from the resimulated trees (the AOD trees are not used for seeding)
     TTree* gFexSRJTree = (TTree*)inputFile->Get("gFexSRJSimTree");
     TTree* jFexSRJTree = (TTree*)inputFile->Get("jFexSRJSimTree"); // Note that jFEX, gFEX trees are pre-sorted by Et in LRJNTupler.cc
@@ -566,10 +594,13 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             sizeof(seedValuesOriginal));
         // Copy seed values prior to doing pre-proceessing (overlap removal & seed optimization)
 
-        // --- LRJ_DEBUG dump (matches TrigGepPerf JetTaggerLRJMaker format) ---
-        static const bool lrjDbg    = (std::getenv("LRJ_DEBUG") != nullptr);
-        static const int  lrjDbgMax = (std::getenv("LRJ_DEBUG_NEVT") ? std::atoi(std::getenv("LRJ_DEBUG_NEVT")) : 5);
-        const bool lrjDbgE = lrjDbg && (int)iEvt < lrjDbgMax;
+        // --- LRJ debug dump (matches TrigGepPerf JetTaggerLRJMaker format) ---
+        // Window starts at event 0 so the dump lines up with the Athena side,
+        // which prints from the first event it sees. Bounded to keep the volume
+        // sane: every gated printout below shares this one window.
+        constexpr bool lrjDbg    = true;
+        constexpr unsigned int lrjDbgMax = 10;
+        const bool lrjDbgE = lrjDbg && iEvt < lrjDbgMax;
         auto dumpSeedsEmu = [&](const char* tag, const inputObject* s){
             std::cout << "[LRJ EMU evt " << iEvt << "] " << tag << ":";
             for(unsigned int i=0;i<nSeedsInput_;++i)
@@ -925,7 +956,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         std::vector<unsigned int > jet1MergedIndices; // store indices of merged input objects for each seed
         std::vector<unsigned int > jet2MergedIndices;
 
-        if(iEvt <= 32 && iEvt >= 28){
+        if(lrjDbgE){
             std::cout << "--------------------------" << "\n";
             std::cout << "EVENT: " << iEvt << "\n";
         }
@@ -950,7 +981,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 for (unsigned int iInput = 0; iInput < objectsProcessed; ++iInput){ // loop through input objects to consider merging
                     //std::cout << "inputObjectValues[iInput].et: " << undigitize_et(inputObjectValues[iInput].et) << "\n";
                     if(inputObjectValues[iInput].et  == 0) break;
-                    if(iEvt <= 32 && iEvt >= 28){
+                    if(lrjDbgE){
                         std::cout << "iInput: " << iInput << "\n";
                         std::cout << "input et: " << inputObjectValues[iInput].et << " , input eta: " << inputObjectValues[iInput].eta << " input phi: " << inputObjectValues[iInput].phi << "\n";
                     }
@@ -958,14 +989,18 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     unsigned int uDeltaEta = static_cast<unsigned int>(std::abs(int(seedValues[iSeed].eta) - int(inputObjectValues[iInput].eta)));
                     unsigned int uDeltaPhi = static_cast<unsigned int>(std::abs(int(seedValues[iSeed].phi) - int(inputObjectValues[iInput].phi)));
 
-                    if(iEvt <= 32 && iEvt >= 28){
-                        std::cout << "dEta: " << uDeltaEta << " , dPhi " << uDeltaPhi << "\n";
-                    }
+                    
 
                     if (uDeltaPhi >= pi_digitized_in_phi_) uDeltaPhi = (2 * pi_digitized_in_phi_) - uDeltaPhi;
                     //std::cout << "deltaR2: " << uDeltaEta*uDeltaEta+uDeltaPhi*uDeltaPhi << " , digitized_delta_R2Cut_: " << digitized_delta_R2Cut_ << "\n";
+                    if(lrjDbgE){
+                        std::cout << "dEta: " << uDeltaEta << " , dPhi " << uDeltaPhi << "\n";
+                        std::cout << "deltaR^2: " << uDeltaEta * uDeltaEta + uDeltaPhi * uDeltaPhi << " , digitized_delta_R2Cut_: " << digitized_delta_R2Cut_ << "\n";
+                    }
                     if (uDeltaEta * uDeltaEta + uDeltaPhi * uDeltaPhi <= digitized_delta_R2Cut_){
-
+                        if(lrjDbgE){
+                            std::cout << "MERGING CONSTITUENT" << "\n";
+                        }
                         if(outputJetEt + inputObjectValues[iInput].et >= int(et_max_/et_granularity_ - 1)) outputJetEt = int(et_max_/et_granularity_ - 1);
                         else outputJetEt += inputObjectValues[iInput].et; // add input object Et to seed Et for resultant output jet Et
                         //std::cout << "outputJetEt after sum: " << outputJetEt << "\n";
@@ -1126,7 +1161,9 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             else tau_21 = 0;
 
             // Write (digitized) values to output memory files & (undigitized) values to ntuple
-
+            if(lrjDbgE){
+                std::cout << "outputJetEt: " << outputJetEt << "\n";
+            }
             // Values already computed:
             uint64_t num_subjets_value = static_cast<uint32_t>(numSubjets)        & maskN(num_subjets_length_);
             uint64_t tau_1_value = static_cast<uint32_t>(tau_1)        & maskN(N_subjetiness_bit_length_);
@@ -1312,29 +1349,43 @@ void jetTaggerEmulation(double rMergeCut, // Distance in r-phi plane to look for
                         bool useEtaSKObjects = false, // Whether to use EtaSK PU-suppressed objects (gepCellsTowers and WTAConeJets only)
                         bool trigGepPerfValidation = false, // Validate against Athena TrigGepPerf: read HERNTupler validation output, write fixed output
                         unsigned int pileup = 200, // Pileup scenario of the input sample; tags the output name (r16130 = PU200, r16129 = PU140)
-                        double inputTowerEtThreshold = default_input_tower_et_cut_gev_ // E_T cut [GeV] on the input towers; 0 = feed every tower. Tagged _T<n> in the output name.
+                        double inputTowerEtThreshold = default_input_tower_et_cut_gev_, // E_T cut [GeV] on the input towers; 0 = feed every tower. Tagged _T<n> in the output name.
+                        bool useCalibratedWTAConeJets = use_calibrated_wtacone_jets_ // false = read the uncalibrated WTACone jet trees and write to the uncalibrated production's directory (same filenames, so the directory is what tells the two apart)
                         ){
     if(signalBool) std::cout << "Processing signal of: " << signalString  << "\n";
     // Construct input and output ntuple, LUT paths based on configuration type
     auto infile = explicitInputPath.empty() ? makeInputFileName(signalBool, signalString, "/home/larsonma/GEPHadronicEventReconstruction/data/inputNTuples/", pileup) : explicitInputPath;
-    auto outntuplefile = makeOutputFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, subjetEtThreshold, enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut, output_ntuple_dir_, useEtaSKObjects, pileup,
+    auto outntuplefile = makeOutputFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, subjetEtThreshold, enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut, outputNTupleDir(useCalibratedWTAConeJets), useEtaSKObjects, pileup,
                                           inputTowerEtThreshold);
     if (fileIndex >= 0) {
         size_t pos = outntuplefile.rfind(".root");
         if (pos != std::string::npos)
             outntuplefile = outntuplefile.substr(0, pos) + "_file" + std::to_string(fileIndex) + ".root";
     }
+    
     auto outtextfile = writeMemPrints
         ? makeOutputTextFileName(rMergeCut, numberIOs, nSeeds, RSquaredCut, signalBool, signalString, inputObjectType, seedObjectType, useSKObjects, algoVersion_, "/home/larsonma/GEPHadronicEventReconstruction/data/MemPrintsEmulation/", useEtaSKObjects, pileup)
         : std::string("/dev/null");
+    std::cout << "OUTTEXTFILE : "<< outtextfile << "\n";
     // TrigGepPerf validation override: read the HERNTupler validation ntuple and
     // write a fixed output alongside it (one per version, keyed off algoVersion_).
     // Leaves nominal running untouched.
     if (trigGepPerfValidation) {
         const std::string vTag = (algoVersion_ == 2) ? "v2" : "v3";
-        infile        = "/home/larsonma/DevelopingTriggerSimulation/run/HERNTupler_trigGepPerfValidation_" + vTag + ".root";
+        // INPUT tag, deliberately separate from the algorithm version.
+        //
+        // HERNTupler now generates the v2 and v3 validation ntuples from the SAME Athena
+        // file, differing only in the digitization the memory prints were written at, so
+        // either can be fed to either algorithm. Pinning this to v3 is what lets the v2
+        // algorithm run over the v3 inputs without regenerating anything.
+        //
+        // Set to vTag to go back to reading the ntuple matching the algorithm version.
+        const std::string inputVTag = "v3";
+        infile        = "/home/larsonma/DevelopingTriggerSimulation/run/HERNTupler_trigGepPerfValidation_" + inputVTag + ".root";
+        // OUTPUT stays keyed to the algorithm version, so a v2 run cannot overwrite the
+        // v3 result even when both read the same input.
         outntuplefile = "/home/larsonma/DevelopingTriggerSimulation/run/emulation_trigGepPerfValidation_" + vTag + ".root";
-        outtextfile   = "/dev/null";
+        //outtextfile   = "/dev/null";
     }
     std::cout << "infile: " << infile << "\n";
     std::cout << "outntuplefile: " << outntuplefile << "\n";
@@ -1342,6 +1393,7 @@ void jetTaggerEmulation(double rMergeCut, // Distance in r-phi plane to look for
     std::cout << "calling event loop: " << "\n";
     eventLoop(infile, outntuplefile, outtextfile, inputObjectType, seedObjectType, useSKObjects,
         enableEtWeightedMidpoint, minEtSeedPosOptimization,
-        minEtSeedPosOptimizationCut, subjetEtThreshold, useEtaSKObjects, inputTowerEtThreshold);
+        minEtSeedPosOptimizationCut, subjetEtThreshold, useEtaSKObjects, inputTowerEtThreshold,
+        useCalibratedWTAConeJets);
     //gSystem->Exit(0);
 }

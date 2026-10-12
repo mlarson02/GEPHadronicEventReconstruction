@@ -77,14 +77,20 @@ make_input_constants_file_name() {
 # ---- TrigGepPerf validation mode ----
 # Runs the emulation once on the HERNTupler validation ntuple for the chosen
 # algorithm version, copying the matching constants/LUT and using the emulation
-# config that mirrors the Athena preset (seed=WTACone, const=Towers, subjetEt=25,
-# non-SK). jetTaggerEmulation picks the input/output file from algoVersion_.
+# config that mirrors the Athena preset (seed=WTACone, subjetEt=25, non-SK).
+# The constituent source is version-dependent, as in GepJetAlgConfig.py: v2
+# (BasicV2) reclusters WTA cone jets, v3 (AdvancedV3) runs at tower granularity.
+# jetTaggerEmulation picks the input/output file from algoVersion_.
 if [[ "$trigGepPerfValidation" == true ]]; then
-  trigGepPerfValidationAlgoVersion=3   # 2 = basic (BasicV2), 3 = advanced (AdvancedV3); must match the Athena sample
+  trigGepPerfValidationAlgoVersion=2   # 2 = basic (BasicV2), 3 = advanced (AdvancedV3); must match the Athena sample
   if [[ "$trigGepPerfValidationAlgoVersion" -eq 2 ]]; then
     vRMerge=0.001; vR2=1.21; vIOs=8;   vSeeds=2; vVers=2; vEwm=false; vMep=false
+    # Jet_TagAlg sets ConstSource=WTACone and slices seeds/constituents out of
+    # the one JET1 jet collection, so the emulation must cluster cone jets too
+    vInputObj="gepWTAConeCellsTowersJets"
   else
     vRMerge=2;     vR2=1.21; vIOs=512; vSeeds=2; vVers=3; vEwm=false;  vMep=true
+    vInputObj="gepCellsTowers"
   fi
   vConstants=$(make_input_constants_file_name "$vRMerge" "$vIOs" "$vSeeds" "$vR2" "$vVers" "$constants_base")
   vLutR8b=$(make_input_LUT_file_name "$vRMerge" "$vR2" "deltaR_8b" "$vVers" "$inputLUTFilePath")
@@ -96,8 +102,9 @@ if [[ "$trigGepPerfValidation" == true ]]; then
   #   useSKObjects, signalString, inputObjectType, seedObjectType, subjetEtThreshold,
   #   enableEtWeightedMidpoint, minEtSeedPosOptimization, minEtSeedPosOptimizationCut,
   #   writeMemPrints, explicitInputPath, fileIndex, useEtaSKObjects, trigGepPerfValidation
-  # NOTE: useEtaSKObjects=true -> EtaSK GEPCellsTowers WTACone seeds + EtaSK towers (the intended JetTagger input)
-  root -l -b -q "${src_cc}+(${vRMerge}, ${vIOs}, ${vSeeds}, ${vR2}, true, false, false, \"ggF_hh_bbbb\", \"gepCellsTowers\", \"gepWTAConeCellsTowersJets\", 25, ${vEwm}, ${vMep}, 25.0, false, \"\", -1, true, true)"
+  # NOTE: useEtaSKObjects=true -> EtaSK GEPCellsTowers WTACone seeds, and the EtaSK
+  #       variant of whichever constituent collection vInputObj selects
+  root -l -b -q "${src_cc}+(${vRMerge}, ${vIOs}, ${vSeeds}, ${vR2}, true, false, false, \"ggF_hh_bbbb\", \"${vInputObj}\", \"gepWTAConeCellsTowersJets\", 25, ${vEwm}, ${vMep}, 25.0, true, \"\", -1, true, true)"
   rm -rf jetTaggerEmulation_cc*
   exit 0
 fi

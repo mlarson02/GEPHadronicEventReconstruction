@@ -43,7 +43,7 @@ const unsigned int nJZSlices = 10;
 const double reweightLuminosity = 7.5e10;
 
 // PU140 counterpart: nominal HL-LHC 140 PU instantaneous luminosity 5.0*10^34 cm^-2 s^-1 * 1 s.
-// Used in luminosity mode when pileup == 140. Verify against the value assumed for your samples.
+// Used in luminosity mode when pileup == 140. Needs verification
 const double reweightLuminosity_PU140 = 5.0e10;
 
 // Filter efficiencies from AMI
@@ -81,7 +81,7 @@ const double sumOfEventWeightsByJZSlice[nJZSlices] = {249900.0,      // JZ0
                                                       0.000169235,   // JZ6
                                                       4.75189e-05,   // JZ7
                                                       1.42645e-05,   // JZ8
-                                                      3.27753e-08};  // JZ9
+                                                      6.56967e-08};  // JZ9
 
 // PU140 counterpart of sumOfEventWeightsByJZSlice, from getSumOfWeights.C over the
 // PU140 ntuples (sumOfWeights_PU140.txt). Selected when pileup == 140.
@@ -146,6 +146,21 @@ inline double reweightLuminosityForPU(unsigned int pileup) {
 inline double reweightNormalizationForPU(unsigned int pileup) {
     return useRateNormalization ? targetRate / totalEffectiveCrossSection
                                 : reweightLuminosityForPU(pileup);
+}
+
+// --- GEP jet energy scale (JES) calibration of the WTACone CellsTowers jets ---
+// LUTs come from gepjetcalibrator: runHERCalibHistMaker fills the response histograms from the
+// JZ-slice ntuples written by this macro (antiKt4TruthJetsTree is the reference) and
+// runCalibLUTMakerHER fits them. One LUT file per pileup scenario, holding one LUT per
+// PU-suppression variant (none / SK / EtaSK). When enabled, calibrated copies of those jets are
+// written to new *CalibJetsTree trees; the uncalibrated trees are written unchanged.
+// Keep false until the LUTs for the pileup being processed exist: the job aborts if they are missing.
+const bool apply_gep_jes_calibration_ = true;
+const std::string gep_jes_lut_file_pu200_ = "/data/larsonma/GEPHadronicEventReconstruction/gepJetCalib/PU200/GEP_JES_LUTs.root";
+const std::string gep_jes_lut_file_pu140_ = "/data/larsonma/GEPHadronicEventReconstruction/gepJetCalib/PU140/GEP_JES_LUTs.root";
+
+inline const std::string& gepJESLUTFileForPU(unsigned int pileup) {
+    return (pileup == 140) ? gep_jes_lut_file_pu140_ : gep_jes_lut_file_pu200_;
 }
 
 // Helper to construct memprint / test vector filenames
@@ -330,6 +345,70 @@ void find_non_higgs_daughters(const xAOD::TruthParticle* particle,
 }
 
 
+// WTACone jets after the JES calibration, sorted by calibrated E_T. EtRaw keeps each jet's
+// uncalibrated E_T for comparison with the uncalibrated trees.
+struct GepJESCalibJets {
+    std::vector<double> et, etRaw, eta, phi;
+    std::vector<unsigned int> nConstituents;
+    void clear() { et.clear(); etRaw.clear(); eta.clear(); phi.clear(); nConstituents.clear(); }
+};
+
+void bookGepJESCalibJetsTree(TTree* tree, GepJESCalibJets& jets) {
+    tree->Branch("Et", &jets.et);
+    tree->Branch("EtRaw", &jets.etRaw);
+    tree->Branch("Eta", &jets.eta);
+    tree->Branch("Phi", &jets.phi);
+    tree->Branch("NConstituents", &jets.nConstituents);
+}
+
+// CalibLUTMaker LUT h_<jetName>_JESLUT: mean response R(pT [GeV], eta). Detached from the file so
+// it survives the file being closed. nullptr if the file does not have it.
+TH2F* loadGepJESLUT(TFile* lutFile, const std::string& jetName) {
+    TH2F* lut = dynamic_cast<TH2F*>(lutFile->Get(("h_" + jetName + "_JESLUT").c_str()));
+    if (lut) lut->SetDirectory(nullptr);
+    return lut;
+}
+
+// Calibrated E_T = E_T / R(E_T, eta). Jets outside the LUT range use the edge bins; a bin without
+// a response (content <= 0) leaves the jet uncalibrated.
+double gepJESCalibratedEt(const TH2F* lut, double et, double eta) {
+    if (et <= 0) return et;
+    const int ix = std::clamp(lut->GetXaxis()->FindFixBin(et), 1, lut->GetNbinsX());
+    const int iy = std::clamp(lut->GetYaxis()->FindFixBin(eta), 1, lut->GetNbinsY());
+    const double response = lut->GetBinContent(ix, iy);
+    return (response > 0) ? et / response : et;
+}
+
+// Calibrate one WTACone collection (the output vectors filled above for this event) and fill its
+// all / leading / subleading calibrated collections, re-sorted by calibrated E_T.
+void fillGepJESCalibJets(const TH2F* lut,
+                         const std::vector<double>& et, const std::vector<double>& eta,
+                         const std::vector<double>& phi, const std::vector<unsigned int>& nConstituents,
+                         GepJESCalibJets& all, GepJESCalibJets& leading, GepJESCalibJets& subleading) {
+    all.clear(); leading.clear(); subleading.clear();
+
+    std::vector<double> calibEt(et.size());
+    for (size_t i = 0; i < et.size(); ++i) calibEt[i] = gepJESCalibratedEt(lut, et[i], eta[i]);
+
+    std::vector<unsigned int> indices(et.size());
+    std::iota(indices.begin(), indices.end(), 0);
+    std::sort(indices.begin(), indices.end(),
+              [&](unsigned int a, unsigned int b) { return calibEt[a] > calibEt[b]; });
+
+    auto push = [&](GepJESCalibJets& jets, unsigned int idx) {
+        jets.et.push_back(calibEt[idx]);
+        jets.etRaw.push_back(et[idx]);
+        jets.eta.push_back(eta[idx]);
+        jets.phi.push_back(phi[idx]);
+        jets.nConstituents.push_back(nConstituents[idx]);
+    };
+    for (unsigned int i = 0; i < indices.size(); ++i) {
+        push(all, indices[i]);
+        if (i == 0) push(leading, indices[i]);
+        if (i == 1) push(subleading, indices[i]);
+    }
+}
+
 // Main function
 void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange, unsigned int algoVersion, unsigned int jzSlice = 3, bool specialJZ0Bool = false, std::string outputDirOverride = "", bool writeDatFiles = false, std::string specificDaodFile = "", std::string specificGepFile = "", std::string fileSuffix = "", bool trigGepPerfValidation = false, unsigned int pileup = 200) {
     //ServiceHandle<StoreGateSvc> inputMetaStore("StoreGateSvc/InputMetaDataStore","");
@@ -377,9 +456,20 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     if (trigGepPerfValidation) {
         const std::string runDir = "/home/larsonma/DevelopingTriggerSimulation/run/";
         // Athena TrigGepPerf output ntuple, one per algorithm version (v2 = basic, v3 = advanced).
-        specificGepFile  = runDir + (algoVersion == 2
-            ? "outputGEPNtuple_WithJetTagger_v2Algo_Sample_ValidLayers_TestgTowers_MR_v2_Constituents.root"
-            : "outputGEPNtuple_WithJetTagger_v2Algo_Sample_ValidLayers_TestgTowers_MR_v2_Constituents.root");
+        // ONE Athena ntuple for both algorithm versions, deliberately. What algoVersion
+        // selects here is the DIGITIZATION the memory prints are written at -- v2 uses a
+        // 10-bit eta / 9-bit phi field, v3 uses 7 / 6 -- so running both over the same
+        // events is the point: it gives two sets of test vectors for one sample rather
+        // than two samples that cannot be compared.
+        //
+        // The prints do not collide: makeMemPrintFilenames() sends v2 to MemPrints_v2/
+        // and v3 to MemPrints_v3/, and the output ntuple is tagged _v<version>.root.
+        //
+        // CAVEAT: this file is a v3Algo Athena run, so at algoVersion 2 the large-R jet
+        // branch-by-branch comparison is v2-emulation against v3-Athena and will not
+        // agree. The tower, cone-jet and MET prints are unaffected -- none of them
+        // depends on the large-R jet algorithm.
+        specificGepFile  = runDir + "outputGEPNtuple_WithJetTagger_v3Algo_GEPMETValidation.root";
         // DAOD_JETM42 paired with the same sample.
         specificDaodFile = "/data/larsonma/TrigGepPerfValidation/mc21_14TeV.603277.PhPy8EG_PDF4LHC21_HHbbbb_HLLHC_chhh1p0.recon.AOD.e8564_s4422_r16130/DAOD_JETM42.merged_HHbbbb_1kEvent_TrigGepPerf_Validation_DAOD.root";
         writeDatFiles    = true;
@@ -415,6 +505,30 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         // Fixed output consumed by jetTaggerEmulation's trigGepPerfValidation mode (one per version).
         outputFileName = TString::Format(
             "/home/larsonma/DevelopingTriggerSimulation/run/HERNTupler_trigGepPerfValidation_v%u.root", algoVersion);
+    }
+
+    // JES LUTs for the WTACone CellsTowers jets (see apply_gep_jes_calibration_). Loaded before the
+    // output file is created, so the trees below attach to the output file and not the LUT file.
+    TH2F* gepJESLUTCellsTowers = nullptr;
+    TH2F* gepJESLUTCellsTowersSK = nullptr;
+    TH2F* gepJESLUTCellsTowersEtaSK = nullptr;
+    if (apply_gep_jes_calibration_) {
+        const std::string& lutFileName = gepJESLUTFileForPU(pileup);
+        TFile* lutFile = TFile::Open(lutFileName.c_str(), "READ");
+        if (lutFile && !lutFile->IsZombie()) {
+            gepJESLUTCellsTowers      = loadGepJESLUT(lutFile, "WTAConeGEPCellsTowerJets");
+            gepJESLUTCellsTowersSK    = loadGepJESLUT(lutFile, "WTAConeGEPCellsTowerSKJets");
+            gepJESLUTCellsTowersEtaSK = loadGepJESLUT(lutFile, "WTAConeGEPCellsTowerEtaSKJets");
+        }
+        if (lutFile) { lutFile->Close(); delete lutFile; }
+        if (!gepJESLUTCellsTowers || !gepJESLUTCellsTowersSK || !gepJESLUTCellsTowersEtaSK) {
+            std::cerr << "[gepJES] FATAL: could not load the PU" << pileup << " JES LUTs "
+                      << "h_WTAConeGEPCellsTower{,SK,EtaSK}Jets_JESLUT from " << lutFileName
+                      << ". Derive them first, or set apply_gep_jes_calibration_ = false.\n";
+            gSystem->Exit(1);
+        }
+        std::cout << "[gepJES] Calibrating WTACone CellsTowers jets with the PU" << pileup
+                  << " LUTs in " << lutFileName << "\n";
     }
 
     // Create ROOT output file
@@ -553,6 +667,29 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     TTree* gepWTAConeBasicClustersEtaSKJetsTree = new TTree("gepWTAConeBasicClustersEtaSKJetsTree", "Tree storing event-wise Pt, Eta, Phi, Mass, NConstituents");
     TTree* gepLeadingWTAConeBasicClustersEtaSKJetsTree = new TTree("gepLeadingWTAConeBasicClustersEtaSKJetsTree", "Tree storing event-wise Pt, Eta, Phi, Mass, NConstituents");
     TTree* gepSubleadingWTAConeBasicClustersEtaSKJetsTree = new TTree("gepSubleadingWTAConeBasicClustersEtaSKJetsTree", "Tree storing event-wise Pt, Eta, Phi, Mass, NConstituents");
+    // Truth anti-kt R=0.4 jets from the DAOD (AntiKt4TruthJets): reference jets for the GEP jet calibration
+    TTree* antiKt4TruthJetsTree = new TTree("antiKt4TruthJetsTree", "Tree storing event-wise Pt, Eta, Phi, Mass");
+    // JES-calibrated WTACone CellsTowers jet trees, only written with apply_gep_jes_calibration_
+    TTree* gepWTAConeCellsTowersCalibJetsTree = nullptr;
+    TTree* gepLeadingWTAConeCellsTowersCalibJetsTree = nullptr;
+    TTree* gepSubleadingWTAConeCellsTowersCalibJetsTree = nullptr;
+    TTree* gepWTAConeCellsTowersSKCalibJetsTree = nullptr;
+    TTree* gepLeadingWTAConeCellsTowersSKCalibJetsTree = nullptr;
+    TTree* gepSubleadingWTAConeCellsTowersSKCalibJetsTree = nullptr;
+    TTree* gepWTAConeCellsTowersEtaSKCalibJetsTree = nullptr;
+    TTree* gepLeadingWTAConeCellsTowersEtaSKCalibJetsTree = nullptr;
+    TTree* gepSubleadingWTAConeCellsTowersEtaSKCalibJetsTree = nullptr;
+    if (apply_gep_jes_calibration_) {
+        gepWTAConeCellsTowersCalibJetsTree = new TTree("gepWTAConeCellsTowersCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+        gepLeadingWTAConeCellsTowersCalibJetsTree = new TTree("gepLeadingWTAConeCellsTowersCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+        gepSubleadingWTAConeCellsTowersCalibJetsTree = new TTree("gepSubleadingWTAConeCellsTowersCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+        gepWTAConeCellsTowersSKCalibJetsTree = new TTree("gepWTAConeCellsTowersSKCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+        gepLeadingWTAConeCellsTowersSKCalibJetsTree = new TTree("gepLeadingWTAConeCellsTowersSKCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+        gepSubleadingWTAConeCellsTowersSKCalibJetsTree = new TTree("gepSubleadingWTAConeCellsTowersSKCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+        gepWTAConeCellsTowersEtaSKCalibJetsTree = new TTree("gepWTAConeCellsTowersEtaSKCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+        gepLeadingWTAConeCellsTowersEtaSKCalibJetsTree = new TTree("gepLeadingWTAConeCellsTowersEtaSKCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+        gepSubleadingWTAConeCellsTowersEtaSKCalibJetsTree = new TTree("gepSubleadingWTAConeCellsTowersEtaSKCalibJetsTree", "Tree storing event-wise JES-calibrated Et, EtRaw, Eta, Phi, NConstituents");
+    }
     /*TTree* recoAntiKt10LCTopoJets = new TTree("recoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* leadingRecoAntiKt10LCTopoJets = new TTree("leadingRecoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");
     TTree* subleadingRecoAntiKt10LCTopoJets = new TTree("recoAntiKt10LCTopoJets", "Tree storing event-wise Et, Eta, Phi");*/
@@ -780,6 +917,15 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     std::vector<double> truthAntiKt4WZSRJEtValues, truthAntiKt4WZSRJEtaValues, truthAntiKt4WZSRJPhiValues, truthAntiKt4WZSRJMassValues;
     std::vector<double> truthAntiKt4WZSRJLeadingEtValues, truthAntiKt4WZSRJLeadingEtaValues, truthAntiKt4WZSRJLeadingPhiValues, truthAntiKt4WZSRJLeadingMassValues;
     std::vector<double> truthAntiKt4WZSRJSubleadingEtValues, truthAntiKt4WZSRJSubleadingEtaValues, truthAntiKt4WZSRJSubleadingPhiValues, truthAntiKt4WZSRJSubleadingMassValues;
+
+    // Truth anti-kt R=0.4 jets vectors (AntiKt4TruthJets), sorted by pT
+    std::vector<double> antiKt4TruthPtValues, antiKt4TruthEtaValues, antiKt4TruthPhiValues, antiKt4TruthMassValues;
+    unsigned long nEventsWithoutAntiKt4TruthJets = 0; // events whose DAOD has no AntiKt4TruthJets
+
+    // JES-calibrated WTACone CellsTowers jets (all / leading / subleading per PU-suppression variant)
+    GepJESCalibJets gepWTAConeCellsTowersCalibJets, gepLeadingWTAConeCellsTowersCalibJets, gepSubleadingWTAConeCellsTowersCalibJets;
+    GepJESCalibJets gepWTAConeCellsTowersSKCalibJets, gepLeadingWTAConeCellsTowersSKCalibJets, gepSubleadingWTAConeCellsTowersSKCalibJets;
+    GepJESCalibJets gepWTAConeCellsTowersEtaSKCalibJets, gepLeadingWTAConeCellsTowersEtaSKCalibJets, gepSubleadingWTAConeCellsTowersEtaSKCalibJets;
 
     // gFEX MET quantities (scalar per event)
     double gMHX = 0.0, gMHY = 0.0;                 // hard term (L1_gMHTComponentsJwoj)
@@ -1509,6 +1655,25 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     subleadingTruthAntiKt4TruthDressedWZJets->Branch("Eta", &truthAntiKt4WZSRJSubleadingEtaValues);
     subleadingTruthAntiKt4TruthDressedWZJets->Branch("Phi", &truthAntiKt4WZSRJSubleadingPhiValues);
     subleadingTruthAntiKt4TruthDressedWZJets->Branch("Mass", &truthAntiKt4WZSRJSubleadingMassValues);
+
+    // antiKt4TruthJetsTree
+    antiKt4TruthJetsTree->Branch("Pt", &antiKt4TruthPtValues);
+    antiKt4TruthJetsTree->Branch("Eta", &antiKt4TruthEtaValues);
+    antiKt4TruthJetsTree->Branch("Phi", &antiKt4TruthPhiValues);
+    antiKt4TruthJetsTree->Branch("Mass", &antiKt4TruthMassValues);
+
+    // JES-calibrated WTACone CellsTowers jet trees
+    if (apply_gep_jes_calibration_) {
+        bookGepJESCalibJetsTree(gepWTAConeCellsTowersCalibJetsTree, gepWTAConeCellsTowersCalibJets);
+        bookGepJESCalibJetsTree(gepLeadingWTAConeCellsTowersCalibJetsTree, gepLeadingWTAConeCellsTowersCalibJets);
+        bookGepJESCalibJetsTree(gepSubleadingWTAConeCellsTowersCalibJetsTree, gepSubleadingWTAConeCellsTowersCalibJets);
+        bookGepJESCalibJetsTree(gepWTAConeCellsTowersSKCalibJetsTree, gepWTAConeCellsTowersSKCalibJets);
+        bookGepJESCalibJetsTree(gepLeadingWTAConeCellsTowersSKCalibJetsTree, gepLeadingWTAConeCellsTowersSKCalibJets);
+        bookGepJESCalibJetsTree(gepSubleadingWTAConeCellsTowersSKCalibJetsTree, gepSubleadingWTAConeCellsTowersSKCalibJets);
+        bookGepJESCalibJetsTree(gepWTAConeCellsTowersEtaSKCalibJetsTree, gepWTAConeCellsTowersEtaSKCalibJets);
+        bookGepJESCalibJetsTree(gepLeadingWTAConeCellsTowersEtaSKCalibJetsTree, gepLeadingWTAConeCellsTowersEtaSKCalibJets);
+        bookGepJESCalibJetsTree(gepSubleadingWTAConeCellsTowersEtaSKCalibJetsTree, gepSubleadingWTAConeCellsTowersEtaSKCalibJets);
+    }
 
     // gFexMETTree branches (one scalar value per event)
     gFexMETTree->Branch("gMHX",   &gMHX);
@@ -2450,6 +2615,18 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             if (!event.retrieve(AntiKt10TruthSoftDropBeta100Zcut10Jets, "AntiKt10TruthSoftDropBeta100Zcut10Jets").isSuccess()) {
                 cerr << "Failed to retrieve reco AntiKt10TruthSoftDropBeta100Zcut10Jets" << endl;
                 continue;
+            }
+
+            // Reference jets for the GEP jet calibration. A DAOD without the container leaves
+            // antiKt4TruthJetsTree empty for the event rather than skipping the event; contains()
+            // keeps a missing container from printing a retrieve error every event.
+            const xAOD::JetContainer* AntiKt4TruthJets = nullptr;
+            if (event.contains<xAOD::JetContainer>("AntiKt4TruthJets") &&
+                !event.retrieve(AntiKt4TruthJets, "AntiKt4TruthJets").isSuccess()) {
+                AntiKt4TruthJets = nullptr;
+            }
+            if (!AntiKt4TruthJets && nEventsWithoutAntiKt4TruthJets++ == 0) {
+                std::cout << "WARNING: no AntiKt4TruthJets in the DAOD, antiKt4TruthJetsTree left empty for such events (total printed at the end)\n";
             }
 
             // Retrieve the CaloTopoClusters422 container  // disabled: topo422 clusters no longer written out
@@ -4289,6 +4466,45 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 truthAntiKt4WZSRJSubleadingPhiValues.push_back(subleading->phi());
                 truthAntiKt4WZSRJSubleadingMassValues.push_back(subleading->m() / 1000.0);
             }
+            // AntiKt4TruthJets, sorted by descending pT
+            antiKt4TruthPtValues.clear();
+            antiKt4TruthEtaValues.clear();
+            antiKt4TruthPhiValues.clear();
+            antiKt4TruthMassValues.clear();
+            if (AntiKt4TruthJets) {
+                std::vector<std::pair<size_t, double>> truthAntiKt4JetPtWithIndex;
+                for (size_t i = 0; i < AntiKt4TruthJets->size(); ++i) {
+                    truthAntiKt4JetPtWithIndex.emplace_back(i, (*AntiKt4TruthJets)[i]->pt() / 1000.0);
+                }
+                std::sort(truthAntiKt4JetPtWithIndex.begin(), truthAntiKt4JetPtWithIndex.end(),
+                        [](const std::pair<size_t, double>& a, const std::pair<size_t, double>& b) {
+                            return a.second > b.second;
+                        });
+                for (const auto& [index, pt] : truthAntiKt4JetPtWithIndex) {
+                    const auto& jet = (*AntiKt4TruthJets)[index];
+                    antiKt4TruthPtValues.push_back(pt);
+                    antiKt4TruthEtaValues.push_back(jet->eta());
+                    antiKt4TruthPhiValues.push_back(jet->phi());
+                    antiKt4TruthMassValues.push_back(jet->m() / 1000.0);
+                }
+            }
+
+            // JES-calibrated copies of the WTACone CellsTowers jets filled above
+            if (apply_gep_jes_calibration_) {
+                fillGepJESCalibJets(gepJESLUTCellsTowers,
+                                    gepWTAConeCellsTowersJetspTValues, gepWTAConeCellsTowersJetsEtaValues,
+                                    gepWTAConeCellsTowersJetsPhiValues, gepWTAConeCellsTowersJetsNConstituentsValues,
+                                    gepWTAConeCellsTowersCalibJets, gepLeadingWTAConeCellsTowersCalibJets, gepSubleadingWTAConeCellsTowersCalibJets);
+                fillGepJESCalibJets(gepJESLUTCellsTowersSK,
+                                    gepWTAConeCellsTowersSKJetspTValues, gepWTAConeCellsTowersSKJetsEtaValues,
+                                    gepWTAConeCellsTowersSKJetsPhiValues, gepWTAConeCellsTowersSKJetsNConstituentsValues,
+                                    gepWTAConeCellsTowersSKCalibJets, gepLeadingWTAConeCellsTowersSKCalibJets, gepSubleadingWTAConeCellsTowersSKCalibJets);
+                fillGepJESCalibJets(gepJESLUTCellsTowersEtaSK,
+                                    gepWTAConeCellsTowersEtaSKJetspTValues, gepWTAConeCellsTowersEtaSKJetsEtaValues,
+                                    gepWTAConeCellsTowersEtaSKJetsPhiValues, gepWTAConeCellsTowersEtaSKJetsNConstituentsValues,
+                                    gepWTAConeCellsTowersEtaSKCalibJets, gepLeadingWTAConeCellsTowersEtaSKCalibJets, gepSubleadingWTAConeCellsTowersEtaSKCalibJets);
+            }
+
             sampleJZSlice = jzSlice;
             eventInfoTree->Fill();
             truthbTree->Fill();
@@ -4368,6 +4584,18 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             truthAntiKt4TruthDressedWZJets->Fill();
             leadingTruthAntiKt4TruthDressedWZJets->Fill();
             subleadingTruthAntiKt4TruthDressedWZJets->Fill();
+            antiKt4TruthJetsTree->Fill();
+            if (apply_gep_jes_calibration_) {
+                gepWTAConeCellsTowersCalibJetsTree->Fill();
+                gepLeadingWTAConeCellsTowersCalibJetsTree->Fill();
+                gepSubleadingWTAConeCellsTowersCalibJetsTree->Fill();
+                gepWTAConeCellsTowersSKCalibJetsTree->Fill();
+                gepLeadingWTAConeCellsTowersSKCalibJetsTree->Fill();
+                gepSubleadingWTAConeCellsTowersSKCalibJetsTree->Fill();
+                gepWTAConeCellsTowersEtaSKCalibJetsTree->Fill();
+                gepLeadingWTAConeCellsTowersEtaSKCalibJetsTree->Fill();
+                gepSubleadingWTAConeCellsTowersEtaSKCalibJetsTree->Fill();
+            }
             gFexMETTree->Fill();
             gFexMETNoiseCutTree->Fill();
             gFexMETRmsTree->Fill();
@@ -4469,12 +4697,28 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
     truthAntiKt4TruthDressedWZJets->Write("", TObject::kOverwrite);
     leadingTruthAntiKt4TruthDressedWZJets->Write("", TObject::kOverwrite);
     subleadingTruthAntiKt4TruthDressedWZJets->Write("", TObject::kOverwrite);
+    antiKt4TruthJetsTree->Write("", TObject::kOverwrite);
+    if (apply_gep_jes_calibration_) {
+        gepWTAConeCellsTowersCalibJetsTree->Write("", TObject::kOverwrite);
+        gepLeadingWTAConeCellsTowersCalibJetsTree->Write("", TObject::kOverwrite);
+        gepSubleadingWTAConeCellsTowersCalibJetsTree->Write("", TObject::kOverwrite);
+        gepWTAConeCellsTowersSKCalibJetsTree->Write("", TObject::kOverwrite);
+        gepLeadingWTAConeCellsTowersSKCalibJetsTree->Write("", TObject::kOverwrite);
+        gepSubleadingWTAConeCellsTowersSKCalibJetsTree->Write("", TObject::kOverwrite);
+        gepWTAConeCellsTowersEtaSKCalibJetsTree->Write("", TObject::kOverwrite);
+        gepLeadingWTAConeCellsTowersEtaSKCalibJetsTree->Write("", TObject::kOverwrite);
+        gepSubleadingWTAConeCellsTowersEtaSKCalibJetsTree->Write("", TObject::kOverwrite);
+    }
     gFexMETTree->Write("", TObject::kOverwrite);
     gFexMETNoiseCutTree->Write("", TObject::kOverwrite);
     gFexMETRmsTree->Write("", TObject::kOverwrite);
     metTruthTree->Write("", TObject::kOverwrite);
     // metCoreAntiKt4EMTopoTree->Write("", TObject::kOverwrite);
     // metCoreAntiKt4EMPFlowTree->Write("", TObject::kOverwrite);
+    if (nEventsWithoutAntiKt4TruthJets > 0) {
+        std::cout << "WARNING: " << nEventsWithoutAntiKt4TruthJets
+                  << " event(s) had no AntiKt4TruthJets in the DAOD; antiKt4TruthJetsTree is empty for them\n";
+    }
     outputFile->Close();
     std::cout << "Processing complete." << endl;
     //std::cout << "higgsPassEventCounter: " << higgsPassEventCounter << "\n";
@@ -4493,7 +4737,7 @@ void HERNTupler(){
     // (paths overridden inside nTupler), then feed its output to the emulation
     // (jetTaggerConfigLocal.sh with trigGepPerfValidation=true).
     const bool trigGepPerfValidation = true;
-    const unsigned int trigGepPerfValidationAlgoVersion = 2; // 2 = basic sample, 3 = advanced sample
+    const unsigned int trigGepPerfValidationAlgoVersion = 3; // 2 = basic sample, 3 = advanced sample
     if (trigGepPerfValidation) {
         const unsigned int etaAltRange = eta_range_; // 98 for both versions, see analysisHelperFunctions.h
         nTupler(/*signalBool=*/true, /*signalString=*/"ggF_hh_bbbb", etaAltRange, trigGepPerfValidationAlgoVersion,

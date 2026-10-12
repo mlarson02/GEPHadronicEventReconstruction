@@ -174,7 +174,49 @@ Long64_t lrj_num_entries_     = -1;
 // matters for a legacy run with the pair list disabled. Keep it in step with
 // TAGGER_DIRS in condor/submit_largeRJetCompute.py and output_ntuple_dir_ in
 // algorithm/emulation/jetTaggerEmulation.cc.
-const std::string lrj_tagger_dir_ = "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples_towerEtCutFixed/";
+//
+// use_calibrated_wtacone_jets_: read the JES-calibrated WTACone CellsTowers jets (HERNTupler
+// *CalibJetsTree, needs ntuples made with apply_gep_jes_calibration_ = true) and the tagger outputs
+// seeded with them. Only the DEFAULT now: pairs from the generated list take theirs from the tagger path
+// (lrjProductions below). The CalibJetsTree trees have no Ring*Et / TotalTobN branches, so their reads and
+// fills below are commented out ("[no Ring/TobN in the CalibJetsTree trees]").
+const bool use_calibrated_wtacone_jets_ = true;
+const std::string lrj_tagger_dir_ = use_calibrated_wtacone_jets_ ?
+    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CalibJets/" :
+    "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples_towerEtCutFixed/";
+
+// PER-PAIR production. The constant above now only sets the hardcoded fallback lists; each pair's
+// production is read off its tagger path at the top of the file-pair loop, and picks that pair's
+// WTACone jet trees and state directory. That is what lets one pair list hold BOTH productions
+// (the before/after-calibration comparison): the two write identical basenames, so the directory is
+// the only thing telling them apart. Table mirrors TAGGER_DIRS / STATE_DIRS in
+// condor/submit_largeRJetCompute.py — keep the two in step.
+struct LRJProduction { std::string taggerDir, stateDir; bool calibrated; };
+inline const std::vector<LRJProduction>& lrjProductions() {
+    static const std::vector<LRJProduction> kProductions = {
+        {"/outputNTuplesDev_CalibJets/",
+         "/data/larsonma/LargeRadiusJets/largeRJetIntermediateState_CalibJets/",       true},
+        {"/outputNTuplesDev_gjTowerSamples_towerEtCutFixed/",
+         "/data/larsonma/LargeRadiusJets/largeRJetIntermediateState_towerEtCutFixed/", false},
+        {"/outputNTuplesDev_gjTowerSamples/",
+         "/data/larsonma/LargeRadiusJets/largeRJetIntermediateState/",                 false},
+    };
+    return kProductions;
+}
+// Production a tagger output belongs to, or nullptr for a directory not in the table.
+inline const LRJProduction* lrjProductionOf(const std::string& taggerPath) {
+    for (const LRJProduction& p : lrjProductions())
+        if (taggerPath.find(p.taggerDir) != std::string::npos) return &p;
+    return nullptr;
+}
+// Set per pair in the file-pair loop; the default only matters before the first pair.
+bool lrj_pair_calibrated_ = use_calibrated_wtacone_jets_;
+
+// Name of a WTACone CellsTowers jet tree: the uncalibrated name as given, or its *CalibJetsTree counterpart
+inline std::string lrjWTAConeCellsTowersTreeName(const std::string& uncalibratedName) {
+    if (!lrj_pair_calibrated_) return uncalibratedName;
+    return uncalibratedName.substr(0, uncalibratedName.size() - std::string("JetsTree").size()) + "CalibJetsTree";
+}
 // Generated pair-list file (condor/submit_largeRJetCompute.py --pairs-only writes it, both
 // drivers read it by default). Non-empty = REPLACE the hardcoded signalFiles /
 // backgroundFiles lists in largeRJetRun with the file's pairs, which is what guarantees
@@ -733,11 +775,32 @@ std::vector<TH1F*> sig_h_ConstituentMass_vec;
 std::vector<TH1F*> back_h_ConstituentMass_vec;
 std::vector<unsigned int> nInputObjects_vec;
 for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
+    // This pair's production (lrjProductions): which WTACone jet trees it reads and which state
+    // directory it uses. Signal and background must agree, or a calibrated signal would be
+    // measured against an uncalibrated background. A directory missing from the table keeps
+    // the old single-production behavior: the compile-time switch and the registry's default.
+    static const std::string kDefaultStateDir = gLRJState.stateDir;
+    const LRJProduction* pairProduction = lrjProductionOf(backgroundFiles[fileIt].second);
+    if (pairProduction && lrjProductionOf(signalFiles[fileIt].second) != pairProduction) {
+        std::cerr << "[ERROR] Pair " << fileIt << " mixes productions (signal vs background tagger):\n"
+                  << "  " << signalFiles[fileIt].second << "\n"
+                  << "  " << backgroundFiles[fileIt].second << "\n";
+        return;
+    }
+    if (!pairProduction)
+        std::cout << "[production] tagger directory not in lrjProductions(), using the defaults: "
+                  << backgroundFiles[fileIt].second << "\n";
+    lrj_pair_calibrated_ = pairProduction ? pairProduction->calibrated : use_calibrated_wtacone_jets_;
+    std::cout << "[production] pair " << fileIt << ": "
+              << (lrj_pair_calibrated_ ? "calibrated" : "uncalibrated") << " WTACone jets\n";
     // State registry: names the state file after the background tagger output; in the plot
     // stage this opens <base>__state.root for the book() fetches below. Closes the
     // previous pair's file if one is still open.
     if (gLRJState.stage != LRJStage::kMono) {
         gLRJState.EndPair();
+        // Only after EndPair: the previous pair is fully closed (its compute chunk was saved
+        // inside its own iteration), so switching directory cannot misdirect it.
+        gLRJState.stateDir = pairProduction ? pairProduction->stateDir : kDefaultStateDir;
         gLRJState.BeginPair(backgroundFiles[fileIt].second);
     }
     double sumOfBackgroundEventWeight = 0;
@@ -822,17 +885,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* gepBasicClustersSKTreeSignal = (TTree*)signalInputFile->Get("gepBasicClustersSKTree"); if (gepBasicClustersSKTreeSignal) { gepBasicClustersSKTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersSKTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersSKTree"); if (gepCellsTowersSKTreeSignal) { gepCellsTowersSKTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersEtaSKTreeSignal = (TTree*)signalInputFile->Get("gepCellsTowersEtaSKTree"); if (gepCellsTowersEtaSKTreeSignal) { gepCellsTowersEtaSKTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersJetsTree"); if (gepWTAConeCellsTowersJetsTreeSignal) { gepWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersJetsTree").c_str()); if (gepWTAConeCellsTowersJetsTreeSignal) { gepWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeBasicClustersJetsTree"); if (gepWTAConeBasicClustersJetsTreeSignal) { gepWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersJetsTree"); if (gepLeadingWTAConeCellsTowersJetsTreeSignal) { gepLeadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersJetsTreeSignal) { gepLeadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepLeadingWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeBasicClustersJetsTree"); if (gepLeadingWTAConeBasicClustersJetsTreeSignal) { gepLeadingWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersJetsTree"); if (gepSubleadingWTAConeCellsTowersJetsTreeSignal) { gepSubleadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersJetsTreeSignal) { gepSubleadingWTAConeCellsTowersJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepSubleadingWTAConeBasicClustersJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeBasicClustersJetsTree"); if (gepSubleadingWTAConeBasicClustersJetsTreeSignal) { gepSubleadingWTAConeBasicClustersJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersSKJetsTree"); if (gepWTAConeCellsTowersSKJetsTreeSignal) { gepWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersSKJetsTree").c_str()); if (gepWTAConeCellsTowersSKJetsTreeSignal) { gepWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeBasicClustersSKJetsTree"); if (gepWTAConeBasicClustersSKJetsTreeSignal) { gepWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersSKJetsTree"); if (gepLeadingWTAConeCellsTowersSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersSKJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepLeadingWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeBasicClustersSKJetsTree"); if (gepLeadingWTAConeBasicClustersSKJetsTreeSignal) { gepLeadingWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersSKJetsTree"); if (gepSubleadingWTAConeCellsTowersSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersSKJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gepSubleadingWTAConeBasicClustersSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeBasicClustersSKJetsTree"); if (gepSubleadingWTAConeBasicClustersSKJetsTreeSignal) { gepSubleadingWTAConeBasicClustersSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gFexSRJTreeSignal = (TTree*)signalInputFile->Get("gFexSRJTree"); if (gFexSRJTreeSignal) { gFexSRJTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gFexLeadingSRJTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingSRJTree"); if (gFexLeadingSRJTreeSignal) { gFexLeadingSRJTreeSignal->SetCacheSize(30*1024*1024); }
@@ -883,9 +946,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* gFexLeadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexLeadingSRJSimTree"); if (gFexLeadingSRJSimTreeSignal) { gFexLeadingSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
     TTree* gFexSubleadingSRJSimTreeSignal = (TTree*)signalInputFile->Get("gFexSubleadingSRJSimTree"); if (gFexSubleadingSRJSimTreeSignal) { gFexSubleadingSRJSimTreeSignal->SetCacheSize(30*1024*1024); }
     // EtaSK WTA cone jet trees — signal
-    TTree* gepWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree"); if (gepWTAConeCellsTowersEtaSKJetsTreeSignal) { gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepLeadingWTAConeCellsTowersEtaSKJetsTree"); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get("gepSubleadingWTAConeCellsTowersEtaSKJetsTree"); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepWTAConeCellsTowersEtaSKJetsTreeSignal) { gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal = (TTree*)signalInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetCacheSize(30*1024*1024); }
 
     TTree* jetTaggerLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerLRJsTree"); if (jetTaggerLRJsBack) { jetTaggerLRJsBack->SetCacheSize(30*1024*1024); }
     TTree* jetTaggerLeadingLRJsBack = (TTree*)backgroundJetTaggerFile->Get("jetTaggerLeadingLRJsTree"); if (jetTaggerLeadingLRJsBack) { jetTaggerLeadingLRJsBack->SetCacheSize(30*1024*1024); }
@@ -900,17 +963,17 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* gepBasicClustersSKTreeBack = (TTree*)backgroundInputFile->Get("gepBasicClustersSKTree"); if (gepBasicClustersSKTreeBack) { gepBasicClustersSKTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersSKTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersSKTree"); if (gepCellsTowersSKTreeBack) { gepCellsTowersSKTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepCellsTowersEtaSKTreeBack = (TTree*)backgroundInputFile->Get("gepCellsTowersEtaSKTree"); if (gepCellsTowersEtaSKTreeBack) { gepCellsTowersEtaSKTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersJetsTree"); if (gepWTAConeCellsTowersJetsTreeBack) { gepWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersJetsTree").c_str()); if (gepWTAConeCellsTowersJetsTreeBack) { gepWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeBasicClustersJetsTree"); if (gepWTAConeBasicClustersJetsTreeBack) { gepWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersJetsTree"); if (gepLeadingWTAConeCellsTowersJetsTreeBack) { gepLeadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersJetsTreeBack) { gepLeadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepLeadingWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeBasicClustersJetsTree"); if (gepLeadingWTAConeBasicClustersJetsTreeBack) { gepLeadingWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersJetsTree"); if (gepSubleadingWTAConeCellsTowersJetsTreeBack) { gepSubleadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersJetsTreeBack) { gepSubleadingWTAConeCellsTowersJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepSubleadingWTAConeBasicClustersJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeBasicClustersJetsTree"); if (gepSubleadingWTAConeBasicClustersJetsTreeBack) { gepSubleadingWTAConeBasicClustersJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersSKJetsTree"); if (gepWTAConeCellsTowersSKJetsTreeBack) { gepWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersSKJetsTree").c_str()); if (gepWTAConeCellsTowersSKJetsTreeBack) { gepWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeBasicClustersSKJetsTree"); if (gepWTAConeBasicClustersSKJetsTreeBack) { gepWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersSKJetsTree"); if (gepLeadingWTAConeCellsTowersSKJetsTreeBack) { gepLeadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersSKJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersSKJetsTreeBack) { gepLeadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepLeadingWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeBasicClustersSKJetsTree"); if (gepLeadingWTAConeBasicClustersSKJetsTreeBack) { gepLeadingWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersSKJetsTree"); if (gepSubleadingWTAConeCellsTowersSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersSKJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gepSubleadingWTAConeBasicClustersSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeBasicClustersSKJetsTree"); if (gepSubleadingWTAConeBasicClustersSKJetsTreeBack) { gepSubleadingWTAConeBasicClustersSKJetsTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gFexSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexSRJTree"); if (gFexSRJTreeBack) { gFexSRJTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gFexLeadingSRJTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingSRJTree"); if (gFexLeadingSRJTreeBack) { gFexLeadingSRJTreeBack->SetCacheSize(30*1024*1024); }
@@ -961,9 +1024,9 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     TTree* gFexLeadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexLeadingSRJSimTree"); if (gFexLeadingSRJSimTreeBack) { gFexLeadingSRJSimTreeBack->SetCacheSize(30*1024*1024); }
     TTree* gFexSubleadingSRJSimTreeBack = (TTree*)backgroundInputFile->Get("gFexSubleadingSRJSimTree"); if (gFexSubleadingSRJSimTreeBack) { gFexSubleadingSRJSimTreeBack->SetCacheSize(30*1024*1024); }
     // EtaSK WTA cone jet trees — background
-    TTree* gepWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepWTAConeCellsTowersEtaSKJetsTree"); if (gepWTAConeCellsTowersEtaSKJetsTreeBack) { gepWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepLeadingWTAConeCellsTowersEtaSKJetsTree"); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
-    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get("gepSubleadingWTAConeCellsTowersEtaSKJetsTree"); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepWTAConeCellsTowersEtaSKJetsTreeBack) { gepWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepLeadingWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
+    TTree* gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack = (TTree*)backgroundInputFile->Get(lrjWTAConeCellsTowersTreeName("gepSubleadingWTAConeCellsTowersEtaSKJetsTree").c_str()); if (gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack) { gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack->SetCacheSize(30*1024*1024); }
 
     std::vector<double>* mcEventWeightsValuesSignal = nullptr;
     double* sumOfWeightsForSampleValuesSignal = nullptr;
@@ -1910,24 +1973,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Eta", &gepWTAConeCellsTowersEtaSKJetsEtaValuesSignal);
     gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Phi", &gepWTAConeCellsTowersEtaSKJetsPhiValuesSignal);
     gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("NConstituents", &gepWTAConeCellsTowersEtaSKJetsNConstituentsValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring0Et", &gepWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring1Et", &gepWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring2Et", &gepWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring3Et", &gepWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring4Et", &gepWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal);
-    gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("TotalTobN", &gepWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring0Et", &gepWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring1Et", &gepWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring2Et", &gepWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring3Et", &gepWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring4Et", &gepWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("TotalTobN", &gepWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal);
 
     // === gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal ===
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Et", &gepLeadingWTAConeCellsTowersEtaSKJetspTValuesSignal);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Eta", &gepLeadingWTAConeCellsTowersEtaSKJetsEtaValuesSignal);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Phi", &gepLeadingWTAConeCellsTowersEtaSKJetsPhiValuesSignal);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("NConstituents", &gepLeadingWTAConeCellsTowersEtaSKJetsNConstituentsValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring0Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring1Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring2Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring3Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring4Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("TotalTobN", &gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring0Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring1Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring2Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring3Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Ring4Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("TotalTobN", &gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal);
 
     // === gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal ===
     gepSubleadingWTAConeCellsTowersEtaSKJetsTreeSignal->SetBranchAddress("Et", &gepSubleadingWTAConeCellsTowersEtaSKJetspTValuesSignal);
@@ -2355,24 +2418,24 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Eta", &gepWTAConeCellsTowersEtaSKJetsEtaValuesBack);
     gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Phi", &gepWTAConeCellsTowersEtaSKJetsPhiValuesBack);
     gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("NConstituents", &gepWTAConeCellsTowersEtaSKJetsNConstituentsValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring0Et", &gepWTAConeCellsTowersEtaSKJetsRing0EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring1Et", &gepWTAConeCellsTowersEtaSKJetsRing1EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring2Et", &gepWTAConeCellsTowersEtaSKJetsRing2EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring3Et", &gepWTAConeCellsTowersEtaSKJetsRing3EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring4Et", &gepWTAConeCellsTowersEtaSKJetsRing4EtValuesBack);
-    gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("TotalTobN", &gepWTAConeCellsTowersEtaSKJetsTotalTobNValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring0Et", &gepWTAConeCellsTowersEtaSKJetsRing0EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring1Et", &gepWTAConeCellsTowersEtaSKJetsRing1EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring2Et", &gepWTAConeCellsTowersEtaSKJetsRing2EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring3Et", &gepWTAConeCellsTowersEtaSKJetsRing3EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring4Et", &gepWTAConeCellsTowersEtaSKJetsRing4EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("TotalTobN", &gepWTAConeCellsTowersEtaSKJetsTotalTobNValuesBack);
 
     // === gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack ===
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Et", &gepLeadingWTAConeCellsTowersEtaSKJetspTValuesBack);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Eta", &gepLeadingWTAConeCellsTowersEtaSKJetsEtaValuesBack);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Phi", &gepLeadingWTAConeCellsTowersEtaSKJetsPhiValuesBack);
     gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("NConstituents", &gepLeadingWTAConeCellsTowersEtaSKJetsNConstituentsValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring0Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring1Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring2Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring3Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring4Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesBack);
-    gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("TotalTobN", &gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring0Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring1Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring2Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring3Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Ring4Et", &gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesBack);
+    // [no Ring/TobN in the CalibJetsTree trees] gepLeadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("TotalTobN", &gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesBack);
 
     // === gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack ===
     gepSubleadingWTAConeCellsTowersEtaSKJetsTreeBack->SetBranchAddress("Et", &gepSubleadingWTAConeCellsTowersEtaSKJetspTValuesBack);
@@ -5199,7 +5262,11 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             size_t start = pos + key.length(); // skip "14TeV_"; result starts with "rMerge_"
             size_t end   = signalFiles[fileIt].second.rfind(".root");
             if (end != std::string::npos && end > start) {
-                algorithmConfigurations.push_back(signalFiles[fileIt].second.substr(start, end - start));
+                // Uncalibrated pairs get a suffix: both productions share this name, and it is
+                // what the per-file plot directories (largeRJetPlots/, rateVsEff/, ...) are named
+                // after, so without it the two arms would overwrite each other's PDFs.
+                algorithmConfigurations.push_back(signalFiles[fileIt].second.substr(start, end - start)
+                                                  + (lrj_pair_calibrated_ ? "" : "_uncalib"));
             } else {
                 std::cerr << ".root not found or too early in string.\n";
             }
@@ -5346,12 +5413,12 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         // EtaSK WTA cone jets — signal kinematic distributions
         if (gepLeadingWTAConeCellsTowersEtaSKJetspTValuesSignal->size() > 0) {
             sig_h_leading_WTA_coneEtaSK_cellstowers_pT->Fill(gepLeadingWTAConeCellsTowersEtaSKJetspTValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring0Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring1Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring2Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring3Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_Ring4Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal->at(0));
-            sig_h_leading_WTA_coneEtaSK_TotalTobN->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring0Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing0EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring1Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing1EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring2Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing2EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring3Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing3EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_Ring4Et->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsRing4EtValuesSignal->at(0));
+            // [no Ring/TobN in the CalibJetsTree trees] sig_h_leading_WTA_coneEtaSK_TotalTobN->Fill(gepLeadingWTAConeCellsTowersEtaSKJetsTotalTobNValuesSignal->at(0));
         }
         if (gepSubleadingWTAConeCellsTowersEtaSKJetspTValuesSignal->size() > 0)
             sig_h_subleading_WTA_coneEtaSK_cellstowers_pT->Fill(gepSubleadingWTAConeCellsTowersEtaSKJetspTValuesSignal->at(0));
@@ -6171,14 +6238,21 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     SetAxes(out_gFEX_Sim_leading.gRate_vsEff->GetXaxis(), "Signal Efficiency");
     SetAxes(out_gFEX_Sim_leading.gRate_vsEff->GetYaxis(), "Estimated Background Rate [Hz]");
 
-    // --- Estimated background rate for the gFEX leading LRJ trigger at a fixed 140 GeV E_T threshold ---
+    // --- Estimated background rate for the glJ140 trigger item ---
+    // 140 is the menu label, not the cut: glJ140 fires at an ACTUAL E_T threshold of 110 GeV
+    // (Run 4 menu, the same mapping metAnalysisAndRates.C applies to gXEJWOJ and jXE — 80->50,
+    // 90->60 per ATR-30180, 100->70, 140->110, 160->130). Quoting the rate at 140 GeV for an item
+    // that fires at 110 understates it, so the rate is evaluated at the threshold and the label is
+    // kept for the item name.
     {
         auto rateAtThr_kHz = [](const TH1* hRateVsThr, double thrGeV) {
             return hRateVsThr->GetBinContent(hRateVsThr->FindFixBin(thrGeV)) / 1e3; // Hz -> kHz
         };
-        std::cout << "  gFEX leading LRJ trigger rate at E_{T} > 140 GeV [kHz]:\n"
-                  << "                    gFEX (AOD):   " << rateAtThr_kHz(out_gFEX_leading.hRate_vsThr,     140.0) << "\n"
-                  << "                    gFEX (Resim): " << rateAtThr_kHz(out_gFEX_Sim_leading.hRate_vsThr, 140.0) << "\n";
+        const double glJ140ThrGeV = 110.0;
+        printf("  glJ140 trigger rate [kHz] (item label 140, actual E_{T} threshold %.0f GeV):\n",
+               glJ140ThrGeV);
+        std::cout << "                    gFEX (AOD):   " << rateAtThr_kHz(out_gFEX_leading.hRate_vsThr,     glJ140ThrGeV) << "\n"
+                  << "                    gFEX (Resim): " << rateAtThr_kHz(out_gFEX_Sim_leading.hRate_vsThr, glJ140ThrGeV) << "\n";
     }
 
     auto c1_gFEX_Sim_leading = new TCanvas("c1_gFEX_Sim_leading","gFEX Sim vs threshold",1200,500);
@@ -6614,6 +6688,102 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         cjFEXgFEXSimROC->cd(); DrawATLASLabel(); cjFEXgFEXSimROC->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone_4thLead.pdf");
     }
 
+    // ---- Resim-only rate-vs-efficiency overlays (leading + 4th leading) ---------------------
+    // The rate-vs-eff counterparts of the resim-only turn-ons: the RESIMULATED jFEX and gFEX
+    // small-R jets against the GEP cone jet, three curves instead of the five above. With the
+    // AOD curves gone there is no AOD/resim distinction left to draw, so the legend names the
+    // resim objects plainly and the sample labels itself in the top-right corner. Colours and
+    // markers are the ones the resim-only turn-ons use, so a reader moving between the two
+    // kinds of plot sees the same object in the same colour.
+    //
+    // The graphs are CLONED before they are restyled. They are the same TGraph objects the
+    // 5-way blocks above drew and that several later overlays draw again — colouring them in
+    // place here would repaint a curve on a plot that has not been written yet.
+    {
+        const Int_t roc3cols[3]    = { kP6Blue, kP6Red, kP6Yellow };
+        const Int_t roc3mstyles[3] = { 21, 23, 24 };
+        const char* roc3labels[3]  = { "jFEX SRJ", "gFEX SRJ", "GEP Cone Jet" };
+        const std::string roc3Process = ProcessLegendLabel(signalFiles[fileIt].second);
+
+        // BOTTOM-RIGHT on both canvases. These curves run from bottom-left to top-right, so the
+        // low-rate/high-efficiency corner is the only large empty region; a legend anywhere
+        // along the top lands on the curves. Shared by both plots so the pair reads alike, and
+        // the floor clears the frame bottom at y = 0.16 (bottom margin).
+        const double kRoc3LegX1 = 0.55, kRoc3LegY1 = 0.19;
+        const double kRoc3LegX2 = 0.93, kRoc3LegY2 = 0.39;
+
+        // Right-aligned at the frame edge on the "ATLAS Work in progress" line, which that
+        // label leaves free from about x = 0.45 rightwards.
+        auto drawRoc3ProcessLabel = [&]() {
+            if (roc3Process.empty()) return;
+            TLatex pl; pl.SetNDC(); pl.SetTextFont(42); pl.SetTextSize(0.035); pl.SetTextAlign(31);
+            pl.DrawLatex(0.95, 0.945, roc3Process.c_str());
+        };
+
+        auto styleRoc3 = [&](TGraph* src, int ic) {
+            TGraph* g = (TGraph*)src->Clone(Form("roc3Clone_%d_%p", ic, (void*)src));
+            g->SetMarkerStyle(roc3mstyles[ic]);
+            g->SetMarkerSize(1.1);
+            g->SetMarkerColor(roc3cols[ic]);
+            g->SetLineColor(roc3cols[ic]);
+            g->SetLineWidth(2);
+            return g;
+        };
+
+        // Leading.
+        {
+            TGraph* src[3] = { out_jFEX_Sim_leading.gRate_vsEff,
+                               out_gFEX_SRJ_Sim_leading.gRate_vsEff,
+                               out_leading_cone.gRate_vsEff };
+            TGraph* g[3];
+            for (int ic = 0; ic < 3; ++ic) g[ic] = styleRoc3(src[ic], ic);
+
+            auto cRoc3Lead = new TCanvas("cRoc3Lead", "Resim only: rate vs eff overlay (leading)", 700, 600);
+            cRoc3Lead->SetLeftMargin(0.16); cRoc3Lead->SetBottomMargin(0.16); cRoc3Lead->SetTicks(1,1);
+            cRoc3Lead->SetLogy();
+            g[0]->SetMinimum(10.0);   // show background-rate axis down to ~10 Hz, as on the 5-way
+            g[0]->SetMaximum(1e8);
+            g[0]->Draw("AP");
+            g[0]->GetXaxis()->SetLimits(0.0, 1.05);  // full signal-efficiency range from 0
+            gPad->Modified(); gPad->Update();
+            g[1]->Draw("P SAME");
+            g[2]->Draw("P SAME");
+            {
+                auto legRoc3 = new TLegend(kRoc3LegX1, kRoc3LegY1, kRoc3LegX2, kRoc3LegY2);
+                legRoc3->SetBorderSize(0); legRoc3->SetFillStyle(0); legRoc3->SetTextSize(0.04);
+                for (int ic = 0; ic < 3; ++ic) legRoc3->AddEntry(g[ic], roc3labels[ic], "lp");
+                legRoc3->Draw();
+            }
+            cRoc3Lead->cd(); DrawATLASLabel(); drawRoc3ProcessLabel();
+            cRoc3Lead->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jFEXSim_gFEXSim_cone.pdf");
+        }
+
+        // 4th leading. Left to autoscale, as its 5-way parent is: the multi-jet rates sit in a
+        // different window from the leading ones.
+        {
+            TGraph* src[3] = { out_jFEX_Sim_4thleading.gRate_vsEff,
+                               out_gFEX_Sim_4thleading.gRate_vsEff,
+                               out_4thLeadCone.gRate_vsEff };
+            TGraph* g[3];
+            for (int ic = 0; ic < 3; ++ic) g[ic] = styleRoc3(src[ic], ic);
+
+            auto cRoc3_4th = new TCanvas("cRoc3_4th", "Resim only: rate vs eff overlay (4th leading)", 700, 600);
+            cRoc3_4th->SetLeftMargin(0.16); cRoc3_4th->SetBottomMargin(0.16); cRoc3_4th->SetTicks(1,1);
+            cRoc3_4th->SetLogy();
+            g[0]->Draw("AP");
+            g[1]->Draw("P SAME");
+            g[2]->Draw("P SAME");
+            {
+                auto legRoc3_4th = new TLegend(kRoc3LegX1, kRoc3LegY1, kRoc3LegX2, kRoc3LegY2);
+                legRoc3_4th->SetBorderSize(0); legRoc3_4th->SetFillStyle(0); legRoc3_4th->SetTextSize(0.04);
+                for (int ic = 0; ic < 3; ++ic) legRoc3_4th->AddEntry(g[ic], roc3labels[ic], "lp");
+                legRoc3_4th->Draw();
+            }
+            cRoc3_4th->cd(); DrawATLASLabel(); drawRoc3ProcessLabel();
+            cRoc3_4th->SaveAs(rateVsEffFileDir + "rate_vs_eff_overlay_jFEXSim_gFEXSim_cone_4thLead.pdf");
+        }
+    }
+
     // ---- Rate normalization overlays: as filled vs sigma x L vs binomial per-crossing ------
     // Every rate histogram above keeps the normalization it always had; this block only draws
     // clones. Four curves per trigger:
@@ -6669,8 +6839,10 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             std::vector<TH1*>        curves = { hAsFilled, hBinomial };
             std::vector<std::string> labels;
             labels.push_back("All JZ Slices [HSTP], no binomial");
-            labels.push_back(Form("All JZ Slices [HSTP], binomial",
-                                  analysisPileupLRJ, kCrossingRateHz / 1e6));
+            // Plain string: the format string lost its conversions when the pileup and
+            // crossing rate came out of this label, leaving two arguments with nowhere to go
+            // (-Wformat-extra-args on every run).
+            labels.push_back("All JZ Slices [HSTP], binomial");
             if (hJZ0) { curves.push_back(hJZ0); labels.push_back("JZ0 only, no HSTP"); }
             const std::vector<Int_t> normCols = { kBlack, kP10Red, kP10Green };
 
@@ -18342,6 +18514,105 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         cTurnOn5_4th.cd(); DrawATLASLabel(); cTurnOn5_4th.SaveAs(rateVsEffFileDir + "turn_on_overlay_jFEX_jFEXSim_gFEX_gFEXSim_cone_4thLead.pdf");
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Resim-only duplicates of the two 5-way turn-on overlays above: the RESIMULATED jFEX and
+    // gFEX small-R jets against the GEP cone jet, three curves instead of five. The AOD SRJ
+    // curves are what the 5-way plots exist to compare against; with them dropped there is no
+    // AOD/resim distinction left on the canvas, so the legend names the resim objects plainly
+    // ("jFEX SRJ", not "jFEX SRJ (Resim)") — these are the headline trigger plots, and the
+    // 5-way overlays above stay as the AOD-vs-resim comparison.
+    //
+    // Curve colours and markers are carried over from the 5-way parents so the same object is
+    // the same colour in both, with ONE exception: resim jFEX moves off kP6Gray, which there
+    // only has to separate it from the AOD jFEX curve next to it and here would compete with
+    // the grey truth-spectrum underlay.
+    //
+    // Unlike the hand-drawn 5-way parents these go through DrawTurnOnWithRatio, the shared
+    // turn-on template, which is where the ratio panel, the top legend, the dashed line at
+    // full efficiency, the y range to 1.4 and the grey spectrum underlay all come from. The
+    // ratio denominator is PINNED to the first curve (refIndex = 0): left on auto the template
+    // would pick the gFEX entry by its label, and these plots are read against jFEX.
+    {
+        auto makeEff3 = [](TH1F* num, TH1F* denom, const char* name) {
+            TH1F* e = (TH1F*)num->Clone(name);
+            e->SetDirectory(0);
+            e->Divide(num, denom, 1.0, 1.0, "B");
+            return e;
+        };
+        const Int_t to3Cols[3]   = { kP6Blue, kP6Red, kP6Yellow };
+        const Int_t to3Styles[3] = { 21, 23, 24 };
+        const char* to3Names[3]  = { "jFEX SRJ", "gFEX SRJ", "GEP Cone Jet" };
+
+        // Leading @ 25 kHz vs truth leading AntiKt4 dressedWZ jet E_T.
+        {
+            TH1F* to3Hists[3] = {
+                makeEff3(sig_h_truthSRJ_Et_num_jFEX_Sim,         sig_h_truthSRJ_Et_denom_jFEX_turnon, "eff3_lead_jFEX_Sim"),
+                makeEff3(sig_h_truthSRJ_Et_num_gFEX_Sim,         sig_h_truthSRJ_Et_denom_jFEX_turnon, "eff3_lead_gFEX_Sim"),
+                makeEff3(sig_h_truthSRJ_Et_num_WTA_cone_jFEXcmp, sig_h_truthSRJ_Et_denom_jFEX_turnon, "eff3_lead_WTA_cone")
+            };
+            const double to3Thrs[3] = { jFEX_Sim_25kHz_Threshold_Leading,
+                                        gFEX_Sim_25kHz_Threshold_Leading,
+                                        cone_singleJet_25kHz_threshold };
+
+            std::vector<TurnOnCurve> to3Curves;
+            for (int k = 0; k < 3; ++k) {
+                TurnOnCurve tc;
+                tc.h = to3Hists[k]; tc.color = to3Cols[k]; tc.marker = to3Styles[k];
+                tc.label = Form("%s, E_{T} > %.0f GeV", to3Names[k], to3Thrs[k]);
+                to3Curves.push_back(tc);
+            }
+            TurnOnOpts to3Opts;
+            to3Opts.xTitle   = "Leading Truth Jet E_{T} [GeV]";
+            // Below 50 GeV every curve is in the noise and the truth spectrum is empty, which is
+            // the range the hand-drawn version clipped off too.
+            to3Opts.xMin     = 50.0;
+            to3Opts.xMax     = 400.0;
+            to3Opts.refIndex = 0;
+            to3Opts.refShortName = "first";
+            // The rate is common to all three curves, so it states itself once under the process
+            // label instead of riding on every legend entry.
+            to3Opts.processLabel = ProcessLegendLabel(signalFiles[fileIt].second);
+            to3Opts.legendHeader = "Fixed to 25 kHz rate";
+            to3Opts.legendScale  = 1.35;   // three short entries in a tall gap
+            to3Opts.spectrum = sig_h_truthSRJ_Et_denom_jFEX_turnon;
+            DrawTurnOnWithRatio(to3Curves, to3Opts,
+                                rateVsEffFileDir + "turn_on_overlay_jFEXSim_gFEXSim_cone.pdf");
+        }
+
+        // 4th-leading @ 100 kHz vs truth 4th-leading AntiKt4 dressedWZ jet E_T.
+        {
+            TH1F* to3Hists4[3] = {
+                makeEff3(sig_h_truth4thSRJ_Et_num_jFEX_Sim, sig_h_truth4thSRJ_Et_denom_turnon, "eff3_4th_jFEX_Sim"),
+                makeEff3(sig_h_truth4thSRJ_Et_num_gFEX_Sim, sig_h_truth4thSRJ_Et_denom_turnon, "eff3_4th_gFEX_Sim"),
+                makeEff3(sig_h_truth4thSRJ_Et_num_WTA_cone, sig_h_truth4thSRJ_Et_denom_turnon, "eff3_4th_WTA_cone")
+            };
+            const double to3Thrs4[3] = { jFEX_Sim_100kHz_Threshold_4thLeading,
+                                         gFEX_Sim_100kHz_Threshold_4thLeading,
+                                         cone_multiJet_100kHz_threshold };
+
+            std::vector<TurnOnCurve> to3Curves4;
+            for (int k = 0; k < 3; ++k) {
+                TurnOnCurve tc;
+                tc.h = to3Hists4[k]; tc.color = to3Cols[k]; tc.marker = to3Styles[k];
+                tc.label = Form("%s, E_{T} > %.0f GeV", to3Names[k], to3Thrs4[k]);
+                to3Curves4.push_back(tc);
+            }
+            TurnOnOpts to3Opts4;
+            to3Opts4.xTitle   = "4th Leading Truth Jet E_{T} [GeV]";
+            // These histograms stop at 200 GeV, so the template's 400 default has to come down
+            // or the frame runs on past the data. No lower clip: the 4th jet lives down there.
+            to3Opts4.xMax     = 200.0;
+            to3Opts4.refIndex = 0;
+            to3Opts4.refShortName = "first";
+            to3Opts4.processLabel = ProcessLegendLabel(signalFiles[fileIt].second);
+            to3Opts4.legendHeader = "Fixed to 100 kHz rate";
+            to3Opts4.legendScale  = 1.35;
+            to3Opts4.spectrum = sig_h_truth4thSRJ_Et_denom_turnon;
+            DrawTurnOnWithRatio(to3Curves4, to3Opts4,
+                                rateVsEffFileDir + "turn_on_overlay_jFEXSim_gFEXSim_cone_4thLead.pdf");
+        }
+    }
+
     TH1F* sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow = (TH1F*)sig_h_offlineLRJ_Et_num10kHz_gFexLRJ_HiggsMassWindow->Clone();
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->SetName("eff_gFEX_LRJ_10kHz");
     sig_eff_offline_gFEX_LRJ10kHz_HiggsMassWindow->GetYaxis()->SetTitle("Emulated Trigger Efficiency (Signal)");
@@ -23818,6 +24089,23 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             std::cout << "Overlay mixes input-object counts — appending IOs=<N> to legend labels\n";
     }
 
+    // And for the WTACone jet calibration (lrjProductions): the two productions share every
+    // filename tag, so a before/after-calibration overlay would otherwise draw identical labels.
+    bool overlayMixesCalibration = false;
+    std::vector<bool> fileIsCalibrated(backgroundFiles.size(), use_calibrated_wtacone_jets_);
+    {
+        bool anyCalib = false, anyUncalib = false;
+        for (unsigned int f = 0; f < backgroundFiles.size(); ++f) {
+            const LRJProduction* p = lrjProductionOf(backgroundFiles[f].second);
+            if (p) fileIsCalibrated[f] = p->calibrated;
+            (fileIsCalibrated[f] ? anyCalib : anyUncalib) = true;
+        }
+        overlayMixesCalibration = anyCalib && anyUncalib;
+        if (overlayMixesCalibration)
+            std::cout << "Overlay mixes calibrated and uncalibrated WTACone jets — appending it to"
+                      << " legend labels\n";
+    }
+
     //std::cout << "looping through " << backgroundFiles.size() << " background files" << "\n";
     for(unsigned int fileIt = 0; fileIt < backgroundFiles.size(); fileIt++){ 
         //std::cout << "fileIt: " << fileIt << "\n";
@@ -23856,6 +24144,8 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             if (std::regex_search(backgroundFiles[fileIt].second, mV, std::regex("_v(\\d)\\.root")))
                 labelVaryingSuffix += Form(", v%s", std::string(mV[1]).c_str());
         }
+        if (overlayMixesCalibration)
+            labelVaryingSuffix += fileIsCalibrated[fileIt] ? ", calibrated" : ", uncalibrated";
         // dSearchLabel closes almost every overlay legend label, so appending here puts the
         // suffixes at the end of each legend row with one change.
         dSearchLabel += labelVaryingSuffix;
@@ -25447,10 +25737,13 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
             // it goes in the entry itself — the ATLAS info line can only say "140, 200".
             // puSuffixRecluster is empty for single-pileup runs, leaving those legends as
             // they were.
-            const std::string puSuffixRecluster = overlayMixesPileup
+            std::string puSuffixRecluster = overlayMixesPileup
                 ? Form(", #LTPU#GT = %d", PileupFromPath(
                       backgroundFiles[fileIt].first + " " + backgroundFiles[fileIt].second))
                 : std::string();
+            // Same for a before/after-calibration overlay, where the calibration is the comparison.
+            if (overlayMixesCalibration)
+                puSuffixRecluster += fileIsCalibrated[fileIt] ? ", calibrated" : ", uncalibrated";
             legReclusterEtOnly->AddEntry(gLeadEt,
                 Form("%s, E_{T, LRJ} cut%s", reclusterLabel.c_str(),
                      puSuffixRecluster.c_str()), "p");

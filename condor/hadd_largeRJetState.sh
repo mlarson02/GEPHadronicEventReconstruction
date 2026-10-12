@@ -32,7 +32,7 @@ set -e
 
 # Must match gLRJState.stateDir (analysis/largeRJetStateRegistry.h) and STATE_DIRS in
 # submit_largeRJetCompute.py — one state directory per emulation production.
-STATE_DIR="${LRJ_STATE_DIR:-/data/larsonma/LargeRadiusJets/largeRJetIntermediateState_towerEtCutFixed}"
+STATE_DIR="${LRJ_STATE_DIR:-/data/larsonma/LargeRadiusJets/largeRJetIntermediateState_CalibJets}"
 PATTERN="*"
 HADD_THREADS=0
 PARALLEL_JOBS=4

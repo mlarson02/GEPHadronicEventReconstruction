@@ -23,9 +23,9 @@
 
 void getSumOfWeights() {
     const TString baseDir =
-        "/data/larsonma/GEPHadronicEventReconstruction/GEPOutputReaderNTuples_PU140/QCD_Dijet";
+        "/data/larsonma/GEPHadronicEventReconstruction/GEPOutputReaderNTuples/QCD_Dijet";
 
-    std::ofstream out("sumOfWeights_PU140.txt");
+    std::ofstream out("sumOfWeights_PU200_Update_JZ2.txt");
 
     for (int jz = 0; jz < 10; ++jz) {
         // Version tag varies per JZ slice (v17/v18/v22, JZ1 is PU200), so match

@@ -21,6 +21,9 @@
 #   $18 pileup              (200 or 140; tags the output name r16130 / r16129. Default 200.)
 #   $19 inputTowerEtCut     (E_T cut [GeV] on the input towers; 0 = no cut. Tagged _T<n> in
 #                            the output name. Default 0.)
+#   $20 calibratedWTAConeJets (true or false; false = the uncalibrated WTACone jet trees, written to the
+#                            uncalibrated production's directory — submit_jet_tagger_emulation.py --uncalib.
+#                            Default true.)
 
 RMRG="$1"
 R2="$2"
@@ -41,10 +44,12 @@ FIDX="${16}"
 ETASK="${17}"
 PILEUP="${18:-200}"
 TOWERET="${19:-0}"
+CALIB="${20:-true}"
 
 echo "=== JetTagger Emulation Condor job ==="
 echo "  rMerge=$RMRG  rSquared=$R2  nIOs=$NIOS  nSeeds=$NSEEDS  algo=$ALGOV"
 echo "  signal=$SIGNAL  signalString=$SIGSTR  puSup=$PUSUP  etaSK=$ETASK  pileup=$PILEUP"
+echo "  calibratedWTAConeJets=$CALIB"
 echo "  inputObj=$INOBJ  seedObj=$SEEDOBJ  subjetEt=$SJETT"
 echo "  etWtMid=$ETWM  minEtOpt=$MINETO  minEtCut=$MINETC"
 echo "  inputFile=$INFILE  fileIndex=$FIDX"
@@ -93,6 +98,6 @@ cd "$JOBDIR"
 
 # --- Run emulation ---
 echo "Running emulation in: $JOBDIR"
-root -l -b -q "jetTaggerEmulation.cc+(${RMRG}, ${NIOS}, ${NSEEDS}, ${R2}, ${SIGNAL}, true, ${PUSUP}, \"${SIGSTR}\", \"${INOBJ}\", \"${SEEDOBJ}\", ${SJETT}, ${ETWM}, ${MINETO}, ${MINETC}, false, \"${INFILE}\", ${FIDX}, ${ETASK}, false, ${PILEUP}, ${TOWERET})"
+root -l -b -q "jetTaggerEmulation.cc+(${RMRG}, ${NIOS}, ${NSEEDS}, ${R2}, ${SIGNAL}, true, ${PUSUP}, \"${SIGSTR}\", \"${INOBJ}\", \"${SEEDOBJ}\", ${SJETT}, ${ETWM}, ${MINETO}, ${MINETC}, false, \"${INFILE}\", ${FIDX}, ${ETASK}, false, ${PILEUP}, ${TOWERET}, ${CALIB})"
 
 echo "=== Job complete ==="

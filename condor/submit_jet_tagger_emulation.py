@@ -8,12 +8,14 @@ dict maps each sample name to the directory containing its HERNTupler output
 files; all *.root files found there become separate jobs.
 
 Usage:
-  python3 submit_jet_tagger_emulation.py [--dry-run] [--max-jobs N] [--label LABEL] [--pu 140]
+  python3 submit_jet_tagger_emulation.py [--dry-run] [--max-jobs N] [--label LABEL] [--pu 140] [--uncalib]
 
   --dry-run    print the .sub file without submitting
   --max-jobs N limit to first N jobs (useful for testing)
   --label STR  override the auto-generated label
   --pu N       pileup scenario (200 = default, 140 = the ntuples_PU140 mirrors)
+  --uncalib    uncalibrated WTACone jets instead of the JES-calibrated ones; outputs go to
+               outputNTuplesDev_gjTowerSamples_towerEtCutFixed (label gets "_uncalib")
 """
 
 import argparse
@@ -28,8 +30,21 @@ WRAPPER = Path(__file__).parent / "run_jet_tagger_emulation_job.sh"
 # ---------------------------------------------------------------------------
 # Parameter grid — edit these to match jetTaggerConfigLocal.sh
 # ---------------------------------------------------------------------------
-ALGO_VERSIONS  = [3]
-R_MERGE_CUTS   = [2.0]
+# --- v2 nominal, UNCALIBRATED WTA cone jets (2026-10-07) --------------------------------
+# ACTIVE. Submit with  --uncalib . The "before" arm of the before/after-calibration comparison
+# of the v2 PU200 nominal configuration: the calibrated arm is already on disk (outputs in
+# outputNTuplesDev_CalibJets, state in largeRJetIntermediateState_CalibJets), and the
+# uncalibrated one was lost with the old directory. --uncalib reads the *JetsTree trees and writes
+# to outputNTuplesDev_gjTowerSamples_towerEtCutFixed, under the SAME basename as the calibrated arm:
+#   ..._r16130_rMerge_0.001_IOs_8_Seeds_2_R2_1.21_IO_gepWTAConeCellsTowersJets_
+#   Seed_gepWTAConeCellsTowersJets_EtaSK_T2_subjetEt25GeV_ewm0_mep1_mec20GeV_v2
+# Changed for this: ALGO_VERSIONS [2], R_MERGE_CUTS [0.001], N_IOS [8], INPUT_OBJECTS WTA cone
+# jets, and the WTA cone entry of SUBJET_ET_SCAN_BY_SEED commented out (so subjetEt 25 / mec 20).
+# T2 / EtaSK / ewm0 / mep1 / ggF + ttbar already matched. Restore the commented values after.
+ALGO_VERSIONS  = [2]
+#ALGO_VERSIONS  = [3]
+R_MERGE_CUTS   = [0.001]
+#R_MERGE_CUTS   = [2]
 R_SQUARED_CUTS = [1.21]
 # --- PU140 EtaSK backfill (2026-08-25) ------------------------------------------------
 # PU140 (r16129) has only the _SK_ configs; every PU200 EtaSK config is missing at PU140,
@@ -45,15 +60,33 @@ R_SQUARED_CUTS = [1.21]
 # 128 = the PU140 EtaSK backfill described above (matches every config on disk today);
 #       swap it back in when you want the like-for-like PU140-vs-PU200 EtaSK overlay.
 #N_IOS          = [128]
-N_IOS          = [256]
+#N_IOS          = [256]
+N_IOS          = [8]
 N_SEEDS        = [2]
 SIGNALS        = [True, False]
 SIGNAL_STRINGS = ["ggF_hh_bbbb", "ttbar_allhad"]   # only used when signal=True
-INPUT_OBJECTS  = ["gepCellsTowers"]
-#INPUT_OBJECTS  = ["gepWTAConeCellsTowersJets"]
-SEED_OBJECTS   = ["gepWTAConeCellsTowersJets", "jFEXSRJ", "gFEXSRJ"]
-#SEED_OBJECTS   = ["jFEXSRJ"]
+#INPUT_OBJECTS  = ["gepCellsTowers"]
+INPUT_OBJECTS  = ["gepWTAConeCellsTowersJets"]
+# --- gFEX EtaSK T2 backfill (2026-09-22) ------------------------------------------------
+# ACTIVE. The seeding comparison (gFEX 25 / WTA cone 25 / jFEX 40 GeV, EtaSK, rMerge 2,
+# IOs 256, v3, PU200) is missing exactly one arm in this production: gFEXSRJ exists ONLY as
+# _EtaSK_T0_subjetEt25GeV. WTA cone and jFEX already have their _T2_ outputs, so this
+# submission is narrowed to the single missing configuration —
+#   SEED_OBJECTS        = ["gFEXSRJ"]        (subjetEt 25 / mec 20 come from the tables below)
+#   INPUT_TOWER_ET_CUTS = [2.0]              T0 already on disk; do not remake it
+#   PU_SUPPRESSION      = [True]             with ETA_SK_OBJECTS = [True] this is EtaSK alone
+#   ETA_SK_OBJECTS      = [True]
+# Everything else (v3, rMerge 2, R2 1.21, IOs 256, Seeds 2, IO gepCellsTowers, ewm0, mep1)
+# already matches the other two arms, so the output basename comes out as
+#   ..._rMerge_2_IOs_256_Seeds_2_R2_1.21_IO_gepCellsTowers_Seed_gFEXSRJ_EtaSK_T2_
+#   subjetEt25GeV_ewm0_mep1_mec20GeV_v3
+# SIGNAL_STRINGS is left at ggF + ttbar for parity with the existing gFEX _T0_ output (the
+# plot only needs ggF; dropping "ttbar_allhad" saves 200 of ~2400 jobs).
+# Restore the commented settings below once this backfill is done.
+SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
+#SEED_OBJECTS   = ["gepWTAConeCellsTowersJets", "jFEXSRJ", "gFEXSRJ"]
 #SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
+#SEED_OBJECTS   = ["jFEXSRJ"]
 # --- SK / NoSK at T0 (no 2 GeV input-tower cut), 2026-08-28 -----------------------------
 # The T0 production so far is EtaSK ONLY, so a 1-1 EtaSK vs SK vs NoSK comparison is not
 # possible without these. EtaSK already exists at both IO counts, so it is deliberately NOT
@@ -71,10 +104,15 @@ SEED_OBJECTS   = ["gepWTAConeCellsTowersJets", "jFEXSRJ", "gFEXSRJ"]
 # 2 GeV under the old energy encoding and 4 GeV under the current one, while SK/NoSK cut at
 # a true 2 GeV. The threshold is digitized consistently now, so new _T2_ EtaSK output is NOT
 # comparable with the _T2_ EtaSK files already on disk. _T0_ is unaffected either way.
-INPUT_TOWER_ET_CUTS = [0.0]
+# gFEX EtaSK T2 backfill: T0 is already on disk, so only the 2 GeV arm is remade.
+INPUT_TOWER_ET_CUTS = [2.0]
+#INPUT_TOWER_ET_CUTS = [0.0, 2.0]
 
-PU_SUPPRESSION = [True, False]
-ETA_SK_OBJECTS = [True, False]  # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
+# gFEX EtaSK T2 backfill: [True] + ETA_SK_OBJECTS [True] is EtaSK alone (SK/NoSK exist).
+PU_SUPPRESSION = [True]
+#PU_SUPPRESSION = [True, False]
+ETA_SK_OBJECTS = [True]  # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
+#ETA_SK_OBJECTS = [True, False]
 ET_WEIGHTED_MIDPOINTS      = [False]
 MIN_ET_SEED_POS_OPT        = [True]
 
@@ -99,7 +137,7 @@ MIN_ET_SEED_POS_OPT_CUT_BY_SEED = {
 SUBJET_ET_SCAN_BY_SEED = {
     #"jFEXSRJ":                   [30, 35, 40, 45],
     #"gFEXSRJ":                   [25, 30, 35, 40],
-    #"gepWTAConeCellsTowersJets": [25, 30, 35, 40],
+    #"gepWTAConeCellsTowersJets": [40, 45, 50, 55, 60],
 }
 
 # Directories containing HERNTupler output ntuples for each sample.
@@ -117,6 +155,10 @@ _NTUPLE_BASE_BY_PU = {
 }
 # Pileup scenario for this submission; set from --pu in main().
 PILEUP = 200
+# Seed / input with the JES-calibrated WTACone jets (*CalibJetsTree) — the default production.
+# --uncalib sets this False: the uncalibrated *JetsTree trees, written to the uncalibrated
+# production's directory (jetTaggerEmulation.cc outputNTupleDir). Set from --uncalib in main().
+CALIBRATED_WTACONE_JETS = True
 INPUT_DIRS = {
     "ggF_hh_bbbb":                f"{_NTUPLE_BASE}/ggF_HHbbbb_v4/",
     "VBF_hh_bbbb":                f"{_NTUPLE_BASE}/VBF_HHbbbb_v4/",
@@ -259,9 +301,9 @@ def make_submit_file(jobs: list[dict], wrapper: str, label: str,
         '+queue                = "short"',
         "getenv                = false",
         "",
-        # pileup is fixed for the whole submission, so it goes in the header rather
-        # than the per-job ItemData.
-        f"arguments = $(RMRG) $(R2) $(NIOS) $(NSEEDS) $(ALGOV) $(SIG) $(SIGSTR) $(PUSUP) $(INOBJ) $(SEEDOBJ) $(SJETT) $(ETWM) $(MINETO) $(MINETC) $(INFILE) $(FIDX) $(ETASK) {PILEUP} $(TOWERET)",
+        # pileup and calibration are fixed for the whole submission, so they go in the header
+        # rather than the per-job ItemData.
+        f"arguments = $(RMRG) $(R2) $(NIOS) $(NSEEDS) $(ALGOV) $(SIG) $(SIGSTR) $(PUSUP) $(INOBJ) $(SEEDOBJ) $(SJETT) $(ETWM) $(MINETO) $(MINETC) $(INFILE) $(FIDX) $(ETASK) {PILEUP} $(TOWERET) {bool_str(CALIBRATED_WTACONE_JETS)}",
         "log       = $(LOG)",
         "output    = $(OUT)",
         "error     = $(ERR)",
@@ -379,10 +421,15 @@ def main():
     parser.add_argument("--pu", type=int, default=200, choices=[140, 200], metavar="PILEUP",
                         help="Pileup scenario (default: 200). 140 reads the ntuples_PU140 "
                              "mirror tree instead of ntuples.")
+    parser.add_argument("--uncalib", action="store_true",
+                        help="Use the UNCALIBRATED WTACone jets (*JetsTree) instead of the "
+                             "JES-calibrated *CalibJetsTree ones; outputs go to the uncalibrated "
+                             "production directory.")
     args = parser.parse_args()
 
-    global PILEUP
+    global PILEUP, CALIBRATED_WTACONE_JETS
     PILEUP = args.pu
+    CALIBRATED_WTACONE_JETS = not args.uncalib
 
     all_samples = list(SIGNAL_STRINGS) + ["BACKGROUND"]
 
@@ -409,6 +456,12 @@ def main():
         print(f"[pileup] PU{args.pu}: reading inputs from {_NTUPLE_BASE_BY_PU[args.pu]}")
         print(f"[pileup] Outputs are tagged r16129 (PU140) instead of r16130 (PU200), "
               "so they sit alongside the PU200 ones without overwriting them.")
+    # Both productions write the same filenames (only the output directory differs), so the
+    # label is what keeps the uncalibrated logs/itemdata/sub files off the calibrated ones.
+    if args.uncalib:
+        args.label += "_uncalib"
+        print("[calibration] UNCALIBRATED WTACone jets: reading *JetsTree, writing to "
+              "outputNTuplesDev_gjTowerSamples_towerEtCutFixed (set in jetTaggerEmulation.cc)")
 
     log_dir = str(Path.home() / "condor_logs" / args.label)
     os.makedirs(log_dir, exist_ok=True)

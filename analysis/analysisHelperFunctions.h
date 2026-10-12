@@ -1,3 +1,9 @@
+// Without this, loading two macros that both include this header into one ROOT session
+// (e.g. makeMETEventDisplays.C while a previously compiled metAnalysisAndRates_C.so is
+// auto-loaded) pulls it into the same translation unit twice and every struct and free
+// function below is reported as a redefinition.
+#pragma once
+
 #include <iostream>
 #include <chrono>
 #include <fstream>
@@ -254,6 +260,21 @@ std::string SeedLegendLabel(const FileInfo& info) {
 
 std::string SeedLegendLabel(const std::string& path) {
     return SeedLegendLabel(ParseFileName(path));
+}
+
+// Physics-process text for the top-right corner of a plot, e.g. "hh#rightarrow4b [ggF]".
+// Taken from the file path so a per-file plot can label itself without the caller having to
+// carry the sample around. Same mapping as the per-file legend block in
+// largeRJetAnalysisCore.h (legLabelSig_SampleInfoOnly) — add new samples to both.
+std::string ProcessLegendLabel(const std::string& path) {
+    const std::string mode = getProductionMode(path);
+    if(mode == "VBF")          return "hh#rightarrow4b [VBF, c_{vv} = 0]";
+    if(mode == "VBF_SM")       return "hh#rightarrow4b [VBF, c_{vv} = 1]";
+    if(mode == "ggF")          return "hh#rightarrow4b [ggF]";
+    if(mode == "Zprime_tthad") return "Z' #rightarrow t#bar{t} [had]";
+    if(mode == "ZvvHbb")       return "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}";
+    if(mode == "ttbar_had")    return "t#bar{t} [had]";
+    return "";   // unrecognized sample: no label beats a wrong one
 }
 
 
@@ -1292,14 +1313,58 @@ inline void DrawRateCurvesWithRatio(const std::vector<TH1*>& curves,
                                     const std::string& refShortName,   // names the denominator on the ratio axis
                                     const std::string& xTitle,
                                     const std::string& yTitle,
-                                    const std::string& legendHeader,
+                                    // Algorithm/trigger this canvas is about ("jFEX", "gFEX JwoJ",
+                                    // "GEP Jet MET"). It used to be the legend's first row, where
+                                    // it read as just another entry at entry size; it is now drawn
+                                    // bold and large under the legend, which is what identifies
+                                    // the plot at a glance.
+                                    const std::string& algoLabel,
                                     const TString& outputPath,
                                     double yScale = 1.0,
                                     double xMax = -1.0,
                                     double yMin = -1.0,
                                     double ratioMin = 0.0,
-                                    double ratioMax = 3.0) {
+                                    double ratioMax = 3.0,
+                                    // Put algoLabel in the top-right corner instead of under the
+                                    // legend. Defaulted off so every existing caller is unchanged.
+                                    // Worth turning on when the legend has few entries: the box
+                                    // then leaves a gap under its top edge, and the label lands in
+                                    // the middle of the curves rather than clear of them.
+                                    bool algoLabelTopRight = false,
+                                    // Where along a bin its point is drawn. A cumulative rate curve
+                                    // means "rate above THIS threshold", so its point belongs on the
+                                    // bin's low edge — the default, and what every original caller
+                                    // wants. A differential distribution instead has its value
+                                    // spread across the bin, and its point belongs at the centre;
+                                    // drawing it at the low edge shifts the whole spectrum half a
+                                    // bin left. Set true for those.
+                                    bool useBinCenters = false,
+                                    // Left edge of the legend box, NDC. The right edge stays put,
+                                    // so lowering this widens the box leftwards rather than
+                                    // sliding it — which is what an entry carrying a summary
+                                    // statistic alongside its name needs. 0.30 = the layout every
+                                    // caller had before this knob existed.
+                                    double legX1 = 0.30,
+                                    // Height of ONE legend row, NDC. 0 keeps the fixed 0.60-0.86
+                                    // box every original caller was drawn with. Set it and the box
+                                    // is sized to the entry count instead and pinned to its top
+                                    // edge, which is what keeps a two- or three-curve legend from
+                                    // spreading its rows across the plot.
+                                    double legRowHeight = 0.0,
+                                    // Legend text size, NDC. 0 keeps the original 0.034.
+                                    double legTextSize = 0.0,
+                                    // Top edge of the legend box, NDC. 0.86 = flush with the frame
+                                    // top, which is where every original caller draws it. Lower it
+                                    // to bring a compact box down off the frame edge. The algorithm
+                                    // label rides on this too, so it moves with the box.
+                                    double legTopNDC = 0.86) {
   if (curves.empty() || refIndex >= curves.size() || !curves[refIndex]) return;
+
+  // The x of bin ib under whichever convention the caller asked for. Used by both pads, so the
+  // main curve and its ratio point always land on the same x.
+  auto binX = [&](const TH1* h, int ib) {
+    return useBinCenters ? h->GetBinCenter(ib) : h->GetBinLowEdge(ib);
+  };
 
   const Style_t mkstyles[8] = { 20, 21, 22, 23, 29, 33, 34, 47 };
   // Plain ROOT enums only: the Petroff kP6/kP8/kP10 constants are TColor::GetColor() variables
@@ -1311,7 +1376,7 @@ inline void DrawRateCurvesWithRatio(const std::vector<TH1*>& curves,
   auto graphFrom = [&](const TH1* h, Int_t col, Style_t mk) -> TGraphErrors* {
     std::vector<double> x, y, ex, ey;
     for (int ib = 1; ib <= h->GetNbinsX(); ++ib) {
-      x .push_back(h->GetBinLowEdge(ib));
+      x .push_back(binX(h, ib));
       y .push_back(h->GetBinContent(ib) * yScale);
       ex.push_back(0.0);
       ey.push_back(h->GetBinError(ib)   * yScale);
@@ -1322,7 +1387,7 @@ inline void DrawRateCurvesWithRatio(const std::vector<TH1*>& curves,
     return g;
   };
 
-  TCanvas* c = new TCanvas(("cRatio_" + outputPath).Data(), legendHeader.c_str(), 800, 800);
+  TCanvas* c = new TCanvas(("cRatio_" + outputPath).Data(), algoLabel.c_str(), 800, 800);
   TPad* padHi = new TPad("padHi", "", 0.0, 0.30, 1.0, 1.0);
   TPad* padLo = new TPad("padLo", "", 0.0, 0.00, 1.0, 0.30);
   // Both pads need the same left margin or the two x axes will not line up. It has to be wide
@@ -1356,12 +1421,46 @@ inline void DrawRateCurvesWithRatio(const std::vector<TH1*>& curves,
     graphs[0]->SetMinimum(yMin > 0.0 ? yMin : std::max(yMaxSeen * 1e-8, 1e-12));
     graphs[0]->SetMaximum(yMaxSeen * 20.0);
   }
-  TLegend* leg = new TLegend(0.42, 0.62, 0.93, 0.92);
-  leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.034);
-  if (!legendHeader.empty()) leg->AddEntry((TObject*)nullptr, legendHeader.c_str(), "");
+  // Pulled well in from the pad's right edge (0.93) so the entries are not flush against it,
+  // and one row shorter than it used to be now that the algorithm name has left the box.
+  //
+  // The box's TOP edge is what is fixed; the bottom follows from legRowHeight when the caller
+  // sets one. ROOT spreads entries evenly over whatever height it is given, so a box sized for
+  // four curves and handed two puts those two half a pad apart, on top of the curves. Sizing to
+  // the entry count keeps the rows together under the top edge whatever the curve count is.
+  const double legX2 = 0.82, legY2 = legTopNDC;
+  int nLegEntries = 0;
+  for (unsigned int i = 0; i < graphs.size(); ++i) if (graphs[i]) nLegEntries++;
+  const double legY1 = (legRowHeight > 0.0 && nLegEntries > 0)
+                       ? legY2 - legRowHeight * nLegEntries
+                       : 0.60;
+  TLegend* leg = new TLegend(legX1, legY1, legX2, legY2);
+  leg->SetBorderSize(0); leg->SetFillStyle(0);
+  leg->SetTextSize(legTextSize > 0.0 ? legTextSize : 0.034);
+  // The symbol column is a fraction of the box WIDTH, so a box widened to hold long entries also
+  // stretches its marker-and-line samples into the plot. Pull it back in on the compact layout.
+  if (legRowHeight > 0.0) leg->SetMargin(0.12);
   for (unsigned int i = 0; i < graphs.size(); ++i)
     if (graphs[i]) leg->AddEntry(graphs[i], labels[i].c_str(), "lp");
   leg->Draw();
+
+  // Algorithm name UNDER the legend, right-aligned on the legend's own right edge: bold and
+  // twice the entry size, so the one thing that changes from canvas to canvas in this family
+  // of plots is the first thing read, rather than a row lost among the entries. It rides on
+  // the legend's own corner, so moving the box moves the name with it.
+  if (!algoLabel.empty()) {
+    TLatex al; al.SetNDC(); al.SetTextFont(62); al.SetTextAlign(31);
+    if (algoLabelTopRight) {
+      // Above the legend's top edge, so it clears both the box and the curves. Smaller than
+      // the under-legend placement because there is only the strip above the legend to work
+      // with, and at the larger size a long name would reach back across the ATLAS label.
+      al.SetTextSize(0.045);
+      al.DrawLatex(0.93, legY2 + 0.01, algoLabel.c_str());
+    } else {
+      al.SetTextSize(0.070);
+      al.DrawLatex(legX2, legY1 - 0.075, algoLabel.c_str());
+    }
+  }
   DrawATLASLabel(0.20, 0.88, "Work in progress");   // defaults live on the macro definitions
 
   // ---- ratio pad
@@ -1380,8 +1479,9 @@ inline void DrawRateCurvesWithRatio(const std::vector<TH1*>& curves,
       // histogram (a JZ0 twin, a truth spectrum) and need not share the numerator's binning.
       // Indexing both by ib then silently divides values taken at two different thresholds.
       // Where the edges do not line up, the reference is evaluated at the bin containing thr,
-      // i.e. at the largest of its thresholds not above thr.
-      const double thr   = curves[i]->GetBinLowEdge(ib);
+      // i.e. at the largest of its thresholds not above thr. Under useBinCenters the pairing is
+      // by bin centre instead, which FindFixBin resolves to the same bin either way.
+      const double thr   = binX(curves[i], ib);
       const int    ibRef = href->GetXaxis()->FindFixBin(thr);
       if (ibRef < 1 || ibRef > href->GetNbinsX()) continue;
       const double yr = href->GetBinContent(ibRef);
@@ -1452,22 +1552,33 @@ struct TurnOnCurve {
 };
 
 struct TurnOnOpts {
+    double xMin        = 0.0;     // 0 or negative = keep the histogram's own lower edge
     double xMax        = 400.0;   // 0 or negative = keep the histogram's own upper edge
     double yMax        = 1.4;     // curves occupy 0-1; the strip above is the legend's
     double ratioMin    = 0.0;
     double ratioMax    = 3.0;     // widened automatically if points fall outside, never narrowed
     double ratioMaxCap = 10.0;
     int    legendCols  = 0;       // 0 = pick from the entry count; clamped to 2 either way
+    // Headroom for the legend text, as a multiple of the template's original ceiling. The
+    // sizing below is already adaptive — it shrinks the rows to fit the entry count and the
+    // space above the plateau — but it is also capped, and with only a few short entries that
+    // cap is what binds, leaving a small legend in a large gap. Raise this on a plot with room
+    // to spare; the fit-to-space logic still overrides it, so a crowded legend cannot spill
+    // over the curves. 1.0 = the layout every caller got before this knob existed.
+    double legendScale = 1.0;
     int    refIndex    = -1;      // -1 = auto: "gFEX JwoJ", then "gFEX", then the first curve
     std::string xTitle;
     std::string yTitle = "Emulated Trigger Efficiency";
     std::string legendHeader;     // drawn top-right under the process label, NOT as a legend row
-    // Placement of that header. Defaults are the original values, so a caller that does not set
-    // them gets exactly the layout this template has always drawn; the MET macro enlarges the
-    // text and pulls it in to the frame's right edge. headerX is a RIGHT edge (align 31) and
-    // headerY is the text baseline.
+    // Placement of that header, and of the process label above it — both are right-aligned on
+    // headerX so their right edges line up. headerX is a RIGHT edge (align 31) and headerY is
+    // the text baseline.
+    // 0.95 = the FRAME's right edge (pad right margin 0.05), not the canvas edge. At the old
+    // 0.99 a long header ran into the last tenth of the canvas and read as if it were about to
+    // clip; flush with the frame is where ATLAS plots put this strip. The MET macro pulls its
+    // own header in further still (0.90) because it draws at twice this text size.
     double      headerTextSize = 0.028;
-    double      headerX        = 0.99;
+    double      headerX        = 0.95;
     double      headerY        = 0.897;
     std::string processLabel;     // e.g. "hh#rightarrow4b", drawn top-right above the frame
     std::string refShortName;     // ratio axis reads "Ratio to <this>"; empty = derive from label
@@ -1535,7 +1646,9 @@ inline TCanvas* DrawTurnOnWithRatio(const std::vector<TurnOnCurve>& curves,
     drawn.push_back(h);
   }
 
-  const double xLo = drawn[0]->GetXaxis()->GetXmin();
+  // xLo/xHi drive the frame, the plateau line, the ratio points and the ratio frame, so
+  // clipping here is all it takes to restrict a plot to the interesting range.
+  const double xLo = (opts.xMin > 0.0) ? opts.xMin : drawn[0]->GetXaxis()->GetXmin();
   const double xHi = (opts.xMax > 0.0) ? opts.xMax : drawn[0]->GetXaxis()->GetXmax();
 
   drawn[0]->SetTitle("");
@@ -1612,7 +1725,7 @@ inline TCanvas* DrawTurnOnWithRatio(const std::vector<TurnOnCurve>& curves,
   const double legY2 = 0.855;
   // Floor: where the plateau sits, so the box never grows down over the curves.
   const double plateau  = 0.02 + (1.0 / opts.yMax) * (0.86 - 0.02);
-  const double rowHWant = withRatio ? 0.042 : 0.038;
+  const double rowHWant = (withRatio ? 0.042 : 0.038) * opts.legendScale;
 
   auto textSizeFor = [&](int cols) {
     const int rows = (nEntries + cols - 1) / cols;
@@ -1623,7 +1736,7 @@ inline TCanvas* DrawTurnOnWithRatio(const std::vector<TurnOnCurve>& curves,
     const double colW = 0.92 * (legX2 - legX1) / cols;
     const double byWidth  = colW / (maxLen * 0.38);
     const double byHeight = rowH * 0.58;
-    return std::min(std::min(byWidth, byHeight), 0.024);
+    return std::min(std::min(byWidth, byHeight), 0.024 * opts.legendScale);
   };
 
   int nCols = opts.legendCols > 0 ? std::min(opts.legendCols, 2)
@@ -1644,11 +1757,13 @@ inline TCanvas* DrawTurnOnWithRatio(const std::vector<TurnOnCurve>& curves,
   DrawATLASLabel(0.16, 0.88, "Work in progress");
   // Process and legend header both live in the strip above the frame, on the right: the header
   // used to be a legend row, which cost a row of the little vertical space there is.
-  // RIGHT-ALIGNED at the pad edge (align 31) rather than left-anchored at 0.62 — a long header
-  // used to run straight off the canvas. Long ones are also split over two lines.
+  // RIGHT-ALIGNED (align 31) rather than left-anchored at 0.62 — a long header used to run
+  // straight off the canvas. Long ones are also split over two lines. Both share opts.headerX
+  // so the two lines keep a common right edge whatever a caller sets it to; the MET macro is
+  // unaffected because it draws its own process label from DrawATLASLabel, not from here.
   if (!opts.processLabel.empty()) {
     TLatex pt; pt.SetNDC(); pt.SetTextFont(42); pt.SetTextSize(0.035); pt.SetTextAlign(31);
-    pt.DrawLatex(0.99, 0.945, opts.processLabel.c_str());
+    pt.DrawLatex(opts.headerX, 0.945, opts.processLabel.c_str());
   }
   if (!opts.legendHeader.empty()) {
     // The header sits on the SECOND line of the strip, never the first, whether or not this
