@@ -90,6 +90,7 @@ trap "rm -rf '$JOBDIR'" EXIT
 
 cp "$EMUL_DIR/jetTaggerEmulation.cc"      "$JOBDIR/"
 cp "$EMUL_DIR/emulationHelperFunctions.h" "$JOBDIR/"
+cp "$EMUL_DIR/jetTOBEncoding.h"           "$JOBDIR/"
 mkdir "$JOBDIR/UsedConstantsLUTs"
 cp "$CONSTANTS_FILE" "$JOBDIR/UsedConstantsLUTs/constants.h"
 cp "$LUT_FILE"       "$JOBDIR/UsedConstantsLUTs/deltaRLUT_8b.h"

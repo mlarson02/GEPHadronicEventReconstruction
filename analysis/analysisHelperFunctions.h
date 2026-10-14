@@ -5017,10 +5017,10 @@ const double mH_ = 125.0;
 // eta_min_ / phi_min_ are the *first tower centre* and *_max_ one LSB past the
 // last, so digitizing a tower centre lands exactly on an integer code (no
 // round-half ties) and undigitizing a code returns the tower centre it came
-// from. This mirrors the Athena tower grid, CaloTowerContainer::configureGrid
-// (98, -4.9, 4.9, 64) with phi hardcoded to [-pi, pi]:
+// from. Same tower centres as the Athena tower grid, CaloTowerContainer::configureGrid
+// (98, -4.9, 4.9, 64), with the phi codes counted from phi = 0 (index 0 = [0, pi/32)):
 //   eta centre(k) = -4.9 + (k + 0.5) * 0.1    = -4.85    + k * 0.1
-//   phi centre(k) = -pi  + (k + 0.5) * pi/32  = -pi+pi/64 + k * pi/32
+//   phi centre(k) =        (k + 0.5) * pi/32  =  pi/64    + k * pi/32, reported in (-pi, pi]
 constexpr double et_granularity_ = 0.25; // 250 MeV LSB
 constexpr unsigned int et_bit_length_ = 13;
 constexpr unsigned int et_min_ = 0;
@@ -5037,7 +5037,7 @@ constexpr unsigned int phi_bit_length_ = 9; // v2 TOB field width
 //constexpr unsigned int phi_bit_length_ = 6;
 constexpr unsigned int phi_range_ = 64; // 64 towers of pi/32 -> exactly 2*pi, both versions
 constexpr double phi_granularity_ = M_PI / 32.0;
-constexpr double phi_min_ = -M_PI + M_PI / 64.0;
+constexpr double phi_min_ = M_PI / 64.0;
 constexpr double phi_max_ = phi_min_ + phi_range_ * phi_granularity_;
 constexpr unsigned int pi_digitized_in_phi_ = phi_range_ / 2; // 32 codes = pi
 
@@ -5049,9 +5049,8 @@ const unsigned nSeeds_ = 2;
 //
 // Kept separate from digitize() because phi is periodic while eta/Et are not:
 // the generic function saturates at range - 1, which is wrong at both ends of
-// the phi axis. A value in the top half tower (phi within pi/64 of +pi) belongs
-// in code 0, not in a code one past the end of the range -- which would not even
-// fit the 6-bit v3 field. The code count is phi_range_ (64) rather than
+// the phi axis. Codes count from phi = 0 (index 0 = [0, pi/32)), so a negative
+// phi wraps to the top of the range rather than clamping to code 0. The code count is phi_range_ (64) rather than
 // 1 << phi_bit_length_ so that the wider v2 phi field keeps the same pi/32
 // granularity and the same dynamic range, with its top 3 bits left as padding.
 inline unsigned int digitize_phi(double phi) {
@@ -5060,9 +5059,93 @@ inline unsigned int digitize_phi(double phi) {
     return static_cast<unsigned int>(((code % nPhi) + nPhi) % nPhi);
 }
 
-// Inverse of digitize_phi: returns the centre of the phi tower a code refers to.
+// Inverse of digitize_phi: returns the centre of the phi tower a code refers to, in (-pi, pi].
 inline double undigitize_phi_value(unsigned int phi_code) {
-    return phi_min_ + phi_code * phi_granularity_;
+    const double phi = phi_min_ + phi_code * phi_granularity_;
+    return (phi > M_PI) ? phi - 2.0 * M_PI : phi;
+}
+
+// Jet TOB eta/phi encoding, twin of algorithm/emulation/jetTOBEncoding.h (keep the two in step).
+// Eta: 10b two's complement, LSB 0.0125, code k covers [k, k+1) * 0.0125, so "00 0000 0000" is [0, 0.0125).
+// Phi: 9b, LSB 2pi/512, code k covers [k, k+1) * 2pi/512 from phi = 0; a tower-grid phi index i is code i << 3.
+// Input jets (WTACone, gFEX/jFEX): false = tower-grid indices, true = jet TOB eta/phi codes.
+// Output large-R jets always carry the jet TOB codes.
+constexpr bool input_jets_use_jet_tob_encoding_ = false;
+
+constexpr unsigned int jet_eta_bit_length_ = 10;
+constexpr unsigned int jet_eta_mask_ = (1u << jet_eta_bit_length_) - 1;
+constexpr double jet_eta_granularity_ = 0.0125;
+constexpr int jet_eta_code_min_ = -(1 << (jet_eta_bit_length_ - 1)); // -512 = -6.39375
+constexpr int jet_eta_code_max_ = (1 << (jet_eta_bit_length_ - 1)) - 1; // 511 = 6.39375
+constexpr unsigned int jet_to_tower_eta_shift_ = 3; // 8 jet codes per 0.1 tower
+
+constexpr unsigned int jet_phi_bit_length_ = 9;
+constexpr unsigned int jet_phi_mask_ = (1u << jet_phi_bit_length_) - 1;
+constexpr unsigned int jet_to_tower_phi_shift_ = 3; // 8 jet codes per pi/32 tower
+
+// Tower centres sit exactly on jet bin edges (eta tower i -> code 8i - 388); the nudge, in LSBs, keeps a
+// float and a double copy of the same centre from landing either side of the edge
+constexpr double jet_tob_edge_nudge_ = 1e-3;
+
+// Phi in (-pi, pi]
+inline double wrap_phi_pm_pi(double phi) {
+    phi = std::fmod(phi, 2.0 * M_PI);
+    if (phi > M_PI) phi -= 2.0 * M_PI;
+    if (phi <= -M_PI) phi += 2.0 * M_PI;
+    return phi;
+}
+
+// Jet eta -> 10b two's complement code
+inline unsigned int digitize_jet_eta(double eta) {
+    const int code = static_cast<int>(std::floor(eta / jet_eta_granularity_ + jet_tob_edge_nudge_));
+    return static_cast<unsigned int>(std::clamp(code, jet_eta_code_min_, jet_eta_code_max_)) & jet_eta_mask_;
+}
+
+// Signed value of a jet eta code
+inline int jet_eta_signed(unsigned int code) {
+    code &= jet_eta_mask_;
+    return (code >> (jet_eta_bit_length_ - 1)) ? static_cast<int>(code) - (1 << jet_eta_bit_length_) : static_cast<int>(code);
+}
+
+// Centre of the bin a jet eta code refers to
+inline double undigitize_jet_eta(unsigned int code) {
+    return (jet_eta_signed(code) + 0.5) * jet_eta_granularity_;
+}
+
+// Jet eta code -> tower index, clamped to the tower grid
+inline unsigned int jet_eta_to_tower_index(unsigned int code) {
+    const int index = (jet_eta_signed(code) >> jet_to_tower_eta_shift_) + static_cast<int>(eta_range_ / 2);
+    return static_cast<unsigned int>(std::clamp(index, 0, static_cast<int>(eta_range_) - 1));
+}
+
+// Tower index -> jet eta code of that tower's centre, 8 * (index - eta_range_ / 2) + 4
+inline unsigned int tower_index_to_jet_eta(unsigned int index) {
+    const int code = (static_cast<int>(index) - static_cast<int>(eta_range_ / 2)) * (1 << jet_to_tower_eta_shift_)
+                   + (1 << (jet_to_tower_eta_shift_ - 1));
+    return static_cast<unsigned int>(code) & jet_eta_mask_;
+}
+
+// Jet phi -> 9b code
+inline unsigned int digitize_jet_phi(double phi) {
+    const double lsb = 2.0 * M_PI / (1 << jet_phi_bit_length_);
+    double phi02pi = wrap_phi_pm_pi(phi);
+    if (phi02pi < 0) phi02pi += 2.0 * M_PI;
+    return static_cast<unsigned int>(std::floor(phi02pi / lsb + jet_tob_edge_nudge_)) & jet_phi_mask_;
+}
+
+// Jet phi code -> tower index
+inline unsigned int jet_phi_to_tower_index(unsigned int code) {
+    return ((code & jet_phi_mask_) >> jet_to_tower_phi_shift_) % phi_range_;
+}
+
+// Tower index -> jet phi code, the index with jet_to_tower_phi_shift_ zero LSBs
+inline unsigned int tower_index_to_jet_phi(unsigned int index) {
+    return (index << jet_to_tower_phi_shift_) & jet_phi_mask_;
+}
+
+// Jet phi code -> centre of its tower, in (-pi, pi]
+inline double undigitize_jet_phi(unsigned int code) {
+    return wrap_phi_pm_pi((jet_phi_to_tower_index(code) + 0.5) * (2.0 * M_PI / phi_range_));
 }
 
 // Function to scale and digitize a value, returning the result as a binary string

@@ -122,6 +122,16 @@ public:
             std::cerr << "ChainSource: no files match " << pathOrGlob << "\n";
             return nullptr;
         }
+        return OpenFiles(files, pathOrGlob);
+    }
+
+    // As Open, from an explicit, already-ordered file list. label is only used in printouts.
+    static ChainSource* OpenFiles(const std::vector<std::string>& files, const std::string& label) {
+        if (files.empty()) {
+            std::cerr << "ChainSource: empty file list for " << label << "\n";
+            return nullptr;
+        }
+        const char* pathOrGlob = label.c_str();
 
         ChainSource* src = new ChainSource();
         src->fFiles = files;
@@ -151,6 +161,113 @@ public:
             std::cout << "ChainSource: chaining " << files.size() << " file(s) from "
                       << pathOrGlob << "\n";
         return src;
+    }
+
+    // --- Unmerged inputs ---------------------------------------------------------------------
+    // Opens an {ntuple, emulation output} pair from the per-job pieces they would be hadd'd from,
+    // as two chains holding the same events in the same order. Both paths are the MERGED names
+    // the macros are configured with (ntuple may be a glob, e.g. QCD_Dijet_JZ*_v4); the pieces are
+    //   <ntuple stem>_*.root     HERNTupler outputs (_NNNNNN), natural-sorted = the submit
+    //                            scripts' fidx order (sorted per directory, JZ0 -> JZ9)
+    //   <emu stem>_file<N>.root  emulation outputs; piece N was made from ntuple inputs
+    //                            [N, N + inputsPerEmuFile) of that list
+    // The emulation pieces decide what is opened: only the ntuple inputs behind an existing piece
+    // are chained, so a failed emulation job drops its inputs too instead of shifting every later
+    // event. Total entries of eventInfoTree and emulEventInfoTree are cross-checked at the end.
+    // inputsPerEmuFile must match FILES_PER_JOB of the submit script (MET 5, jet tagger 1), and the
+    // ntuple directories must hold the same files as when the emulation was submitted.
+    // Returns false (both handles nullptr) on any inconsistency.
+    static bool OpenUnmergedPair(const std::string& ntuplePath, const std::string& emuPath,
+                                 int inputsPerEmuFile, ChainSource*& ntuple, ChainSource*& emu) {
+        ntuple = nullptr;
+        emu    = nullptr;
+        auto stem = [](const std::string& p) {
+            return (p.size() > 5 && p.compare(p.size() - 5, 5, ".root") == 0) ? p.substr(0, p.size() - 5) : p;
+        };
+        const std::string ntGlob  = stem(ntuplePath) + "_*.root";
+        const std::string emuGlob = stem(emuPath) + "_file*.root";
+
+        const std::vector<std::string> ntFiles = ExpandGlob(ntGlob.c_str());
+        if (ntFiles.empty()) {
+            std::cerr << "ChainSource: no unmerged ntuples match " << ntGlob << "\n";
+            return false;
+        }
+
+        // Emulation pieces keyed by their first input index N
+        std::vector<std::pair<long, std::string>> pieces;
+        const std::vector<std::string> emuFiles = ExpandGlob(emuGlob.c_str());
+        const std::string emuPrefix = stem(emuPath) + "_file";
+        for (size_t i = 0; i < emuFiles.size(); ++i) {
+            const std::string& f = emuFiles[i];
+            if (f.compare(0, emuPrefix.size(), emuPrefix) != 0) continue;
+            const std::string idx = f.substr(emuPrefix.size(), f.size() - emuPrefix.size() - 5);
+            if (idx.empty() || idx.find_first_not_of("0123456789") != std::string::npos) continue;
+            pieces.push_back(std::make_pair(std::stol(idx), f));
+        }
+        if (pieces.empty()) {
+            std::cerr << "ChainSource: no unmerged emulation outputs match " << emuGlob << "\n";
+            return false;
+        }
+        std::sort(pieces.begin(), pieces.end());
+
+        const long step = std::max(1, inputsPerEmuFile);
+        const long nNt  = (long)ntFiles.size();
+        std::vector<std::string> ntSel, emuSel;
+        std::set<long> have;
+        for (size_t i = 0; i < pieces.size(); ++i) {
+            const long n = pieces[i].first;
+            if (n % step != 0 || n >= nNt) {
+                std::cerr << "ChainSource: " << pieces[i].second << " does not map onto the " << nNt
+                          << " ntuple inputs of " << ntGlob << " at " << step
+                          << " input(s) per piece — wrong inputsPerEmuFile, or the inputs changed since"
+                          << " the emulation was submitted\n";
+                return false;
+            }
+            have.insert(n);
+            emuSel.push_back(pieces[i].second);
+            for (long k = n; k < std::min(n + step, nNt); ++k) ntSel.push_back(ntFiles[k]);
+        }
+
+        const long nExpected = (nNt + step - 1) / step;
+        std::cout << "ChainSource: unmerged pair " << emuSel.size() << "/" << nExpected
+                  << " emulation piece(s), " << ntSel.size() << "/" << nNt << " ntuple input(s)\n"
+                  << "             ntuples:   " << ntGlob << "\n"
+                  << "             emulation: " << emuGlob << "\n";
+        if ((long)emuSel.size() < nExpected) {
+            std::cout << "ChainSource: WARNING missing emulation piece(s), inputs skipped — first indices:";
+            int nPrinted = 0;
+            for (long n = 0; n < nNt && nPrinted < 20; n += step)
+                if (!have.count(n)) { std::cout << " " << n; ++nPrinted; }
+            if ((long)(nExpected - emuSel.size()) > nPrinted) std::cout << " ...";
+            std::cout << "\n";
+        }
+        std::cout << std::flush;
+
+        ntuple = OpenFiles(ntSel, ntGlob);
+        emu    = OpenFiles(emuSel, emuGlob);
+        if (!ntuple || ntuple->IsZombie() || !emu || emu->IsZombie()) {
+            if (ntuple) ntuple->Close();
+            if (emu)    emu->Close();
+            ntuple = nullptr;
+            emu    = nullptr;
+            return false;
+        }
+
+        // Event-count cross-check of the two chains
+        TTree* evt    = ntuple->Get("eventInfoTree");
+        TTree* emuEvt = emu->Get("emulEventInfoTree");
+        if (!evt || !emuEvt) {
+            std::cout << "ChainSource: WARNING eventInfoTree/emulEventInfoTree missing, entry cross-check skipped\n";
+        } else if (evt->GetEntries() != emuEvt->GetEntries()) {
+            std::cerr << "ChainSource: entry mismatch — ntuples " << evt->GetEntries()
+                      << ", emulation " << emuEvt->GetEntries() << "; the chains are not aligned\n";
+            ntuple->Close();
+            emu->Close();
+            ntuple = nullptr;
+            emu    = nullptr;
+            return false;
+        }
+        return true;
     }
 
     bool IsZombie() const { return fZombie; }

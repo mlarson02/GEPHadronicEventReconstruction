@@ -312,8 +312,11 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
         for (unsigned int iJet = 0; iJet < jetsProcessed; iJet++) {
             if(jetPtVec->at(iJet) <= jetEtThreshold) continue;
             unsigned int jetEt  = digitize(jetPtVec->at(iJet),  et_bit_length_,  static_cast<double>(et_min_),  static_cast<double>(et_max_));
-            unsigned int jetPhi = digitize_phi(jetPhiVec->at(iJet));
-            unsigned int jetEta = digitize(jetEtaVec->at(iJet), eta_bit_length_, eta_min_, eta_max_);
+            // Tower-grid indices, through the jet TOB codes if input jets carry them
+            unsigned int jetPhi = input_jets_use_jet_tob_encoding_ ? jet_phi_to_tower_index(digitize_jet_phi(jetPhiVec->at(iJet)))
+                                                                   : digitize_phi(jetPhiVec->at(iJet));
+            unsigned int jetEta = input_jets_use_jet_tob_encoding_ ? jet_eta_to_tower_index(digitize_jet_eta(jetEtaVec->at(iJet)))
+                                                                   : digitize(jetEtaVec->at(iJet), eta_bit_length_, eta_min_, eta_max_, eta_range_);
 
             jetPhiOverlapVec.push_back(jetPhi);
             jetEtaOverlapVec.push_back(jetEta);
@@ -343,7 +346,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,
             //std::cout << "towerPhi (undigi): " << towerPhiVec->at(iTower) << "\n";
             unsigned int towerEt  = digitize(towerEtVec->at(iTower),  et_bit_length_,  static_cast<double>(et_min_),  static_cast<double>(et_max_));
             unsigned int towerPhi = digitize_phi(towerPhiVec->at(iTower));
-            unsigned int towerEta = digitize(towerEtaVec->at(iTower), eta_bit_length_, eta_min_, eta_max_);
+            unsigned int towerEta = digitize(towerEtaVec->at(iTower), eta_bit_length_, eta_min_, eta_max_, eta_range_);
             // Check for overlap between jets and towers, if towers overlap, remove from computation of tower MET
            
             if(doJetTowerOverlapRemoval){
@@ -743,66 +746,47 @@ const std::string met_baseline_log_suffix_      = ".log";
 const std::string met_baseline_ntuple_path_   = "/data/larsonma/GEPMET/METBaselineValidation/";
 const std::string met_baseline_ntuple_suffix_ = "_METBaselineValidation.root";
 
-// Output word, 64 bits, the MET TOB data format of Table 4.5. MSB -> LSB:
+// Output word, 64 bits, the MET TOB data format. MSB -> LSB:
 //
-//   [63]     reserved            driven to zero
+//   [63]     SumET overflow      SumET exceeded the 13-bit output range
 //   [62]     upstream overflow   an accepted input object had already saturated its E_T
 //   [61]     MET overflow        |MET| exceeded the 13-bit output range
-//   [60]     Energy Sum overflow SumET exceeded the 13-bit output range
-//   [59]     Ey overflow         |Ey| >= 4096, i.e. exceeded the +-4095 output range
-//   [58]     Ex overflow         |Ex| >= 4096, i.e. exceeded the +-4095 output range
-//   [57:45]  Energy Sum          unsigned 13-bit scalar energy, saturated at 8191
-//   [44:32]  Ey_miss             13-bit two's complement, saturated at +-4095
-//   [31:19]  Ex_miss             13-bit two's complement, saturated at +-4095
-//   [18:13]  phi_miss             6-bit azimuth, 64 bins
+//   [60:48]  SumET               unsigned 13-bit scalar energy, saturated at 8191
+//   [47:35]  Ey_miss             13-bit two's complement, saturated at +-4095
+//   [34:22]  Ex_miss             13-bit two's complement, saturated at +-4095
+//   [21:13]  phi_miss            9 bits, {phi6, 3'b000}: the 6-bit metPhiIndex in the top bits
 //   [12:0]   ET_miss             unsigned 13-bit magnitude, saturated at 8191
 //
-// This REPLACES the earlier layout, which carried Ey/Ex at [57:45]/[44:32], reserved
-// eta/phi fields, and no flags. Every field except Energy Sum has moved, so a .dat
-// written before this change cannot be compared field-by-field against one written after
-// it -- regenerate rather than diff.
+// This REPLACES the Table 4.5 layout (reserved bit, Ex/Ey overflow flags at [58]/[59],
+// 6-bit phi at [18:13]). Every field but ET_miss has moved -- regenerate
+// rather than diff. Ex/Ey still saturate at +-4095; their overflow conditions are no longer
+// in the word and survive only as diagnostics in the validation ntuple and log.
 //
-// Ex/Ey encoding. These fields are TWO'S COMPLEMENT (metTobTwosComplementEt). They were
-// sign-magnitude, matching ex_sign_magnitude / ey_sign_magnitude in MET_Engine.v; the
-// format is moving to two's complement and this path has been switched ahead of the
-// firmware, so until MET_Engine.v follows, Ex/Ey on negative components will not match an
-// RTL sim built from the current Verilog. Every other field, and all five flags, are
-// unchanged -- the saturation range is kept at +-4095 precisely so the overflow flags mean
-// the same thing in both encodings. A .dat written before this change differs only in
-// the Ex/Ey fields of events with a negative component -- regenerate rather than diff.
-//
-// phi. It was once a reserved zero field because there was no bitwise phi to put in it.
-// metPhiIndex() is a port of MET_PHI_COMPARATOR.v and phi_miss is now a real field.
-//
-// Saturation, not masking. The three magnitude fields clamp at their maxima and raise the
-// matching flag, which is what metTobTwosComplementEt / metTobSumEt / metIntegerRoot do. The old
-// pack_signed_et masked instead, so an out-of-range component wrapped to near zero with
-// nothing to say it had.
+// Saturation, not masking. The magnitude fields clamp at their maxima, which is what
+// metTobTwosComplementEt / metTobSumEt / metIntegerRoot do; pack_signed_et masks instead.
 constexpr unsigned int met_tob_et_missing_width_        = et_bit_length_;        // 13
-constexpr unsigned int met_tob_phi_missing_width_       = met_phi_bit_length_;   // 6
+constexpr unsigned int met_tob_phi_missing_padding_     = 3;                     // zero LSBs below phi6
+constexpr unsigned int met_tob_phi_missing_width_       = met_phi_bit_length_ + met_tob_phi_missing_padding_; // 9
 constexpr unsigned int met_tob_ex_total_width_          = signed_et_bit_length_; // 13
 constexpr unsigned int met_tob_ey_total_width_          = signed_et_bit_length_; // 13
 constexpr unsigned int met_tob_sum_et_width_            = et_bit_length_;        // 13
 constexpr unsigned int met_tob_flag_width_              = 1;
-constexpr unsigned int met_tob_reserved_width_          = 1;
 
 constexpr unsigned int met_tob_et_missing_low_          = 0;
 constexpr unsigned int met_tob_phi_missing_low_         = met_tob_et_missing_low_        + met_tob_et_missing_width_;   // 13
-constexpr unsigned int met_tob_ex_total_low_            = met_tob_phi_missing_low_       + met_tob_phi_missing_width_;  // 19
-constexpr unsigned int met_tob_ey_total_low_            = met_tob_ex_total_low_          + met_tob_ex_total_width_;     // 32
-constexpr unsigned int met_tob_sum_et_low_              = met_tob_ey_total_low_          + met_tob_ey_total_width_;     // 45
-constexpr unsigned int met_tob_ex_overflow_low_         = met_tob_sum_et_low_            + met_tob_sum_et_width_;       // 58
-constexpr unsigned int met_tob_ey_overflow_low_         = met_tob_ex_overflow_low_       + met_tob_flag_width_;         // 59
-constexpr unsigned int met_tob_sum_et_overflow_low_     = met_tob_ey_overflow_low_       + met_tob_flag_width_;         // 60
-constexpr unsigned int met_tob_met_overflow_low_        = met_tob_sum_et_overflow_low_   + met_tob_flag_width_;         // 61
+constexpr unsigned int met_tob_ex_total_low_            = met_tob_phi_missing_low_       + met_tob_phi_missing_width_;  // 22
+constexpr unsigned int met_tob_ey_total_low_            = met_tob_ex_total_low_          + met_tob_ex_total_width_;     // 35
+constexpr unsigned int met_tob_sum_et_low_              = met_tob_ey_total_low_          + met_tob_ey_total_width_;     // 48
+constexpr unsigned int met_tob_met_overflow_low_        = met_tob_sum_et_low_            + met_tob_sum_et_width_;       // 61
 constexpr unsigned int met_tob_upstream_overflow_low_   = met_tob_met_overflow_low_      + met_tob_flag_width_;         // 62
-constexpr unsigned int met_tob_reserved_low_            = met_tob_upstream_overflow_low_ + met_tob_flag_width_;         // 63
-constexpr unsigned int met_tob_total_bits_              = met_tob_reserved_low_          + met_tob_reserved_width_;
+constexpr unsigned int met_tob_sum_et_overflow_low_     = met_tob_upstream_overflow_low_ + met_tob_flag_width_;         // 63
+constexpr unsigned int met_tob_total_bits_              = met_tob_sum_et_overflow_low_   + met_tob_flag_width_;
 static_assert(met_tob_total_bits_ == 64, "MET TOB output word must be exactly 64 bits");
 static_assert(met_tob_et_missing_low_ == 0 && met_tob_phi_missing_low_ == 13 &&
-              met_tob_ex_total_low_   == 19 && met_tob_ey_total_low_   == 32 &&
-              met_tob_sum_et_low_     == 45 && met_tob_ex_overflow_low_ == 58,
-              "MET TOB field offsets must match Table 4.5");
+              met_tob_ex_total_low_   == 22 && met_tob_ey_total_low_   == 35 &&
+              met_tob_sum_et_low_     == 48 && met_tob_met_overflow_low_ == 61 &&
+              met_tob_upstream_overflow_low_ == 62 && met_tob_sum_et_overflow_low_ == 63,
+              "MET TOB field offsets must match the TOB format");
 
 // One object as it appears in a memory-print line: already-digitized codes.
 struct MemPrintObject {
@@ -810,6 +794,17 @@ struct MemPrintObject {
     unsigned int eta = 0;
     unsigned int et  = 0;
 };
+
+// Jet memory prints carry jet TOB codes when input jets do; decode them to the tower grid sinLUT_ indexes
+inline std::vector<std::vector<MemPrintObject>> jetMemPrintsToTowerGrid(std::vector<std::vector<MemPrintObject>> events) {
+    if (!input_jets_use_jet_tob_encoding_) return events;
+    for (auto& event : events)
+        for (auto& jet : event) {
+            jet.eta = jet_eta_to_tower_index(jet.eta);
+            jet.phi = jet_phi_to_tower_index(jet.phi);
+        }
+    return events;
+}
 
 // Read a whole memory-print file into a per-event list of objects.
 //
@@ -962,9 +957,8 @@ inline MetTermDigitized combineMetTerms(const MetTermDigitized& towerTerm,
     return total;
 }
 
-// Write one memory-print line: index, the eleven binary fields of the TOB word in
-// Table 4.5 order, and the packed hex word. Every field is emitted in the binary column,
-// including the reserved bit, so a line reads the same way as the firmware word.
+// Write one memory-print line: index, the eight binary fields of the TOB word in
+// MSB -> LSB order, and the packed hex word.
 //
 // The flags are computed HERE, at packing time, rather than carried in from the
 // arithmetic: overflow is a property of the output field, so the term keeps full-width
@@ -973,26 +967,20 @@ inline MetTermDigitized combineMetTerms(const MetTermDigitized& towerTerm,
 // path, and inputSaturated, which is a fact about the inputs the packer cannot see.
 inline void writeMetBaselineLine(std::ofstream& outFile, unsigned int index,
                                  const MetTermDigitized& term) {
-    bool exOverflow = false, eyOverflow = false, sumEtOverflow = false;
+    bool exOverflow = false, eyOverflow = false, sumEtOverflow = false; // Ex/Ey flags not in the word
     const uint64_t exPacked      = metTobTwosComplementEt(term.metX, exOverflow);
     const uint64_t eyPacked      = metTobTwosComplementEt(term.metY, eyOverflow);
     const uint64_t sumEtPacked   = metTobSumEt(term.sumEt, sumEtOverflow);
     const uint64_t etMissingBits = static_cast<uint64_t>(term.met & maskN(met_tob_et_missing_width_));
-    const uint64_t phiMissBits   = static_cast<uint64_t>(term.phi & maskN(met_tob_phi_missing_width_));
+    const uint64_t phiMissBits   = static_cast<uint64_t>(term.phi & maskN(met_phi_bit_length_)) << met_tob_phi_missing_padding_;
 
-    const uint64_t reservedBit          = 0;
+    const uint64_t sumEtOverflowBit     = sumEtOverflow       ? 1ull : 0ull;
     const uint64_t upstreamOverflowBit  = term.inputSaturated ? 1ull : 0ull;
     const uint64_t metOverflowBit       = term.metOverflow    ? 1ull : 0ull;
-    const uint64_t sumEtOverflowBit     = sumEtOverflow       ? 1ull : 0ull;
-    const uint64_t eyOverflowBit        = eyOverflow          ? 1ull : 0ull;
-    const uint64_t exOverflowBit        = exOverflow          ? 1ull : 0ull;
 
-    std::bitset<met_tob_reserved_width_>    reserved_bitset(reservedBit);
+    std::bitset<met_tob_flag_width_>        sum_et_overflow_bitset(sumEtOverflowBit);
     std::bitset<met_tob_flag_width_>        upstream_overflow_bitset(upstreamOverflowBit);
     std::bitset<met_tob_flag_width_>        met_overflow_bitset(metOverflowBit);
-    std::bitset<met_tob_flag_width_>        sum_et_overflow_bitset(sumEtOverflowBit);
-    std::bitset<met_tob_flag_width_>        ey_overflow_bitset(eyOverflowBit);
-    std::bitset<met_tob_flag_width_>        ex_overflow_bitset(exOverflowBit);
     std::bitset<met_tob_sum_et_width_>      sum_et_bitset(sumEtPacked);
     std::bitset<met_tob_ey_total_width_>    ey_total_bitset(eyPacked);
     std::bitset<met_tob_ex_total_width_>    ex_total_bitset(exPacked);
@@ -1000,12 +988,9 @@ inline void writeMetBaselineLine(std::ofstream& outFile, unsigned int index,
     std::bitset<met_tob_et_missing_width_>  et_missing_bitset(etMissingBits);
 
     const uint64_t combined_value =
-        (reservedBit         << met_tob_reserved_low_)          |
+        (sumEtOverflowBit    << met_tob_sum_et_overflow_low_)   |
         (upstreamOverflowBit << met_tob_upstream_overflow_low_) |
         (metOverflowBit      << met_tob_met_overflow_low_)      |
-        (sumEtOverflowBit    << met_tob_sum_et_overflow_low_)   |
-        (eyOverflowBit       << met_tob_ey_overflow_low_)       |
-        (exOverflowBit       << met_tob_ex_overflow_low_)       |
         (sumEtPacked         << met_tob_sum_et_low_)            |
         (eyPacked            << met_tob_ey_total_low_)          |
         (exPacked            << met_tob_ex_total_low_)          |
@@ -1016,12 +1001,9 @@ inline void writeMetBaselineLine(std::ofstream& outFile, unsigned int index,
     hex_stream << std::hex << std::nouppercase << std::setfill('0') << std::setw(met_tob_total_bits_ / 4) << combined_value;
 
     outFile << "0x" << std::hex << std::setw(2) << std::setfill('0') << index << std::dec << std::setfill(' ')
-            << " " << reserved_bitset.to_string()
+            << " " << sum_et_overflow_bitset.to_string()
             << "|" << upstream_overflow_bitset.to_string()
             << "|" << met_overflow_bitset.to_string()
-            << "|" << sum_et_overflow_bitset.to_string()
-            << "|" << ey_overflow_bitset.to_string()
-            << "|" << ex_overflow_bitset.to_string()
             << "|" << sum_et_bitset.to_string()
             << "|" << ey_total_bitset.to_string()
             << "|" << ex_total_bitset.to_string()
@@ -1059,7 +1041,7 @@ struct MetBaselineNtupleTerm {
     double metGeV   = 0.0;
     double sumEtGeV = 0.0;
     double phiRad   = 0.0;   // bin center, folded into (-pi, pi]
-    // TOB bits [58] through [62].
+    // Overflow flags; Ex/Ey ones are diagnostics only, the TOB carries SumET [63], upstream [62], MET [61].
     bool exOverflow       = false;
     bool eyOverflow       = false;
     bool sumEtOverflow    = false;
@@ -1100,7 +1082,7 @@ struct MetBaselineNtupleTerm {
         ey = metTobTwosComplementToInt(eyPacked);
 
         met      = term.met;
-        phiIndex = term.phi;
+        phiIndex = term.phi; // 6-bit comparator index; the TOB field is phiIndex << met_tob_phi_missing_padding_
         sumEt    = sumEtPacked;
 
         exGeV    = ex    * et_granularity_;
@@ -1161,7 +1143,7 @@ void metBaselineValidation(bool signalBool = true,          // true = signal sam
     std::cout << "ntuple output:      " << ntupleFile      << "\n";
 
     std::vector<std::vector<MemPrintObject>> towerEvents = readMemPrintFile(towerFile);
-    std::vector<std::vector<MemPrintObject>> jetEvents   = readMemPrintFile(jetFile);
+    std::vector<std::vector<MemPrintObject>> jetEvents   = jetMemPrintsToTowerGrid(readMemPrintFile(jetFile));
 
     if (towerEvents.empty() || jetEvents.empty()) {
         std::cerr << "Error: no events read, nothing written" << std::endl;
@@ -1536,7 +1518,7 @@ inline int findEtForMetComponent(unsigned int phi, bool xComponent, int target) 
 
 // Towers only, one MET component landing EXACTLY on target.
 //
-// No phi code sits on an axis -- code k is the centre of tower k, so code 0 is -pi + pi/64
+// No phi code sits on an axis -- code k is the centre of tower k, so code 0 is pi/64
 // -- so a lone object would also carry ~5% of its E_T in the other component. Instead the
 // event is a pair straddling the axis: mirror images in the other component, which then
 // cancels to zero or a count or two. MET is minus the vector sum, so a positive MET
@@ -1545,12 +1527,12 @@ inline MetValidationEvent makeComponentBoundaryEvent(bool xComponent, int target
     unsigned int phiA = 0, phiB = 0;
     if (xComponent) {
         // +Ex: objects straddling phi = pi; -Ex: straddling phi = 0.
-        phiA = (target > 0) ? phi_range_ - 1          : pi_digitized_in_phi_ - 1;
-        phiB = (target > 0) ? 0                        : pi_digitized_in_phi_;
+        phiA = (target > 0) ? pi_digitized_in_phi_ - 1 : phi_range_ - 1;
+        phiB = (target > 0) ? pi_digitized_in_phi_     : 0;
     } else {
         // +Ey: objects straddling phi = -pi/2; -Ey: straddling phi = +pi/2.
-        phiA = (target > 0) ? half_pi_digitized_in_phi_ - 1 : pi_digitized_in_phi_ + half_pi_digitized_in_phi_ - 1;
-        phiB = (target > 0) ? half_pi_digitized_in_phi_     : pi_digitized_in_phi_ + half_pi_digitized_in_phi_;
+        phiA = (target > 0) ? pi_digitized_in_phi_ + half_pi_digitized_in_phi_ - 1 : half_pi_digitized_in_phi_ - 1;
+        phiB = (target > 0) ? pi_digitized_in_phi_ + half_pi_digitized_in_phi_     : half_pi_digitized_in_phi_;
     }
 
     const int half = target / 2;
@@ -1587,15 +1569,15 @@ inline std::vector<MetValidationEvent> makeMetEdgeCaseEvents() {
 
     // Phi codes used below. Code k and k + pi_digitized_in_phi_ are exactly back-to-back,
     // so equal-E_T pairs on them cancel in both components.
-    const unsigned int phiDiag     = half_pi_digitized_in_phi_ / 2;                      //  8, ~ -3pi/4
-    const unsigned int phiDiagOpp  = phiDiag + pi_digitized_in_phi_;                     // 40, ~ +pi/4
-    const unsigned int phiZeroLow  = pi_digitized_in_phi_ - 1;                           // 31, -pi/64
-    const unsigned int phiZeroHigh = pi_digitized_in_phi_;                               // 32, +pi/64
-    const unsigned int phiPiLow    = phi_range_ - 1;                                     // 63, pi - pi/64
-    const unsigned int phiPiHigh   = 0;                                                  //  0, -pi + pi/64
+    const unsigned int phiDiag     = pi_digitized_in_phi_ + half_pi_digitized_in_phi_ / 2; // 40, ~ -3pi/4
+    const unsigned int phiDiagOpp  = half_pi_digitized_in_phi_ / 2;                        //  8, ~ +pi/4
+    const unsigned int phiZeroLow  = phi_range_ - 1;                                       // 63, -pi/64
+    const unsigned int phiZeroHigh = 0;                                                    //  0, +pi/64
+    const unsigned int phiPiLow    = pi_digitized_in_phi_ - 1;                             // 31, pi - pi/64
+    const unsigned int phiPiHigh   = pi_digitized_in_phi_;                                 // 32, -pi + pi/64
     // Codes straddling +pi/4. Objects here put MET near -3pi/4 with |Ex| ~= |Ey|.
-    const unsigned int phiQuarterLow  = pi_digitized_in_phi_ + half_pi_digitized_in_phi_ / 2 - 1; // 39
-    const unsigned int phiQuarterHigh = pi_digitized_in_phi_ + half_pi_digitized_in_phi_ / 2;     // 40
+    const unsigned int phiQuarterLow  = half_pi_digitized_in_phi_ / 2 - 1; //  7
+    const unsigned int phiQuarterHigh = half_pi_digitized_in_phi_ / 2;     //  8
 
     // --- all zero ---
     {
@@ -1881,14 +1863,21 @@ void metRandomValidation(unsigned int seed = 12345,          // TRandom3 seed; m
             jetInFile   << "Event : " << std::dec << iEvt << std::endl;
             for (unsigned int iObject = 0; iObject < events.at(iEvt).towers.size(); iObject++)
                 writeMemPrintObjectLine(towerInFile, iObject, events.at(iEvt).towers.at(iObject));
-            for (unsigned int iObject = 0; iObject < events.at(iEvt).jets.size(); iObject++)
-                writeMemPrintObjectLine(jetInFile, iObject, events.at(iEvt).jets.at(iObject));
+            // Jets are generated on the tower grid; written as jet TOB codes if input jets carry them
+            for (unsigned int iObject = 0; iObject < events.at(iEvt).jets.size(); iObject++) {
+                MemPrintObject jet = events.at(iEvt).jets.at(iObject);
+                if (input_jets_use_jet_tob_encoding_) {
+                    jet.eta = tower_index_to_jet_eta(jet.eta);
+                    jet.phi = tower_index_to_jet_phi(jet.phi);
+                }
+                writeMemPrintObjectLine(jetInFile, iObject, jet);
+            }
         }
     }
 
     // --- read them back: the outputs are computed from the files, not from memory ---
     const std::vector<std::vector<MemPrintObject>> towerEvents = readMemPrintFileWithOverflow(towerInputFile);
-    const std::vector<std::vector<MemPrintObject>> jetEvents   = readMemPrintFileWithOverflow(jetInputFile);
+    const std::vector<std::vector<MemPrintObject>> jetEvents   = jetMemPrintsToTowerGrid(readMemPrintFileWithOverflow(jetInputFile));
     if (towerEvents.size() != nEvents || jetEvents.size() != nEvents) {
         std::cerr << "Error: wrote " << nEvents << " events but read back " << towerEvents.size()
                   << " tower / " << jetEvents.size() << " jet events; nothing else written" << std::endl;

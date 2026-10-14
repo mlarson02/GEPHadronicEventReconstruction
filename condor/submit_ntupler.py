@@ -58,7 +58,9 @@ SIGNAL_STRINGS = {
     # Z -> mu mu: mc21_14TeV.601190.PhPy8EG_AZNLO_Zmumu.recon.AOD.e8557_s4422_r16130
     "Zmumu",
     # Stau-Stau LLP (10 ns): mc21_14TeV.516672.MGPy8EG_A14NNPDF23LO_StauStauLLP_500_0_10ns.recon.AOD.e8557_s4422_r16130
-    #"StauStauLLP_500_0_10ns",
+    "StauStauLLP_500_0_10ns",
+    # VBF H -> ZZ -> 4nu: mc21_14TeV.602765.PhPy8EG_A14NN23LO_13p6_VBFH_m125_ZZ4nu_Filt_MET75.recon.AOD.e8557_s4422_r16130
+    "VBF_H_ZZ4nu",
 }
 
 _JOB_NUM_RE = re.compile(r'\.?_([\d]{5,6})\.')
@@ -168,10 +170,11 @@ def main():
                         help="specialJZ0=true: the noHSTP JZ0 background variant")
     parser.add_argument("--algo", type=int, required=True, choices=[2, 3, 4], metavar="VERSION",
                         help="Algorithm version (2 or 3)")
-    parser.add_argument("--pu", type=int, default=200, choices=[140, 200], metavar="PILEUP",
+    parser.add_argument("--pu", type=int, default=200, choices=[0, 140, 200], metavar="PILEUP",
                         help="Pileup scenario; selects the reweighting constants in HERNTupler "
                              "(default: 200). Point --daod-dir/--gep-dir/--output-dir at the "
-                             "_PU140 mirrors when using --pu 140.")
+                             "_PU140 mirrors when using --pu 140. --pu 0 (submit_ttbar_semilep_only.sh) "
+                             "only tags the label; HERNTupler falls back to the PU200 constants/name.")
     parser.add_argument("--daod-dir", required=True, metavar="DIR",
                         help="Directory containing DAOD_JETM42 *.pool.root files")
     parser.add_argument("--gep-dir", required=True, metavar="DIR",

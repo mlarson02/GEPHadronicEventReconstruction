@@ -25,9 +25,15 @@ constexpr double eta_granularity_ = 0.1;
 constexpr double eta_min_ = -4.85;
 constexpr double eta_max_ = 4.950000000000001;
 constexpr double phi_granularity_ = 0.09817477042468103;
-constexpr double phi_min_ = -3.0925052683774528;
-constexpr double phi_max_ = 3.1906800388021335;
+constexpr double phi_min_ = 0.04908738521234052;
+constexpr double phi_max_ = 6.332272692391927;
 constexpr unsigned int pi_digitized_in_phi_ = 32;
+constexpr unsigned int jet_eta_bit_length_ = 10;
+constexpr double jet_eta_granularity_ = 0.0125;
+constexpr unsigned int jet_to_tower_eta_shift_ = 3;
+constexpr unsigned int jet_phi_bit_length_ = 9;
+constexpr unsigned int jet_to_tower_phi_shift_ = 3;
+#define input_jets_use_jet_tob_encoding_ false
 constexpr unsigned int et_min_ = 0;
 constexpr unsigned int et_max_ = 2048;
 
@@ -44,10 +50,14 @@ constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + num_subjets_
 typedef ap_uint<total_bits_input_> input; // need 32b input, 64b output!
 typedef ap_uint<total_bits_output_> output;
 
+// Tower words carry tower-grid eta/phi indices padded by eta/phi_bits_padding_; seed (jet) words carry the
+// same, or full jet TOB codes if input_jets_use_jet_tob_encoding_, reduced to tower-grid indices before any arithmetic.
 constexpr unsigned int eta_bits_padding_ = 3;
 constexpr unsigned int phi_bits_padding_ = 3;
+static_assert(jet_eta_bit_length_ == eta_bit_length_, "jet eta code must fill the TOB eta field");
+static_assert(jet_phi_bit_length_ == phi_bit_length_, "jet phi code must fill the TOB phi field");
 
-// Widths of the eta/phi codes themselves, as opposed to the padded TOB fields they ship in.
+// Widths of the tower-grid eta index and the phi code, as opposed to the TOB fields they ship in.
 // Size ALL arithmetic from these, never from *_bit_length_: the padding carries no information
 // and only inflates the multipliers, adders and comparators downstream.
 constexpr unsigned int eta_code_bits_ = eta_bit_length_ - eta_bits_padding_; // spans eta_range_

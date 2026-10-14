@@ -66,6 +66,7 @@ trap "rm -rf '$JOBDIR'" EXIT
 
 cp "$EMUL_DIR/metEmulation.cc"                "$JOBDIR/"
 cp "$EMUL_DIR/emulationHelperFunctions_MET.h" "$JOBDIR/"
+cp "$EMUL_DIR/jetTOBEncoding.h"               "$JOBDIR/"
 cp -r "$EMUL_DIR/metConstants"                "$JOBDIR/"
 
 cd "$JOBDIR"

@@ -5,9 +5,10 @@
 #include <iostream>
 #include <cmath>
 #include "UsedConstantsLUTs/constants.h"
+#include "jetTOBEncoding.h"
 
 inline double undigitize_phi(const std::bitset<phi_bit_length_>& phi_bits) { // FIXME these functions should be templated instead of having 4 copies..
-    return phi_min_ + phi_bits.to_ulong() * phi_granularity_;
+    return wrap_phi_pm_pi(phi_min_ + phi_bits.to_ulong() * phi_granularity_); // codes from phi = 0, physical phi in (-pi, pi]
 }
 
 inline double undigitize_eta(const std::bitset<eta_bit_length_>& eta_bits) {
@@ -75,9 +76,8 @@ inline unsigned int calcLutIndex(unsigned int uDeltaEta, unsigned int uDeltaPhi)
 //
 // Kept separate from digitize() because phi is periodic while eta/Et are not:
 // the generic function saturates at range - 1, which is wrong at both ends of
-// the phi axis. A value in the top half tower (phi within pi/64 of +pi) belongs
-// in code 0, not in a code one past the end of the range -- which would not even
-// fit the 6-bit v3 field. The code count is phi_range_ rather than
+// the phi axis. Codes count from phi = 0 (index 0 = [0, pi/32)), so a negative
+// phi wraps to the top of the range rather than clamping to code 0. The code count is phi_range_ rather than
 // 1 << phi_bit_length_ so that the wider v2 phi field keeps the same pi/32
 // granularity and the same dynamic range, with its top 3 bits left as padding.
 inline unsigned int digitize_phi(double phi) {
@@ -422,16 +422,17 @@ void write_constants_header(const std::string& header_path,
     // eta_range_ / phi_range_, never from eta_bit_length_ / phi_bit_length_; the
     // unused high bits of the wider v2 fields are zero padding.
     // eta_min_ / phi_min_ are the first tower centre and *_max_ one LSB past the
-    // last, matching Athena's CaloTowerContainer::configureGrid(98,-4.9,4.9,64),
+    // last, on the tower centres of Athena's CaloTowerContainer::configureGrid(98,-4.9,4.9,64),
     // so a tower centre digitizes to an integer code with no round-half tie and
-    // undigitize_eta / undigitize_phi return the centre it came from.
+    // undigitize_eta / undigitize_phi return the centre it came from. Phi codes
+    // count from phi = 0 (index 0 = [0, pi/32)); undigitized phi is wrapped to (-pi, pi].
     out << "constexpr unsigned int eta_range_ = " << eta_range_ << ";\n";
     out << "constexpr unsigned int phi_range_ = " << phi_range_ << ";\n";
     out << "constexpr double eta_granularity_ = 0.1;\n";
     out << "constexpr double eta_min_ = -4.85;\n";
     out << "constexpr double eta_max_ = eta_min_ + eta_range_ * eta_granularity_;\n";
     out << "constexpr double phi_granularity_ = (2 * M_PI) / double(phi_range_);\n"; // pi/32
-    out << "constexpr double phi_min_ = -M_PI + phi_granularity_ / 2;\n";
+    out << "constexpr double phi_min_ = phi_granularity_ / 2;\n"; // phi index 0 = [0, pi/32)
     out << "constexpr double phi_max_ = phi_min_ + phi_range_ * phi_granularity_;\n";
     out << "constexpr unsigned int pi_digitized_in_phi_ = phi_range_ / 2;\n"; // 32
     out << "const int PI_D     =  int(pi_digitized_in_phi_);\n"; // 32

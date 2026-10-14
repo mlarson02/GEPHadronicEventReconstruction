@@ -31,9 +31,18 @@ void jet_tag(input inputObjectValues[maxObjectsConsidered_], output (&outputJetV
     
     for (unsigned int iSeed = 0; iSeed < nSeedsOutput_; ++iSeed){ // Loop through seeds (which access up to Nth element of input object values now)
         #pragma HLS unroll
-        ap_uint<eta_code_bits_> seedEta = inputObjectValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_);
-        ap_uint<phi_code_bits_> seedPhi = inputObjectValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_);
+        // Tower-grid indices for deltaR, from either input jet encoding
+        ap_uint<eta_bit_length_> seedEtaField = inputObjectValues[iSeed].range(eta_high_, eta_low_);
+        ap_uint<phi_bit_length_> seedPhiField = inputObjectValues[iSeed].range(phi_high_, phi_low_);
+        ap_uint<eta_code_bits_> seedEta = inputJetEtaIndex(seedEtaField);
+        ap_uint<phi_code_bits_> seedPhi = inputJetPhiIndex(seedPhiField);
         ap_uint<et_bit_length_ > outputJetEt = inputObjectValues[iSeed].range(et_high_, et_low_);
+        // Jet TOB codes out: the seed's own if input jets carry them, else its tower's; an empty seed stays zero
+        const bool seedEmpty = (outputJetEt == 0);
+        ap_uint<jet_eta_bit_length_> seedJetEta = input_jets_use_jet_tob_encoding_ ? ap_uint<jet_eta_bit_length_>(seedEtaField)
+                                                : seedEmpty ? ap_uint<jet_eta_bit_length_>(0) : towerIndexToJetEta(seedEta);
+        ap_uint<jet_phi_bit_length_> seedJetPhi = input_jets_use_jet_tob_encoding_ ? ap_uint<jet_phi_bit_length_>(seedPhiField)
+                                                : seedEmpty ? ap_uint<jet_phi_bit_length_>(0) : towerIndexToJetPhi(seedPhi);
         //std::cout << "inputObjectValues[iSeed]: " << inputObjectValues[iSeed] << "\n";
         //std::cout << "et_high_: " << et_high_ << " , et_low_: " << et_low_ << "\n";
         //std::cout << "outputJetet: " << outputJetEt << "\n";
@@ -61,8 +70,8 @@ void jet_tag(input inputObjectValues[maxObjectsConsidered_], output (&outputJetV
             if (iInput < nSeedsOutput_){
                 etTree[iInput] = 0;
             } else {
-                ap_uint<eta_code_bits_> inputEta = inputObjectValues[iInput].range(eta_high_ - eta_bits_padding_, eta_low_);
-                ap_uint<phi_code_bits_> inputPhi = inputObjectValues[iInput].range(phi_high_ - phi_bits_padding_, phi_low_);
+                ap_uint<eta_code_bits_> inputEta = inputJetEtaIndex(inputObjectValues[iInput].range(eta_high_, eta_low_));
+                ap_uint<phi_code_bits_> inputPhi = inputJetPhiIndex(inputObjectValues[iInput].range(phi_high_, phi_low_));
                 ap_uint<et_bit_length_ > inputEt = inputObjectValues[iInput].range(et_high_, et_low_);
                 ap_uint<2*eta_code_bits_ + 1> deltaR2 = calcDeltaR2(seedEta, seedPhi, inputEta, inputPhi);
                 etTree[iInput] = (deltaR2 <= digitized_delta_R2_)
@@ -86,8 +95,8 @@ void jet_tag(input inputObjectValues[maxObjectsConsidered_], output (&outputJetV
         //std::cout << "final outputJetEt: " << outputJetEt << "\n";
         outputJetValues[iSeed].range(padded_zeroes_high_, padded_zeroes_low_) = 0; 
         outputJetValues[iSeed].range(et_high_, et_low_) = outputJetEt;
-        outputJetValues[iSeed].range(eta_high_, eta_low_) = seedEta;
-        outputJetValues[iSeed].range(phi_high_, phi_low_) = seedPhi;
+        outputJetValues[iSeed].range(eta_high_, eta_low_) = seedJetEta;
+        outputJetValues[iSeed].range(phi_high_, phi_low_) = seedJetPhi;
     }
 }
 
@@ -133,21 +142,28 @@ void jet_tag(hls::stream<input_t>  &in,
     for (unsigned int iSeed = 0; iSeed < nSeedsOutput_; ++iSeed) {
 #pragma HLS UNROLL
 
-        ap_uint<eta_bit_length_> seedEta =
+        ap_uint<eta_bit_length_> seedEtaField =
             inputObjectValues[iSeed].range(eta_high_, eta_low_);
-        ap_uint<phi_bit_length_> seedPhi =
+        ap_uint<phi_bit_length_> seedPhiField =
             inputObjectValues[iSeed].range(phi_high_, phi_low_);
+        ap_uint<eta_bit_length_> seedEta = inputJetEtaIndex(seedEtaField);
+        ap_uint<phi_bit_length_> seedPhi = inputJetPhiIndex(seedPhiField);
         ap_uint<et_bit_length_> outputJetEt =
             inputObjectValues[iSeed].range(et_high_, et_low_);
+        const bool seedEmpty = (outputJetEt == 0);
+        ap_uint<jet_eta_bit_length_> seedJetEta = input_jets_use_jet_tob_encoding_ ? ap_uint<jet_eta_bit_length_>(seedEtaField)
+                                                : seedEmpty ? ap_uint<jet_eta_bit_length_>(0) : towerIndexToJetEta(seedEta);
+        ap_uint<jet_phi_bit_length_> seedJetPhi = input_jets_use_jet_tob_encoding_ ? ap_uint<jet_phi_bit_length_>(seedPhiField)
+                                                : seedEmpty ? ap_uint<jet_phi_bit_length_>(0) : towerIndexToJetPhi(seedPhi);
 
         INPUTS:
         for (unsigned int iInput = nSeedsOutput_; iInput < maxObjectsConsidered_; ++iInput) {
 #pragma HLS UNROLL
 
             ap_uint<eta_bit_length_> inputEta =
-                inputObjectValues[iInput].range(eta_high_, eta_low_);
+                inputJetEtaIndex(inputObjectValues[iInput].range(eta_high_, eta_low_));
             ap_uint<phi_bit_length_> inputPhi =
-                inputObjectValues[iInput].range(phi_high_, phi_low_);
+                inputJetPhiIndex(inputObjectValues[iInput].range(phi_high_, phi_low_));
             ap_uint<et_bit_length_> inputEt =
                 inputObjectValues[iInput].range(et_high_, et_low_);
 
@@ -189,8 +205,8 @@ void jet_tag(hls::stream<input_t>  &in,
 
         outputJetValues[iSeed].range(padded_zeroes_high_, padded_zeroes_low_) = 0;
         outputJetValues[iSeed].range(et_high_, et_low_) = outputJetEt;
-        outputJetValues[iSeed].range(eta_high_, eta_low_) = seedEta;
-        outputJetValues[iSeed].range(phi_high_, phi_low_) = seedPhi;
+        outputJetValues[iSeed].range(eta_high_, eta_low_) = seedJetEta;
+        outputJetValues[iSeed].range(phi_high_, phi_low_) = seedJetPhi;
     }
 
     WRITE_OUT:

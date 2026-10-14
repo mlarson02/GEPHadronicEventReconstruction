@@ -7,6 +7,7 @@
 #include <cstdlib>  // std::llabs, used by the MET TOB encoders below
 #include <vector>   // for the GEP JwoJ per-eta-bin parameter table
 #include "metConstants/constants.h"
+#include "jetTOBEncoding.h"
 
 // Wrap unsigned phi index into [0, two_pi_digitized_in_phi_]
 inline unsigned int wrapPhiUnsigned(unsigned int phi) {
@@ -40,9 +41,8 @@ inline unsigned int digitizedDeltaR2(unsigned int eta1, unsigned int phi1, unsig
 //
 // Kept separate from digitize() because phi is periodic while eta/Et are not:
 // the generic function saturates at range - 1, which is wrong at both ends of
-// the phi axis. A value in the top half tower (phi within pi/64 of +pi) belongs
-// in code 0, not in a code one past the end of the range -- which would not even
-// fit the phi field. The code count is phi_range_ rather than
+// the phi axis. Codes count from phi = 0 (index 0 = [0, pi/32)), so a negative
+// phi wraps to the top of the range rather than clamping to code 0. The code count is phi_range_ rather than
 // 1 << phi_bit_length_ so the grid stays tied to the towers, not to the field
 // width. Same definition as the jet tagger chain in emulationHelperFunctions.h.
 inline unsigned int digitize_phi(double phi) {
@@ -81,9 +81,12 @@ std::string makeInputFileName(bool signalBool, std::string signalString,
         else if (signalString == "ZvvHbb") ss << inputRootFilePath << "ZvvHbb_v3/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_resim_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ttbar_had") ss << inputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "Zprime_ttbar") ss << inputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "ttbar_allhad") ss << inputRootFilePath << "ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ttbar_semilep") ss << inputRootFilePath << "ttbar_semilep_v4/mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "ttbar_dilep") ss << inputRootFilePath << "ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
         else if (signalString == "Zmumu") ss << inputRootFilePath << "Zmumu_v4/mc21_14TeV_Zmumu_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "VBF_H_ZZ4nu") ss << inputRootFilePath << "VBF_H_ZZ4nu_v4/mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+        else if (signalString == "StauStauLLP_500_0_10ns") ss << inputRootFilePath << "StauStau_v4/mc21_14TeV_StauStauLLP_500_0_10ns_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     } else {
         ss << inputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     }
@@ -277,7 +280,7 @@ inline double undigitize_et(const std::bitset<et_bit_length_>& et_bits) {
 //
 //     bin 0 = +x,  bin 16 = +y,  bin 32 = -x,  bin 48 = -y
 //
-// whereas digitize_phi() puts index 0 at phi_min_ = -pi + pi/64. A MET phi index must
+// whereas digitize_phi() puts index 0 on the tower [0, pi/32), centred at phi_min_ = pi/64. A MET phi index must
 // never be fed to digitize_phi's inverse, nor to sinLUT_, nor compared against a tower's
 // phi index. The zero vector maps to bin 0, and undigitize_met_phi() below is the only
 // inverse.
@@ -296,7 +299,7 @@ inline double undigitize_et(const std::bitset<et_bit_length_>& et_bits) {
 // is expected to change, so nothing may hard-code 64 or the eight constants.
 //
 // At the Table 4.5 width of 6 bits this happens to be 64 bins, coinciding numerically
-// with the tower count. That is a coincidence and not a relationship: the origins differ
+// with the tower count. That is a coincidence and not a relationship: the bin edges differ
 // too, and at any other width so do the bin counts.
 constexpr unsigned int met_phi_bit_length_ = 6;                         // TOB phi_miss field width
 constexpr unsigned int met_phi_range_      = 1u << met_phi_bit_length_; // bins spanning [0, 2*pi)
@@ -512,6 +515,7 @@ inline unsigned int metTobSignedEt(int value, bool& overflow) {
     return (sign << met_tob_signed_mag_bit_length_) | magOut;
 }
 
+
 // 13-bit two's complement, saturating SYMMETRICALLY at +-4095 (0x0fff / 0x1001).
 //
 // This is the encoding the MET TOB Ex/Ey fields are moving to; MET_Engine.v still builds
@@ -605,9 +609,12 @@ std::string makeOutputMETFileName(unsigned int maxTowersProcessed,
         else if (signalString == "ZvvHbb")            ss << outputRootFilePath << "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_";
         else if (signalString == "ttbar_had")         ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_";
         else if (signalString == "Zprime_ttbar")      ss << outputRootFilePath << "mc21_14TeV_flatpT_Zprime_tthad_e8557_s4422_r16130_";
+        else if (signalString == "ttbar_allhad")      ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_";
         else if (signalString == "ttbar_semilep")     ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_";
         else if (signalString == "ttbar_dilep")       ss << outputRootFilePath << "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_";
         else if (signalString == "Zmumu")             ss << outputRootFilePath << "mc21_14TeV_Zmumu_e8557_s4422_r16130_";
+        else if (signalString == "VBF_H_ZZ4nu")       ss << outputRootFilePath << "mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_";
+        else if (signalString == "StauStauLLP_500_0_10ns") ss << outputRootFilePath << "mc21_14TeV_StauStauLLP_500_0_10ns_e8557_s4422_r16130_";
     } else {
         ss << outputRootFilePath << "mc21_14TeV_jj_JZ_e8557_s4422_r16130_";
     }

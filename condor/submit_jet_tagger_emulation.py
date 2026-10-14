@@ -41,9 +41,9 @@ WRAPPER = Path(__file__).parent / "run_jet_tagger_emulation_job.sh"
 # Changed for this: ALGO_VERSIONS [2], R_MERGE_CUTS [0.001], N_IOS [8], INPUT_OBJECTS WTA cone
 # jets, and the WTA cone entry of SUBJET_ET_SCAN_BY_SEED commented out (so subjetEt 25 / mec 20).
 # T2 / EtaSK / ewm0 / mep1 / ggF + ttbar already matched. Restore the commented values after.
-ALGO_VERSIONS  = [2]
+ALGO_VERSIONS  = [3]
 #ALGO_VERSIONS  = [3]
-R_MERGE_CUTS   = [0.001]
+R_MERGE_CUTS   = [2]
 #R_MERGE_CUTS   = [2]
 R_SQUARED_CUTS = [1.21]
 # --- PU140 EtaSK backfill (2026-08-25) ------------------------------------------------
@@ -61,7 +61,7 @@ R_SQUARED_CUTS = [1.21]
 #       swap it back in when you want the like-for-like PU140-vs-PU200 EtaSK overlay.
 #N_IOS          = [128]
 #N_IOS          = [256]
-N_IOS          = [8]
+N_IOS          = [256]
 N_SEEDS        = [2]
 SIGNALS        = [True, False]
 SIGNAL_STRINGS = ["ggF_hh_bbbb", "ttbar_allhad"]   # only used when signal=True
@@ -83,7 +83,7 @@ INPUT_OBJECTS  = ["gepWTAConeCellsTowersJets"]
 # SIGNAL_STRINGS is left at ggF + ttbar for parity with the existing gFEX _T0_ output (the
 # plot only needs ggF; dropping "ttbar_allhad" saves 200 of ~2400 jobs).
 # Restore the commented settings below once this backfill is done.
-SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
+SEED_OBJECTS   = ["jFEXSRJ"]
 #SEED_OBJECTS   = ["gepWTAConeCellsTowersJets", "jFEXSRJ", "gFEXSRJ"]
 #SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
 #SEED_OBJECTS   = ["jFEXSRJ"]
@@ -105,13 +105,13 @@ SEED_OBJECTS   = ["gepWTAConeCellsTowersJets"]
 # a true 2 GeV. The threshold is digitized consistently now, so new _T2_ EtaSK output is NOT
 # comparable with the _T2_ EtaSK files already on disk. _T0_ is unaffected either way.
 # gFEX EtaSK T2 backfill: T0 is already on disk, so only the 2 GeV arm is remade.
-INPUT_TOWER_ET_CUTS = [2.0]
+INPUT_TOWER_ET_CUTS = [0.0, 1.0, 2.0]
 #INPUT_TOWER_ET_CUTS = [0.0, 2.0]
 
 # gFEX EtaSK T2 backfill: [True] + ETA_SK_OBJECTS [True] is EtaSK alone (SK/NoSK exist).
 PU_SUPPRESSION = [True]
 #PU_SUPPRESSION = [True, False]
-ETA_SK_OBJECTS = [True]  # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
+ETA_SK_OBJECTS = [False]  # True = use EtaSK PU-suppressed towers+jets (gepCellsTowers and WTAConeJets only)
 #ETA_SK_OBJECTS = [True, False]
 ET_WEIGHTED_MIDPOINTS      = [False]
 MIN_ET_SEED_POS_OPT        = [True]
@@ -135,7 +135,7 @@ MIN_ET_SEED_POS_OPT_CUT_BY_SEED = {
 # (subjet E_T - cut) offset fixed -- currently 5 GeV for every seed, so scanning
 # jFEX over 25/30/35/40 GeV pairs with mec 20/25/30/35 GeV.
 SUBJET_ET_SCAN_BY_SEED = {
-    #"jFEXSRJ":                   [30, 35, 40, 45],
+    #"jFEXSRJ":                   [30, 35],
     #"gFEXSRJ":                   [25, 30, 35, 40],
     #"gepWTAConeCellsTowersJets": [40, 45, 50, 55, 60],
 }

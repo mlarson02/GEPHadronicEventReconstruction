@@ -12,6 +12,49 @@
 #include "ap_int.h"
 #include "constants_adv.h"
 
+// Jet eta code (10b two's complement, 0.0125 LSB) -> tower-grid index floor(eta / 0.1) + eta_range_ / 2, clamped to the grid
+inline ap_uint<eta_code_bits_> jetEtaToTowerIndex(ap_uint<jet_eta_bit_length_> jetEta) {
+    #pragma HLS INLINE
+    ap_int<jet_eta_bit_length_> signedEta;
+    signedEta.range(jet_eta_bit_length_ - 1, 0) = jetEta; // same bits, read as two's complement
+    ap_int<jet_eta_bit_length_ - jet_to_tower_eta_shift_ + 1> index =
+        (signedEta >> jet_to_tower_eta_shift_) + static_cast<int>(eta_range_ / 2);
+    if (index < 0) index = 0;
+    if (index > static_cast<int>(eta_range_) - 1) index = static_cast<int>(eta_range_) - 1;
+    return ap_uint<eta_code_bits_>(index);
+}
+
+// Tower-grid index -> jet eta code of that tower's centre, 8 * (index - eta_range_ / 2) + 4
+inline ap_uint<jet_eta_bit_length_> towerIndexToJetEta(ap_uint<eta_code_bits_> index) {
+    #pragma HLS INLINE
+    ap_int<jet_eta_bit_length_> signedEta =
+        (ap_int<jet_eta_bit_length_ + 1>(index) - static_cast<int>(eta_range_ / 2)) * (1 << jet_to_tower_eta_shift_)
+        + (1 << (jet_to_tower_eta_shift_ - 1));
+    return signedEta.range(jet_eta_bit_length_ - 1, 0);
+}
+
+// Jet phi code (9b, LSB 2pi/512 from phi = 0) -> tower-grid index
+inline ap_uint<phi_code_bits_> jetPhiToTowerIndex(ap_uint<jet_phi_bit_length_> jetPhi) {
+    #pragma HLS INLINE
+    return jetPhi.range(jet_phi_bit_length_ - 1, jet_to_tower_phi_shift_);
+}
+
+// Tower-grid index -> jet phi code, the index with jet_to_tower_phi_shift_ zero LSBs
+inline ap_uint<jet_phi_bit_length_> towerIndexToJetPhi(ap_uint<phi_code_bits_> index) {
+    #pragma HLS INLINE
+    return ap_uint<jet_phi_bit_length_>(index) << jet_to_tower_phi_shift_;
+}
+
+// Tower-grid indices of an input jet's eta / phi field, per input_jets_use_jet_tob_encoding_
+inline ap_uint<eta_code_bits_> inputJetEtaIndex(ap_uint<eta_bit_length_> field) {
+    #pragma HLS INLINE
+    return input_jets_use_jet_tob_encoding_ ? jetEtaToTowerIndex(field) : ap_uint<eta_code_bits_>(field.range(eta_code_bits_ - 1, 0));
+}
+inline ap_uint<phi_code_bits_> inputJetPhiIndex(ap_uint<phi_bit_length_> field) {
+    #pragma HLS INLINE
+    return input_jets_use_jet_tob_encoding_ ? jetPhiToTowerIndex(field) : ap_uint<phi_code_bits_>(field.range(phi_code_bits_ - 1, 0));
+}
+
 // Shortest-arc absolute (deltaEta, deltaPhi) between two digitized (eta, phi) points.
 inline void calcDeltaEtaPhi(
     ap_uint<eta_code_bits_> eta1, ap_uint<phi_code_bits_> phi1,

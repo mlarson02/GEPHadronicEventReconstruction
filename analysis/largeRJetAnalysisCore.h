@@ -185,6 +185,14 @@ const std::string lrj_tagger_dir_ = use_calibrated_wtacone_jets_ ?
     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_CalibJets/" :
     "/data/larsonma/LargeRadiusJets/outputNTuplesDev_gjTowerSamples_towerEtCutFixed/";
 
+// true = read the unmerged per-job pieces instead of the hadd'd files: HERNTupler <ntuple>_NNNNNN.root
+// and jet tagger <tagger>_file<N>.root, chained in matching event order (ChainSource::OpenUnmergedPair).
+// Pair paths stay the merged names, so name parsing and state-file keys are unchanged. Read by both the
+// compute and plot stages so they see the same events. lrj_tagger_inputs_per_file_ = inputs per tagger
+// job (condor/submit_jet_tagger_emulation.py runs one job per input file).
+const bool lrj_use_unmerged_inputs_    = false;
+const int  lrj_tagger_inputs_per_file_ = 1;
+
 // PER-PAIR production. The constant above now only sets the hardcoded fallback lists; each pair's
 // production is read off its tagger path at the top of the file-pair loop, and picks that pair's
 // WTACone jet trees and state directory. That is what lets one pair list hold BOTH productions
@@ -850,8 +858,22 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
     }
 
     // Open input ROOT files: original ntuple + separate jet tagger output
-    ChainSource* signalInputFile = ChainSource::Open(signalFiles[fileIt].first.c_str());
-    ChainSource* backgroundInputFile = ChainSource::Open(backgroundFiles[fileIt].first.c_str());
+    ChainSource* signalInputFile = nullptr;
+    ChainSource* backgroundInputFile = nullptr;
+    ChainSource* signalJetTaggerFile = nullptr;
+    ChainSource* backgroundJetTaggerFile = nullptr;
+    if (lrj_use_unmerged_inputs_) {
+        // Ntuple and tagger pieces opened together so both chains hold the same events
+        ChainSource::OpenUnmergedPair(signalFiles[fileIt].first, signalFiles[fileIt].second,
+                                      lrj_tagger_inputs_per_file_, signalInputFile, signalJetTaggerFile);
+        ChainSource::OpenUnmergedPair(backgroundFiles[fileIt].first, backgroundFiles[fileIt].second,
+                                      lrj_tagger_inputs_per_file_, backgroundInputFile, backgroundJetTaggerFile);
+    } else {
+        signalInputFile = ChainSource::Open(signalFiles[fileIt].first.c_str());
+        backgroundInputFile = ChainSource::Open(backgroundFiles[fileIt].first.c_str());
+        signalJetTaggerFile = ChainSource::Open(signalFiles[fileIt].second.c_str());
+        backgroundJetTaggerFile = ChainSource::Open(backgroundFiles[fileIt].second.c_str());
+    }
     // Quote the pileup of the sample actually being processed, not a hardcoded 200.
     SetPileupFromPath(signalFiles[fileIt].first + " " + signalFiles[fileIt].second);
     std::cout << "Labelling plots as <PU> = " << gPileup << "\n";
@@ -864,8 +886,6 @@ for (unsigned int fileIt = 0; fileIt < backgroundFiles.size(); ++fileIt){
         std::cerr << "Error: Could not open background file " << backgroundFiles[fileIt].first << std::endl;
         return;
     }
-    TFile* signalJetTaggerFile = TFile::Open(signalFiles[fileIt].second.c_str(), "READ");
-    TFile* backgroundJetTaggerFile = TFile::Open(backgroundFiles[fileIt].second.c_str(), "READ");
     if ((!signalJetTaggerFile || signalJetTaggerFile->IsZombie()) || (!backgroundJetTaggerFile || backgroundJetTaggerFile->IsZombie())) {
         std::cerr << "Error: Could not open jet tagger file " << signalFiles[fileIt].second << std::endl;
         return;

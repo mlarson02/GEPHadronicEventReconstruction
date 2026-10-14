@@ -23,6 +23,10 @@
 #include <filesystem>
 #include "emulationHelperFunctions.h"
 
+// Output word packs the jet TOB codes into the eta_bit_length_ / phi_bit_length_ fields
+static_assert(jet_eta_bit_length_ == eta_bit_length_, "jet eta code must fill the TOB eta field");
+static_assert(jet_phi_bit_length_ == phi_bit_length_, "jet phi code must fill the TOB phi field");
+
 // E_T cut [GeV] on the input towers fed to the LRJ algorithm — now a RUNTIME parameter
 // (jetTaggerEmulation's inputTowerEtThreshold, submitted per job), not a compile-time switch,
 // so a single submission can produce both the cut and the uncut production. 0 = feed every
@@ -107,8 +111,26 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
     struct inputObject {
         // Main values
         unsigned int et;
-        unsigned int eta;
-        unsigned int phi;
+        unsigned int eta; // tower-grid index, used for all geometry
+        unsigned int phi; // tower-grid index, used for all geometry
+        unsigned int jetEta; // jets only: jet TOB eta code, carried to the output
+        unsigned int jetPhi; // jets only: jet TOB phi code, carried to the output
+    };
+
+    // Input jet position: tower-grid indices for the geometry and jet TOB codes for the output, from the
+    // encoding input_jets_use_jet_tob_encoding_ selects. Set et first: a zero-E_T jet keeps zero codes.
+    auto digitizeInputJetPosition = [](inputObject& jet, double eta, double phi) {
+        if (input_jets_use_jet_tob_encoding_) {
+            jet.jetEta = digitize_jet_eta(eta);
+            jet.jetPhi = digitize_jet_phi(phi);
+            jet.eta = jet_eta_to_tower_index(jet.jetEta);
+            jet.phi = jet_phi_to_tower_index(jet.jetPhi);
+        } else {
+            jet.eta = digitize(eta, eta_bit_length_, eta_min_, eta_max_, eta_range_);
+            jet.phi = digitize_phi(phi);
+            jet.jetEta = (jet.et != 0) ? tower_index_to_jet_eta(jet.eta) : 0;
+            jet.jetPhi = (jet.et != 0) ? tower_index_to_jet_phi(jet.phi) : 0;
+        }
     };
 
     // Relevant data for algorithm read from inputNTuple
@@ -391,8 +413,8 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         std::bitset<mass_approx_bit_length_ > massApprox_bitset_array[nSeedsOutput_];
         std::bitset<psi_R_bit_length_ > psi_R_bitset_array[nSeedsOutput_];
         std::bitset<et_bit_length_  > et_bitset_array[nSeedsOutput_];
-        std::bitset<eta_bit_length_ > eta_bitset_array[nSeedsOutput_];
-        std::bitset<phi_bit_length_ > phi_bitset_array[nSeedsOutput_];
+        std::bitset<jet_eta_bit_length_ > eta_bitset_array[nSeedsOutput_];
+        std::bitset<jet_phi_bit_length_ > phi_bitset_array[nSeedsOutput_];
 
         double tau_21_array[nSeedsOutput_]; // NOTE: store tau_21 as just a double, since this wouldn't be computed within Jet Tagger algorithm anyways, but is still useful to have in the ntuple
 
@@ -524,8 +546,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 }
                 seedValuesOriginal[iSeed].et = digitize(jFexSRJEtValues->at(iSeed), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
-                seedValuesOriginal[iSeed].eta = digitize(jFexSRJEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                seedValuesOriginal[iSeed].phi = digitize_phi(jFexSRJPhiValues->at(iSeed));
+                digitizeInputJetPosition(seedValuesOriginal[iSeed], jFexSRJEtaValues->at(iSeed), jFexSRJPhiValues->at(iSeed));
             }
             else if(seedObjectType == "gFEXSRJ"){
                 if(gFexSRJEtValues->size() < nSeedsInput_){
@@ -538,8 +559,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 }
                 seedValuesOriginal[iSeed].et = digitize(gFexSRJEtValues->at(iSeed), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
-                seedValuesOriginal[iSeed].eta = digitize(gFexSRJEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                seedValuesOriginal[iSeed].phi = digitize_phi(gFexSRJPhiValues->at(iSeed));
+                digitizeInputJetPosition(seedValuesOriginal[iSeed], gFexSRJEtaValues->at(iSeed), gFexSRJPhiValues->at(iSeed));
             }
             else if(seedObjectType == "gepWTAConeCellsTowersJets"){
                 if(useEtaSKObjects){
@@ -553,8 +573,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     }
                     seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersEtaSKJetsEtValues->at(iSeed), et_bit_length_,
                                     static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersEtaSKJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    seedValuesOriginal[iSeed].phi = digitize_phi(gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iSeed));
+                    digitizeInputJetPosition(seedValuesOriginal[iSeed], gepWTAConeCellsTowersEtaSKJetsEtaValues->at(iSeed), gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iSeed));
                 }
                 else if(useSKObjects){
                     //std::cout << " seedobject type is correct" << "\n";
@@ -569,8 +588,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     }
                     seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersSKJetsEtValues->at(iSeed), et_bit_length_,
                                     static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersSKJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    seedValuesOriginal[iSeed].phi = digitize_phi(gepWTAConeCellsTowersSKJetsPhiValues->at(iSeed));
+                    digitizeInputJetPosition(seedValuesOriginal[iSeed], gepWTAConeCellsTowersSKJetsEtaValues->at(iSeed), gepWTAConeCellsTowersSKJetsPhiValues->at(iSeed));
                 }
                 else{
                     //std::cout << " seedobject type is correct" << "\n";
@@ -585,8 +603,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                     }
                     seedValuesOriginal[iSeed].et = digitize(gepWTAConeCellsTowersJetsEtValues->at(iSeed), et_bit_length_,
                                     static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    seedValuesOriginal[iSeed].eta = digitize(gepWTAConeCellsTowersJetsEtaValues->at(iSeed), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    seedValuesOriginal[iSeed].phi = digitize_phi(gepWTAConeCellsTowersJetsPhiValues->at(iSeed));
+                    digitizeInputJetPosition(seedValuesOriginal[iSeed], gepWTAConeCellsTowersJetsEtaValues->at(iSeed), gepWTAConeCellsTowersJetsPhiValues->at(iSeed));
                 }
             }
         }
@@ -632,6 +649,8 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                         std::swap(seedValues[1].et, seedValues[iSeedOR].et); // Et
                         std::swap(seedValues[1].eta, seedValues[iSeedOR].eta); // eta
                         std::swap(seedValues[1].phi, seedValues[iSeedOR].phi); // phi
+                        std::swap(seedValues[1].jetEta, seedValues[iSeedOR].jetEta); // jet eta code
+                        std::swap(seedValues[1].jetPhi, seedValues[iSeedOR].jetPhi); // jet phi code
                         overlapRemovalCounter++;
                         break; // break out of loop as we've found something to swap, thus preventing overlapping large-R jets
                     } // If deltaR^2 between original leading, other proto-seed farther than 2 times jet radius 
@@ -756,20 +775,17 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
                 if(useEtaSKObjects){
                     inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersEtaSKJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersEtaSKJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize_phi(gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iIO + nSeedsOutput_));
+                    digitizeInputJetPosition(inputObjectValues[iIO], gepWTAConeCellsTowersEtaSKJetsEtaValues->at(iIO + nSeedsOutput_), gepWTAConeCellsTowersEtaSKJetsPhiValues->at(iIO + nSeedsOutput_));
                 }
                 else if(useSKObjects){
                     inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersSKJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersSKJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize_phi(gepWTAConeCellsTowersSKJetsPhiValues->at(iIO + nSeedsOutput_));
+                    digitizeInputJetPosition(inputObjectValues[iIO], gepWTAConeCellsTowersSKJetsEtaValues->at(iIO + nSeedsOutput_), gepWTAConeCellsTowersSKJetsPhiValues->at(iIO + nSeedsOutput_));
                 }
                 else{
                     inputObjectValues[iIO].et = digitize(gepWTAConeCellsTowersJetsEtValues->at(iIO + nSeedsOutput_), et_bit_length_,
                                 static_cast<double>(et_min_), static_cast<double>(et_max_));
-                    inputObjectValues[iIO].eta = digitize(gepWTAConeCellsTowersJetsEtaValues->at(iIO + nSeedsOutput_), eta_bit_length_, eta_min_, eta_max_, eta_range_);
-                    inputObjectValues[iIO].phi = digitize_phi(gepWTAConeCellsTowersJetsPhiValues->at(iIO + nSeedsOutput_));
+                    digitizeInputJetPosition(inputObjectValues[iIO], gepWTAConeCellsTowersJetsEtaValues->at(iIO + nSeedsOutput_), gepWTAConeCellsTowersJetsPhiValues->at(iIO + nSeedsOutput_));
                 }
             }
 
@@ -778,7 +794,9 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         // --------------------------------------------
         // --- Pasted in and modified HLS algorithm ---
         // --------------------------------------------
-        // Seed position optimization 
+        // Seeds moved by the seed position optimization output their tower centre, not their own jet eta code
+        bool seedShifted[nSeedsOutput_] = {};
+        // Seed position optimization
         if(algoVersion_ != 2){ // Only execute if using basic (v2) algorithm
             //std::cout << "PERFORMING SEED POSITION OPTIMIZATION" << "\n";
             unsigned int deltaRValuesLessThanSearchDistanceCounter[nSeedsOutput_] = {0, 0};
@@ -943,6 +961,7 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
 
                 seedValues[iSeed].eta = eta_mid_digitized; // FIXME replace 1, 2 with etaIndexInput, phiIndexInput - fine for now
                 seedValues[iSeed].phi = phi_mid_digitized;
+                seedShifted[iSeed] = true;
             }
         }
         if(lrjDbgE){
@@ -1172,8 +1191,11 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             uint64_t psi_R_value = static_cast<uint32_t>(jet_psi_R)        & maskN(psi_R_bit_length_);
             //std::cout << "dim_value: " << diam_value << "\n";
             uint64_t et_value   = static_cast<uint32_t>(outputJetEt)      & maskN(et_bit_length_);
-            uint64_t eta_value  = static_cast<uint32_t>(seedValues[iSeed].eta) & maskN(eta_bit_length_);
-            uint64_t phi_value  = static_cast<uint32_t>(seedValues[iSeed].phi) & maskN(phi_bit_length_);
+            // Jet TOB codes out: the seed's own, or its tower's codes if the seed position optimization moved it
+            const unsigned int outputJetEtaCode = seedShifted[iSeed] ? tower_index_to_jet_eta(seedValues[iSeed].eta) : seedValues[iSeed].jetEta;
+            const unsigned int outputJetPhiCode = seedShifted[iSeed] ? tower_index_to_jet_phi(seedValues[iSeed].phi) : seedValues[iSeed].jetPhi;
+            uint64_t eta_value  = static_cast<uint32_t>(outputJetEtaCode) & maskN(jet_eta_bit_length_);
+            uint64_t phi_value  = static_cast<uint32_t>(outputJetPhiCode) & maskN(jet_phi_bit_length_);
 
             // Set output values - FIXME these aren't actually used currently, rather the bitset arrays below are used for setting final values
             outputJetValues[iSeed].et = et_value;   // Et
@@ -1187,8 +1209,8 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             
             // Bitset strings (unchanged)
             std::bitset<et_bit_length_  > et_bitset(et_value);
-            std::bitset<eta_bit_length_ > eta_bitset(eta_value);
-            std::bitset<phi_bit_length_ > phi_bitset(phi_value);
+            std::bitset<jet_eta_bit_length_ > eta_bitset(eta_value);
+            std::bitset<jet_phi_bit_length_ > phi_bitset(phi_value);
             std::bitset<num_subjets_length_> num_subjets_bitset(num_subjets_value);
             std::bitset<N_subjetiness_bit_length_> tau_1_bitset(tau_1_value);
             std::bitset<N_subjetiness_bit_length_> tau_2_bitset(tau_2_value);
@@ -1251,8 +1273,8 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
             jetTaggerLRJSubjetMultiplicityValues->push_back((numSubjets));
             //std::cout << "undigitized psi_R: " << undigitize_psi_R(psi_R_bitset) << "\n";
             jetTaggerLRJEtValues->push_back(undigitize_et(et_bitset));
-            jetTaggerLRJEtaValues->push_back(undigitize_eta(eta_bitset));
-            jetTaggerLRJPhiValues->push_back(undigitize_phi(phi_bitset));
+            jetTaggerLRJEtaValues->push_back(undigitize_jet_eta(eta_bitset.to_ulong()));
+            jetTaggerLRJPhiValues->push_back(undigitize_jet_phi(phi_bitset.to_ulong()));
 
             numSubjetsSeedArray[iSeed] = numSubjets;
             for(unsigned int iSubj = 0; iSubj < numSubjets; iSubj++){
@@ -1278,8 +1300,8 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         //std::cout << "et_bitset_array[leadIdx]: " << et_bitset_array[leadIdx] << "\n";
         //std::cout << "undigitize_et(et_bitset_array[leadIdx]): " << undigitize_et(et_bitset_array[leadIdx]) << "\n";
         jetTaggerLeadingLRJEtValues->push_back(undigitize_et(et_bitset_array[leadIdx]));
-        jetTaggerLeadingLRJEtaValues->push_back(undigitize_eta(eta_bitset_array[leadIdx]));
-        jetTaggerLeadingLRJPhiValues->push_back(undigitize_phi(phi_bitset_array[leadIdx]));
+        jetTaggerLeadingLRJEtaValues->push_back(undigitize_jet_eta(eta_bitset_array[leadIdx].to_ulong()));
+        jetTaggerLeadingLRJPhiValues->push_back(undigitize_jet_phi(phi_bitset_array[leadIdx].to_ulong()));
 
         for(unsigned int iSubj = 0; iSubj < numSubjetsSeedArray[leadIdx]; iSubj++){
             jetTaggerLeadingLRJSubjetEtValues->push_back(undigitize_et(subjetsSeedArray[leadIdx][iSubj].et));
@@ -1298,8 +1320,8 @@ void eventLoop(std::string inputNTuplePath, std::string outputNTuplePath,std::st
         jetTaggerSubleadingLRJTau_2Values->push_back(undigitize_N_subjetiness(tau_2_bitset_array[sublIdx]));
         jetTaggerSubleadingLRJTau_21Values->push_back(tau_21_array[sublIdx]);
         jetTaggerSubleadingLRJEtValues->push_back(undigitize_et(et_bitset_array[sublIdx]));
-        jetTaggerSubleadingLRJEtaValues->push_back(undigitize_eta(eta_bitset_array[sublIdx]));
-        jetTaggerSubleadingLRJPhiValues->push_back(undigitize_phi(phi_bitset_array[sublIdx]));
+        jetTaggerSubleadingLRJEtaValues->push_back(undigitize_jet_eta(eta_bitset_array[sublIdx].to_ulong()));
+        jetTaggerSubleadingLRJPhiValues->push_back(undigitize_jet_phi(phi_bitset_array[sublIdx].to_ulong()));
 
         for(unsigned int iSubj = 0; iSubj < numSubjetsSeedArray[sublIdx]; iSubj++){
             jetTaggerSubleadingLRJSubjetEtValues->push_back(undigitize_et(subjetsSeedArray[sublIdx][iSubj].et));

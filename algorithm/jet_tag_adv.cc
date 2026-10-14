@@ -31,6 +31,28 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         #pragma HLS unroll
         outputJetValues[i] = 0;
 
+    // Seeds are jets: keep each seed's jet TOB codes for the output (its own if input jets carry them, else
+    // its tower's; zero for an empty seed) and leave tower-grid indices in the seed word, so all geometry
+    // below runs on the grid shared with the input towers
+    ap_uint<jet_eta_bit_length_> seedJetEta[nTotalSeeds_];
+    ap_uint<jet_phi_bit_length_> seedJetPhi[nTotalSeeds_];
+    #pragma HLS ARRAY_PARTITION variable=seedJetEta complete
+    #pragma HLS ARRAY_PARTITION variable=seedJetPhi complete
+    for (unsigned int i = 0; i < nTotalSeeds_; ++i){
+        #pragma HLS unroll
+        ap_uint<eta_bit_length_> etaField = seedValues[i].range(eta_high_, eta_low_);
+        ap_uint<phi_bit_length_> phiField = seedValues[i].range(phi_high_, phi_low_);
+        ap_uint<eta_code_bits_> etaIndex = inputJetEtaIndex(etaField);
+        ap_uint<phi_code_bits_> phiIndex = inputJetPhiIndex(phiField);
+        bool seedEmpty = (seedValues[i].range(et_high_, et_low_) == 0);
+        seedJetEta[i] = input_jets_use_jet_tob_encoding_ ? ap_uint<jet_eta_bit_length_>(etaField)
+                      : seedEmpty ? ap_uint<jet_eta_bit_length_>(0) : towerIndexToJetEta(etaIndex);
+        seedJetPhi[i] = input_jets_use_jet_tob_encoding_ ? ap_uint<jet_phi_bit_length_>(phiField)
+                      : seedEmpty ? ap_uint<jet_phi_bit_length_>(0) : towerIndexToJetPhi(phiIndex);
+        seedValues[i].range(eta_high_, eta_low_) = etaIndex;
+        seedValues[i].range(phi_high_, phi_low_) = phiIndex;
+    }
+
     // Save original seed positions before any modifications; used for subjet finding later
     input seedValuesForSubjets[nTotalSeeds_];
     #pragma HLS ARRAY_PARTITION variable=seedValuesForSubjets complete
@@ -60,7 +82,8 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     #pragma HLS ARRAY_PARTITION variable=orCand complete
     for(unsigned int iSeedOR = nSeedsOutput_; iSeedOR < nTotalSeeds_; iSeedOR++){
         #pragma HLS unroll
-        bool nonEmpty = !(seedValues[iSeedOR].range(et_high_, et_low_) == 0 && seedValues[iSeedOR].range(eta_high_ - eta_bits_padding_, eta_low_) == 0 && seedValues[iSeedOR].range(phi_high_ - phi_bits_padding_, phi_low_) == 0);
+        // Emptiness from the jet eta code: with jet TOB inputs an all-zero seed word decodes to a non-zero tower index
+        bool nonEmpty = !(seedValues[iSeedOR].range(et_high_, et_low_) == 0 && seedJetEta[iSeedOR] == 0 && seedValues[iSeedOR].range(phi_high_ - phi_bits_padding_, phi_low_) == 0);
         orCand[iSeedOR] = nonEmpty && !passesTwoRCut(
             seedValues[0].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[0].range(phi_high_ - phi_bits_padding_, phi_low_),
             seedValues[iSeedOR].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[iSeedOR].range(phi_high_ - phi_bits_padding_, phi_low_)
@@ -87,7 +110,15 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     ap_uint<et_bit_length_ > subEt  = seedValues[1].range(et_high_, et_low_);
     ap_uint<eta_code_bits_> subEta = seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_);
     ap_uint<phi_code_bits_> subPhi = seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_);
+    ap_uint<jet_eta_bit_length_> candJetEta = seedJetEta[orSwapIdx];
+    ap_uint<jet_eta_bit_length_> subJetEta  = seedJetEta[1];
+    ap_uint<jet_phi_bit_length_> candJetPhi = seedJetPhi[orSwapIdx];
+    ap_uint<jet_phi_bit_length_> subJetPhi  = seedJetPhi[1];
     if(doOrSwap){
+        seedJetEta[1]         = candJetEta;
+        seedJetEta[orSwapIdx] = subJetEta;
+        seedJetPhi[1]         = candJetPhi;
+        seedJetPhi[orSwapIdx] = subJetPhi;
         // Swap the (Et, eta, phi) triplet between the original subleading seed (slot 1) and the candidate
         seedValues[1].range(et_high_, et_low_)   = candEt;
         seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_) = candEta;
@@ -179,6 +210,9 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     if(indices[0] == indices[1] && indices[0] != -1){
         skipSecondSeed = true;
     }
+    // Seeds moved here output their tower's jet TOB codes, not their own
+    bool seedShifted[nSeedsOutput_] = {false};
+    #pragma HLS ARRAY_PARTITION variable=seedShifted complete
     // Shift seed positions to the midpoint between the seed and its closest candidate
     for (unsigned int iSeed = 0; iSeed < nSeedsOutput_; iSeed++){
         #pragma HLS unroll
@@ -188,6 +222,7 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         // continues below (indices[iSeed] + nSeedsOutput_ is a valid index even when indices==-1 ->
         // reads slot 1, but the result is discarded since doShift is false).
         bool doShift = !(skipSecondSeed == true && iSeed == 1) && (indices[iSeed] != -1);
+        seedShifted[iSeed] = doShift;
 
         // Safe candidate index for the always-on read below: indices[iSeed] is -1 (ap_int) when no
         // candidate was found, and indices[iSeed] + nSeedsOutput_ could then mix signed/unsigned into an
@@ -340,7 +375,11 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
         outputJetValues[iSeed].range(padded_zeroes_high_, padded_zeroes_low_) = 0;
         outputJetValues[iSeed].range(num_subjets_high_, num_subjets_low_) = numSubjets;
         outputJetValues[iSeed].range(et_high_, et_low_) = outputJetEt;
-        outputJetValues[iSeed].range(eta_high_, eta_low_) = seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_);
-        outputJetValues[iSeed].range(phi_high_, phi_low_) = seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_);
+        outputJetValues[iSeed].range(eta_high_, eta_low_) = seedShifted[iSeed]
+            ? towerIndexToJetEta(seedValues[iSeed].range(eta_high_ - eta_bits_padding_, eta_low_))
+            : seedJetEta[iSeed];
+        outputJetValues[iSeed].range(phi_high_, phi_low_) = seedShifted[iSeed]
+            ? towerIndexToJetPhi(seedValues[iSeed].range(phi_high_ - phi_bits_padding_, phi_low_))
+            : seedJetPhi[iSeed];
     }
 }

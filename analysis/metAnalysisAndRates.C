@@ -179,6 +179,13 @@ const bool use_calibrated_wtacone_jets_ = true;
 const std::string met_emulation_dir_ = use_calibrated_wtacone_jets_ ? "/data/larsonma/GEPMET/outputNTuplesDev_METv4_CalibJets/"
                                                                     : "/data/larsonma/GEPMET/outputNTuplesDev_METv3/";
 
+// true = read the unmerged per-job pieces instead of the hadd'd files: HERNTupler <ntuple>_NNNNNN.root
+// and MET emulation <emu>_file<N>.root, chained in matching event order (ChainSource::OpenUnmergedPair).
+// The configured paths stay the merged names. met_emu_inputs_per_file_ = FILES_PER_JOB of
+// condor/submit_met_emulation.py at the time the emulation was submitted.
+const bool use_unmerged_inputs_     = false;
+const int  met_emu_inputs_per_file_ = 5;
+
 // Input tree of the WTACone CellsTowers jets of one PU-suppression variant ("", "SK" or "EtaSK")
 std::string wtaConeCellsTowersJetsTreeName(const std::string& variant) {
     return "gepWTAConeCellsTowers" + variant + (use_calibrated_wtacone_jets_ ? "CalibJetsTree" : "JetsTree");
@@ -256,13 +263,23 @@ const bool normalizeRateToTarget = true;
 //
 // With this on the plots go to <outputDir>_JZ0JZ1/ and <overlayDir>_JZ0JZ1/ (see main), so a
 // run in this mode does not overwrite the nominal plots.
-const bool use_jz0_jz1_rates_ = true;
+const bool use_jz0_jz1_rates_ = false;
+
+// --- Rate estimate from JZ0 alone, no HSTP filter ------------------------------------------
+// As use_jz0_jz1_rates_, but JZ1 is dropped too: the rate sample is JZ0 only, HSTP filter not
+// applied. Same selection point (keepBackgroundEvent) and same normalization. Plots go to
+// <outputDir>_JZ0/ and <overlayDir>_JZ0/. Mutually exclusive with use_jz0_jz1_rates_.
+const bool use_jz0_only_rates_ = true;
+static_assert(!(use_jz0_jz1_rates_ && use_jz0_only_rates_),
+              "use_jz0_jz1_rates_ and use_jz0_only_rates_ are mutually exclusive");
 
 // Background event selection for the rate sample: JZ0 + JZ1 with no HSTP filter when
 // use_jz0_jz1_rates_ is set, otherwise all JZ slices with the HSTP filter (if applyHSTPFilter).
 // Events the HSTP filter rejects can carry an empty eventWeights vector, and the loops read
 // at(0) straight after this, so the JZ0 + JZ1 branch drops those as well.
 bool keepBackgroundEvent(bool passHSTP, int jzSlice, const std::vector<double>* weights) {
+    if (use_jz0_only_rates_)
+        return jzSlice == 0 && weights && !weights->empty();
     if (use_jz0_jz1_rates_)
         return (jzSlice == 0 || jzSlice == 1) && weights && !weights->empty();
     return !applyHSTPFilter || passHSTP;
@@ -270,6 +287,7 @@ bool keepBackgroundEvent(bool passHSTP, int jzSlice, const std::vector<double>* 
 
 // Legend name of the background sample the rates are estimated from.
 std::string rateSampleName() {
+    if (use_jz0_only_rates_) return "JZ0 only (no HSTP)";
     if (use_jz0_jz1_rates_) return "JZ0+JZ1 (no HSTP)";
     return applyHSTPFilter ? "All JZ slices (HSTP filtered)" : "All JZ slices";
 }
@@ -351,7 +369,11 @@ const double kRateVsThrXMax = 400.0;
 // over five extra decades and squeezed the interesting region into the top-right corner. Unlike
 // kRateVsThrXMax this is a genuine cut, not just an axis range: points below it are dropped, so
 // the efficiency axis tightens onto the surviving part of the curve as well.
-const double kRateVsEffMinRateHz = 10.0;
+// 200 Hz: where the JZ0 rate estimates run out of statistics.
+const double kRateVsEffMinRateHz = 200.0;
+// Same floor for the total-rate vs threshold plots: points below it are dropped and the frame
+// starts there. Without it, ROOT puts a log-y frame with a point/error bar <= 0 at 1e-3 x ymax.
+const double kRateVsThrMinRateHz = kRateVsEffMinRateHz;
 
 // TDR single-item rate specification [Hz], marked with a dashed grey line across the
 // rate-vs-efficiency overlays so each curve can be read off at the working point directly.
@@ -995,6 +1017,9 @@ void drawRateVsThreshold(TH1F* back_weighted, const std::string& title,
     BkgProcLabel bkgProc;   // background-only plot: label as QCD dijet, not the signal
     TGraphErrors* g = makeRateGraph(back_weighted, kP10Blue);
     g->SetTitle((title + ";" + xLabel + ";Rate [Hz]").c_str());
+    for (int p = g->GetN() - 1; p >= 0; --p)
+        if (g->GetY()[p] < kRateVsThrMinRateHz) g->RemovePoint(p);
+    if (g->GetN() == 0) { delete g; return; }
 
     TCanvas c("c", title.c_str(), 700, 600);
     gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
@@ -1002,6 +1027,7 @@ void drawRateVsThreshold(TH1F* back_weighted, const std::string& title,
     g->Draw("AP");
     if (xMax > 0.0)
         g->GetXaxis()->SetLimits(back_weighted->GetXaxis()->GetXmin(), xMax);
+    g->SetMinimum(kRateVsThrMinRateHz);
     c.cd(); DrawATLASLabel(); c.SaveAs(outputPath.c_str());
     delete g;
 }
@@ -1039,6 +1065,9 @@ void drawRateVsThresholdMulti(const std::vector<TH1F*>& backs_weighted,
     std::vector<TGraphErrors*> graphs;
     for (unsigned int i = 0; i < backs_weighted.size(); i++) {
         TGraphErrors* g = makeRateGraph(backs_weighted[i], mcols[i % nMcols], mkstyles[i % nStyles]);
+        // Rate floor in Hz, applied before the kHz scaling
+        for (int p = g->GetN() - 1; p >= 0; --p)
+            if (g->GetY()[p] < kRateVsThrMinRateHz) g->RemovePoint(p);
         if (yScale != 1.0)
             for (int p = 0; p < g->GetN(); ++p) {
                 g->SetPoint(p, g->GetX()[p], g->GetY()[p] * yScale);
@@ -1049,8 +1078,8 @@ void drawRateVsThresholdMulti(const std::vector<TH1F*>& backs_weighted,
         g->Draw(i == 0 ? "AP" : "P SAME");
         if (i == 0 && xMax > 0.0)
             g->GetXaxis()->SetLimits(backs_weighted[0]->GetXaxis()->GetXmin(), xMax);
-        if (i == 0 && yMin > 0.0)
-            g->SetMinimum(yMin);
+        if (i == 0)
+            g->SetMinimum(std::max(yMin, kRateVsThrMinRateHz * yScale));
         // The frame is owned by the first graph, so a later curve that starts higher would be
         // clipped off the top; callers overlaying curves of very different scale pass yMax.
         if (i == 0 && yMax > 0.0)
@@ -1585,7 +1614,7 @@ double findThreshold(TH1F* back_hw, double targetRateHz) {
 }
 
 // -----------------------------------------------------------------------
-// Draw turn-on curves (efficiency vs truth NonInt MET) for multiple algorithms,
+// Draw turn-on curves (efficiency vs truth Calo MET) for multiple algorithms,
 // overlaid on one canvas at a single rate point
 // xLabel defaults to the truth MET axis these curves were written for; the Z->mumu turn-ons
 // pass the dimuon p_{T} axis instead.
@@ -1600,7 +1629,7 @@ void drawTurnOnOverlay(std::vector<TH1F*> effs, const std::vector<std::string>& 
                        const std::string& rateLabel = "",
                        TH1F* truthDist = nullptr,
                        double /*legX1*/ = 0.45, double /*legY1*/ = 0.15,
-                       const std::string& xLabel = "Truth MET_{NonInt} [GeV]") {
+                       const std::string& xLabel = "Truth Calo MET [GeV]") {
     if (effs.empty()) return;
     int  mcols[]    = { kBlack, kP10Red, kP10Blue, kP10Green, kP10Violet, kP10Orange, kP10Cyan,
                         kP10Brown, kP10Ash, kP10Yellow, kP8Pink, kP8Blue, kP6Grape, kP8Azure, kP6Red, kP6Violet };
@@ -2412,7 +2441,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
     std::vector<double> thr_JetMET_60kHz_vec;
     std::vector<double> thr_TowerMET_60kHz_vec;
     std::vector<double> thr_TotalMET_60kHz_vec;
-    std::vector<TH1F*> sig_h_metTruthNonInt_unscaled_vec; // unscaled clone for truth overlay
+    std::vector<TH1F*> sig_h_metTruthCalo_unscaled_vec; // unscaled clone for truth overlay
 
     // Resimulated gFEX MET histogram vectors (populated only when hasGFexSimMET)
     std::vector<TH1F*> sig_h_gMET_JwoJAOD_vec, back_h_gMET_JwoJAOD_vec;
@@ -2502,11 +2531,23 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
     for (unsigned int fileIt = 0; fileIt < signalFiles.size(); fileIt++) {
         std::cout << "Processing file " << fileIt << ": " << labels[fileIt] << "\n";
         // HERNTupler input ntuples: provide all upstream trees (gFEX MET, truth, gepCellsTowers jets, etc.)
-        ChainSource* sigF  = ChainSource::Open(signalFiles[fileIt].first.c_str());
-        ChainSource* backF = ChainSource::Open(backgroundFiles[fileIt].first.c_str());
         // MET emulator outputs: provide metTree (and emulEventInfoTree for ordering validation)
-        TFile* sigEmu  = TFile::Open(signalFiles[fileIt].second.c_str(),     "READ");
-        TFile* backEmu = TFile::Open(backgroundFiles[fileIt].second.c_str(), "READ");
+        ChainSource* sigF    = nullptr;
+        ChainSource* backF   = nullptr;
+        ChainSource* sigEmu  = nullptr;
+        ChainSource* backEmu = nullptr;
+        if (use_unmerged_inputs_) {
+            // Ntuple and emulation pieces opened together so both chains hold the same events
+            ChainSource::OpenUnmergedPair(signalFiles[fileIt].first, signalFiles[fileIt].second,
+                                          met_emu_inputs_per_file_, sigF, sigEmu);
+            ChainSource::OpenUnmergedPair(backgroundFiles[fileIt].first, backgroundFiles[fileIt].second,
+                                          met_emu_inputs_per_file_, backF, backEmu);
+        } else {
+            sigF    = ChainSource::Open(signalFiles[fileIt].first.c_str());
+            backF   = ChainSource::Open(backgroundFiles[fileIt].first.c_str());
+            sigEmu  = ChainSource::Open(signalFiles[fileIt].second.c_str());
+            backEmu = ChainSource::Open(backgroundFiles[fileIt].second.c_str());
+        }
         if (!sigF  || sigF->IsZombie())  { std::cerr << "Cannot open " << signalFiles[fileIt].first      << "\n"; continue; }
         if (!backF || backF->IsZombie()) { std::cerr << "Cannot open " << backgroundFiles[fileIt].first  << "\n"; continue; }
         if (!sigEmu  || sigEmu->IsZombie())  { std::cerr << "Cannot open " << signalFiles[fileIt].second     << "\n"; continue; }
@@ -2748,15 +2789,18 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         metTruthTreeBack->SetBranchAddress("metTruthInt",    &back_metTruthInt);
         metTruthTreeBack->SetBranchAddress("metTruthIntOut", &back_metTruthIntOut);
 
-        // Truth NonInt MET X/Y components (optional — guard if absent)
-        double sig_metTruthNonIntX  = 0.0, sig_metTruthNonIntY  = 0.0;
-        double back_metTruthNonIntX = 0.0, back_metTruthNonIntY = 0.0;
-        bool hasTruthNonIntXY = metTruthTreeSig->FindBranch("metTruthNonIntX") != nullptr;
-        if (hasTruthNonIntXY) {
-            metTruthTreeSig->SetBranchAddress("metTruthNonIntX",  &sig_metTruthNonIntX);
-            metTruthTreeSig->SetBranchAddress("metTruthNonIntY",  &sig_metTruthNonIntY);
-            metTruthTreeBack->SetBranchAddress("metTruthNonIntX", &back_metTruthNonIntX);
-            metTruthTreeBack->SetBranchAddress("metTruthNonIntY", &back_metTruthNonIntY);
+        // Truth Calo MET = MET_Truth["Int"]: the reference truth for turn-ons, residuals and phi.
+        // Magnitude is sign-free; Int X/Y are negated after each GetEntry to point along MET.
+        const double& sig_metTruthCalo  = sig_metTruthInt;
+        const double& back_metTruthCalo = back_metTruthInt;
+        double sig_metTruthCaloX  = 0.0, sig_metTruthCaloY  = 0.0;
+        double back_metTruthCaloX = 0.0, back_metTruthCaloY = 0.0;
+        bool hasTruthCaloXY = metTruthTreeSig->FindBranch("metTruthIntX") != nullptr;
+        if (hasTruthCaloXY) {
+            metTruthTreeSig->SetBranchAddress("metTruthIntX",  &sig_metTruthCaloX);
+            metTruthTreeSig->SetBranchAddress("metTruthIntY",  &sig_metTruthCaloY);
+            metTruthTreeBack->SetBranchAddress("metTruthIntX", &back_metTruthCaloX);
+            metTruthTreeBack->SetBranchAddress("metTruthIntY", &back_metTruthCaloY);
         }
 
         // --- Branch variables: core MET EMTopo ---
@@ -3073,11 +3117,11 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* back_h_gMETX_Rms = new TH1F(("back_h_gMETX_Rms_"+tag).c_str(), "", 80, -400, 400);
         TH1F* sig_h_gMETY_Rms  = new TH1F(("sig_h_gMETY_Rms_" +tag).c_str(), "", 80, -400, 400);
         TH1F* back_h_gMETY_Rms = new TH1F(("back_h_gMETY_Rms_"+tag).c_str(), "", 80, -400, 400);
-        // Truth NonInt MET X/Y components
-        TH1F* sig_h_metTruthNonIntX  = new TH1F(("sig_h_TruthNonIntX_" +tag).c_str(), "", 80, -400, 400);
-        TH1F* back_h_metTruthNonIntX = new TH1F(("back_h_TruthNonIntX_"+tag).c_str(), "", 80, -400, 400);
-        TH1F* sig_h_metTruthNonIntY  = new TH1F(("sig_h_TruthNonIntY_" +tag).c_str(), "", 80, -400, 400);
-        TH1F* back_h_metTruthNonIntY = new TH1F(("back_h_TruthNonIntY_"+tag).c_str(), "", 80, -400, 400);
+        // Truth Calo MET X/Y components (negated Int)
+        TH1F* sig_h_metTruthCaloX  = new TH1F(("sig_h_TruthCaloX_" +tag).c_str(), "", 80, -400, 400);
+        TH1F* back_h_metTruthCaloX = new TH1F(("back_h_TruthCaloX_"+tag).c_str(), "", 80, -400, 400);
+        TH1F* sig_h_metTruthCaloY  = new TH1F(("sig_h_TruthCaloY_" +tag).c_str(), "", 80, -400, 400);
+        TH1F* back_h_metTruthCaloY = new TH1F(("back_h_TruthCaloY_"+tag).c_str(), "", 80, -400, 400);
         // GEP Jet and Tower MET X/Y components
         TH1F* sig_h_JetMetX    = new TH1F(("sig_h_JetMetX_"   +tag).c_str(), "", 80, -400, 400);
         TH1F* back_h_JetMetX   = new TH1F(("back_h_JetMetX_"  +tag).c_str(), "", 80, -400, 400);
@@ -3123,7 +3167,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         TH1F* sig_h_jMET       = new TH1F(("sig_h_jMET_"      +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_h_jMET      = new TH1F(("back_h_jMET_"     +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* sig_h_metTruthNonInt       = new TH1F(("sig_h_TruthNonInt_"      +tag).c_str(), "", nMETBins, metBinEdges);
-        TH1F* sig_h_metTruthNonInt_coarse = new TH1F(("sig_h_TruthNonInt_coarse_"+tag).c_str(), "", 30, 0, 600); // 20 GeV bins for turn-on overlay
+        TH1F* sig_h_metTruthCalo_coarse = new TH1F(("sig_h_TruthCalo_coarse_"+tag).c_str(), "", 30, 0, 600); // 20 GeV bins for turn-on overlay
         TH1F* back_h_metTruthNonInt = new TH1F(("back_h_TruthNonInt_"+tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* sig_h_metTruthInt     = new TH1F(("sig_h_TruthInt_"    +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* back_h_metTruthInt    = new TH1F(("back_h_TruthInt_"   +tag).c_str(), "", nMETBins, metBinEdges);
@@ -3359,7 +3403,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_hw2_NC_Jet->Sumw2();     back_hw2_NC_Tower->Sumw2();
         back_hw2_Rms_Jet->Sumw2();    back_hw2_Rms_Tower->Sumw2();
 
-        // TOB MET vs truth NonInt MET calibration (x = truth, y = TOB) — signal and background
+        // TOB MET vs truth Calo MET calibration (x = truth, y = TOB) — signal and background
         TH2F* sig_h2_gJwoJ_TOBMet_vs_truthMET     = new TH2F(("sig_h2_gJwoJ_TOBMet_vs_truthMET_"    +tag).c_str(), "", n2D, lo2D, hi2D, n2D, lo2D, hi2D);
         TH2F* sig_h2_gNC_TOBMet_vs_truthMET       = new TH2F(("sig_h2_gNC_TOBMet_vs_truthMET_"      +tag).c_str(), "", n2D, lo2D, hi2D, n2D, lo2D, hi2D);
         TH2F* sig_h2_gRms_TOBMet_vs_truthMET      = new TH2F(("sig_h2_gRms_TOBMet_vs_truthMET_"     +tag).c_str(), "", n2D, lo2D, hi2D, n2D, lo2D, hi2D);
@@ -3431,7 +3475,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_h1_gRms_relResidual->Sumw2();  back_h1_JetMET_relResidual->Sumw2();
         back_h1_TowerMET_relResidual->Sumw2(); back_h1_TotalMET_relResidual->Sumw2();
 
-        // Residual vs truth NonInt MET 2D — signal and background
+        // Residual vs truth Calo MET 2D — signal and background
         const int nSumETbins2D = 20; const double hiSumET2D = 1000.0;
         TH2F* sig_h2_gJwoJ_relResidual_vs_truthMET     = new TH2F(("sig_h2_gJwoJ_relResidual_vs_truthMET_"    +tag).c_str(), "", n2D, lo2D, hi2D, 100, -3.0, 2.0);
         TH2F* sig_h2_gNC_relResidual_vs_truthMET       = new TH2F(("sig_h2_gNC_relResidual_vs_truthMET_"      +tag).c_str(), "", n2D, lo2D, hi2D, 100, -3.0, 2.0);
@@ -3483,7 +3527,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         back_h1_gJwoJ_absResidual->Sumw2(); back_h1_gNC_absResidual->Sumw2();
         back_h1_gRms_absResidual->Sumw2();  back_h1_JetMET_absResidual->Sumw2();
         back_h1_TowerMET_absResidual->Sumw2(); back_h1_TotalMET_absResidual->Sumw2();
-        // Absolute residual vs truth NonInt MET 2D
+        // Absolute residual vs truth Calo MET 2D
         TH2F* sig_h2_gJwoJ_absResidual_vs_truthMET     = new TH2F(("sig_h2_gJwoJ_absResidual_vs_truthMET_"    +tag).c_str(), "", n2D, lo2D, hi2D, 60, -hiAbsRes, hiAbsRes);
         TH2F* sig_h2_gNC_absResidual_vs_truthMET       = new TH2F(("sig_h2_gNC_absResidual_vs_truthMET_"      +tag).c_str(), "", n2D, lo2D, hi2D, 60, -hiAbsRes, hiAbsRes);
         TH2F* sig_h2_gRms_absResidual_vs_truthMET      = new TH2F(("sig_h2_gRms_absResidual_vs_truthMET_"     +tag).c_str(), "", n2D, lo2D, hi2D, 60, -hiAbsRes, hiAbsRes);
@@ -3605,7 +3649,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     (std::string("h_turnOnMu_num_") + metTypeShort[iA] + "_" + muRateNames[iR] + "_" + tag).c_str(),
                     "", nTurnOnBins, turnOnBinEdges);
         // Coarse dimuon p_{T} spectrum, drawn as the shaded distribution under the turn-on curves
-        // (same role sig_h_metTruthNonInt_coarse plays for the truth-MET turn-ons).
+        // (same role sig_h_metTruthCalo_coarse plays for the truth-MET turn-ons).
         TH1F* sig_h_dimuonPt_coarse = new TH1F(("sig_h_dimuonPt_coarse_"+tag).c_str(), "", 30, 0, 600);
         TH1F* sig_h_dimuonPt        = new TH1F(("sig_h_dimuonPt_"       +tag).c_str(), "", nMETBins, metBinEdges);
         TH1F* sig_h_dimuonMass      = new TH1F(("sig_h_dimuonMass_"     +tag).c_str(), "", 60, 60, 120);
@@ -3857,9 +3901,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             gNomNCSig->GetEntry(iEvt);
             gNomRmsSig->GetEntry(iEvt);
             metTruthTreeSig->GetEntry(iEvt);
-            // metTruthNonIntX/Y already points in the standard MET direction (sum of NonInt particle
-            // momenta = direction of neutrinos). The DAOD note's constraint is consistent with
-            // momentum conservation, with the Int/IntOut/IntMuon terms (not NonInt) carrying the sign flip.
+            sig_metTruthCaloX = -sig_metTruthCaloX; sig_metTruthCaloY = -sig_metTruthCaloY; // Int -> MET direction
             // coreEMTopoTreeSig->GetEntry(iEvt);
             // coreEMPFlowTreeSig->GetEntry(iEvt);
 
@@ -3888,8 +3930,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 sig_h_gMET_NCAOD->Fill(clampVal(sig_h_gMET_NCAOD,     sig_gMET_NCAOD));
                 sig_h_gMET_RmsAOD->Fill(clampVal(sig_h_gMET_RmsAOD,   sig_gMET_RmsAOD));
             }
-            sig_h_metTruthNonIntX->Fill(sig_metTruthNonIntX);
-            sig_h_metTruthNonIntY->Fill(sig_metTruthNonIntY);
+            sig_h_metTruthCaloX->Fill(sig_metTruthCaloX);
+            sig_h_metTruthCaloY->Fill(sig_metTruthCaloY);
             sig_h_JetMetX->Fill(sig_JetMetX); sig_h_JetMetY->Fill(sig_JetMetY);
             sig_h_TowerMetX->Fill(sig_TowerMetX); sig_h_TowerMetY->Fill(sig_TowerMetY);
             // MET direction per GEP term. A term with both components exactly zero has no
@@ -3923,7 +3965,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                                                clamp2D(sigMETByType2D[cmp2DTypeIdx[j]]));
             }
             sig_h_metTruthNonInt->Fill(clampVal(sig_h_metTruthNonInt, sig_metTruthNonInt));
-            sig_h_metTruthNonInt_coarse->Fill(std::min(sig_metTruthNonInt, 599.9));
+            sig_h_metTruthCalo_coarse->Fill(std::min(sig_metTruthCalo, 599.9));
             sig_h_metTruthInt->Fill(clampVal(sig_h_metTruthInt, sig_metTruthInt));
             sig_h_metTruthIntOut->Fill(clampVal(sig_h_metTruthIntOut, sig_metTruthIntOut));
             // sig_h_coreEMTopo_SoftClus_MET->Fill(clampVal(sig_h_coreEMTopo_SoftClus_MET, sig_coreEMTopo_SoftClus_MET));
@@ -3931,22 +3973,22 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             // sig_h_coreEMTopo_SoftClusEM_MET->Fill(clampVal(sig_h_coreEMTopo_SoftClusEM_MET, sig_coreEMTopo_SoftClusEM_MET));
             // sig_h_coreEMPFlow_SoftClus_MET->Fill(clampVal(sig_h_coreEMPFlow_SoftClus_MET, sig_coreEMPFlow_SoftClus_MET));
             // sig_h_coreEMPFlow_PVSoftTrk_MET->Fill(clampVal(sig_h_coreEMPFlow_PVSoftTrk_MET, sig_coreEMPFlow_PVSoftTrk_MET));
-            h_turnOn_denom->Fill(clampVal(h_turnOn_denom, sig_metTruthNonInt));
+            h_turnOn_denom->Fill(clampVal(h_turnOn_denom, sig_metTruthCalo));
 
             // Calibration / resolution fills (guard against truth = 0 to avoid division by zero)
-            if (sig_metTruthNonInt > 0.0) {
-                double truthCl = std::min(sig_metTruthNonInt, hi2D - 1e-9);
+            if (sig_metTruthCalo > 0.0) {
+                double truthCl = std::min(sig_metTruthCalo, hi2D - 1e-9);
                 auto fillCalib = [&](TH2F* h2corr,
                                      TH1F* h1relRes, TH2F* h2relResVsTruth, TH2F* h2relResVsSumET,
                                      TH1F* h1absRes, TH2F* h2absResVsTruth, TH2F* h2absResVsSumET,
                                      double tobMET, double tobSumET) {
                     h2corr->Fill(truthCl, std::min(tobMET, hi2D - 1e-9));
-                    double relRes = (sig_metTruthNonInt - tobMET) / sig_metTruthNonInt;
+                    double relRes = (sig_metTruthCalo - tobMET) / sig_metTruthCalo;
                     double relResClamp = std::max(-3.0 + 1e-9, std::min(2.0 - 1e-9, relRes));
                     h1relRes->Fill(relResClamp);
                     h2relResVsTruth->Fill(truthCl, relResClamp);
                     h2relResVsSumET->Fill(std::min(tobSumET, hiSumET2D - 1e-9), relResClamp);
-                    double absRes = sig_metTruthNonInt - tobMET;
+                    double absRes = sig_metTruthCalo - tobMET;
                     double absResClamp = std::max(-hiAbsRes + 1e-9, std::min(hiAbsRes - 1e-9, absRes));
                     h1absRes->Fill(absResClamp);
                     h2absResVsTruth->Fill(truthCl, absResClamp);
@@ -4144,6 +4186,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             gNomNCBack->GetEntry(iEvt);
             gNomRmsBack->GetEntry(iEvt);
             metTruthTreeBack->GetEntry(iEvt);
+            back_metTruthCaloX = -back_metTruthCaloX; back_metTruthCaloY = -back_metTruthCaloY; // Int -> MET direction
             // coreEMTopoTreeBack->GetEntry(iEvt);
             // coreEMPFlowTreeBack->GetEntry(iEvt);
             eventInfoTreeBack->GetEntry(iEvt);
@@ -4388,8 +4431,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             //back_h_gMETX->Fill(back_gMETX, w); back_h_gMETY->Fill(back_gMETY, w);
             //back_h_gMETX_NC->Fill(back_gMETX_NC, w); back_h_gMETY_NC->Fill(back_gMETY_NC, w);
             //back_h_gMETX_Rms->Fill(back_gMETX_Rms, w); back_h_gMETY_Rms->Fill(back_gMETY_Rms, w);
-            back_h_metTruthNonIntX->Fill(back_metTruthNonIntX, w);
-            back_h_metTruthNonIntY->Fill(back_metTruthNonIntY, w);
+            back_h_metTruthCaloX->Fill(back_metTruthCaloX, w);
+            back_h_metTruthCaloY->Fill(back_metTruthCaloY, w);
             back_h_JetMetX->Fill(back_JetMetX, w); back_h_JetMetY->Fill(back_JetMetY, w);
             back_h_TowerMetX->Fill(back_TowerMetX, w); back_h_TowerMetY->Fill(back_TowerMetY, w);
             // MET direction per GEP term; events with a null vector carry no direction (see the
@@ -4430,8 +4473,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                     for (int j = i + 1; j < nCmp2DTypes; ++j)
                         back_h2_cmp[i][j]->Fill(clamp2Dbk(backMETByType2D[cmp2DTypeIdx[i]]),
                                                 clamp2Dbk(backMETByType2D[cmp2DTypeIdx[j]]));
-                if (back_metTruthNonInt > 0.0)
-                    back_h2_GEPJwoJMET_TOBMet_vs_truthMET->Fill(std::min(back_metTruthNonInt, hi2D - 1e-9),
+                if (back_metTruthCalo > 0.0)
+                    back_h2_GEPJwoJMET_TOBMet_vs_truthMET->Fill(std::min(back_metTruthCalo, hi2D - 1e-9),
                                                                 clamp2Dbk(back_GEPJwoJMET), w);
             }
 
@@ -4496,19 +4539,19 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             }
 
             // Calibration / resolution fills — background (weighted, guard against truth = 0)
-            if (back_metTruthNonInt > 0.0) {
-                double truthCl_b = std::min(back_metTruthNonInt, hi2D - 1e-9);
+            if (back_metTruthCalo > 0.0) {
+                double truthCl_b = std::min(back_metTruthCalo, hi2D - 1e-9);
                 auto fillCalibBack = [&](TH2F* h2corr,
                                          TH1F* h1relRes, TH2F* h2relResVsTruth, TH2F* h2relResVsSumET,
                                          TH1F* h1absRes, TH2F* h2absResVsTruth, TH2F* h2absResVsSumET,
                                          double tobMET, double tobSumET) {
                     h2corr->Fill(truthCl_b, std::min(tobMET, hi2D - 1e-9), w);
-                    double relRes = (back_metTruthNonInt - tobMET) / back_metTruthNonInt;
+                    double relRes = (back_metTruthCalo - tobMET) / back_metTruthCalo;
                     double relResClamp = std::max(-3.0 + 1e-9, std::min(2.0 - 1e-9, relRes));
                     h1relRes->Fill(relResClamp, w);
                     h2relResVsTruth->Fill(truthCl_b, relResClamp, w);
                     h2relResVsSumET->Fill(std::min(tobSumET, hiSumET2D - 1e-9), relResClamp, w);
-                    double absRes = back_metTruthNonInt - tobMET;
+                    double absRes = back_metTruthCalo - tobMET;
                     double absResClamp = std::max(-hiAbsRes + 1e-9, std::min(hiAbsRes - 1e-9, absRes));
                     h1absRes->Fill(absResClamp, w);
                     h2absResVsTruth->Fill(truthCl_b, absResClamp, w);
@@ -5059,7 +5102,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             gNomNCSig->GetEntry(iEvt);
             gNomRmsSig->GetEntry(iEvt);
             metTruthTreeSig->GetEntry(iEvt);
-            double truthMET = clampVal(h_turnOn_denom, sig_metTruthNonInt);
+            sig_metTruthCaloX = -sig_metTruthCaloX; sig_metTruthCaloY = -sig_metTruthCaloY; // Int -> MET direction
+            double truthMET = clampVal(h_turnOn_denom, sig_metTruthCalo);
             // Individual gFEX and GEP turn-ons
             if (sig_gMET     > thr_gMET_20kHz)     h_turnOn_num_gMET_20kHz->Fill(truthMET);
             if (sig_gMET     > thr_gMET_40kHz)     h_turnOn_num_gMET_40kHz->Fill(truthMET);
@@ -5213,14 +5257,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 };
                 for (int iSel = 0; iSel < nSel80; iSel++) {
                     if (!passes80[iSel]) continue;
-                    sig_sel_truthMET[iSel]->Fill(clampVal(sig_sel_truthMET[iSel], sig_metTruthNonInt));
+                    sig_sel_truthMET[iSel]->Fill(clampVal(sig_sel_truthMET[iSel], sig_metTruthCalo));
                     sig_sel_SumET[iSel]->Fill(std::min(sig_SumET, 1039.9));
                     sig_sel_gSumET[iSel]->Fill(std::min(sig_gSumET, 1039.9));
                     if (METsig  < 25.0) sig_sel_METsig[iSel]->Fill(METsig);
                     if (gMETsig < 25.0) sig_sel_gMETsig[iSel]->Fill(gMETsig);
                     //sig_sel_dPhi_GEP_gFEX[iSel]->Fill(absDeltaPhi(phi_GEP, phi_gFEX));
-                    if (hasTruthNonIntXY && (sig_metTruthNonIntX != 0.0 || sig_metTruthNonIntY != 0.0)) {
-                        double phi_truth = std::atan2(sig_metTruthNonIntY, sig_metTruthNonIntX);
+                    if (hasTruthCaloXY && (sig_metTruthCaloX != 0.0 || sig_metTruthCaloY != 0.0)) {
+                        double phi_truth = std::atan2(sig_metTruthCaloY, sig_metTruthCaloX);
                         sig_sel_dPhi_GEP_truth[iSel]->Fill(absDeltaPhi(phi_GEP, phi_truth));
                         bool hasTOBphi = (iSel < 4) || (iSel == 4 && hasJetMetXY) || (iSel == 5 && hasTowerMetXY);
                         /*if (hasTOBphi) {
@@ -5275,6 +5319,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             gNomNCBack->GetEntry(iEvt);
             gNomRmsBack->GetEntry(iEvt);
             metTruthTreeBack->GetEntry(iEvt);
+            back_metTruthCaloX = -back_metTruthCaloX; back_metTruthCaloY = -back_metTruthCaloY; // Int -> MET direction
             eventInfoTreeBack->GetEntry(iEvt);
             if (!keepBackgroundEvent(passHSTPValuesBack, sampleJZSliceBack, eventWeightsValuesBack)) continue;
             if (hasWTAConeJets) gepWTAConeCellsTowersJetsTreeBack->GetEntry(iEvt);
@@ -5375,14 +5420,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             };
             for (int iSel = 0; iSel < nSel80; iSel++) {
                 if (!passesB[iSel]) continue;
-                back_sel_truthMET[iSel]->Fill(clampVal(back_sel_truthMET[iSel], back_metTruthNonInt), w);
+                back_sel_truthMET[iSel]->Fill(clampVal(back_sel_truthMET[iSel], back_metTruthCalo), w);
                 back_sel_SumET[iSel]->Fill(std::min(back_SumET, 1039.9), w);
                 back_sel_gSumET[iSel]->Fill(std::min(back_gSumET, 1039.9), w);
                 if (METsig  < 25.0) back_sel_METsig[iSel]->Fill(METsig,  w);
                 if (gMETsig < 25.0) back_sel_gMETsig[iSel]->Fill(gMETsig, w);
                 //back_sel_dPhi_GEP_gFEX[iSel]->Fill(absDeltaPhi(phi_GEP, phi_gFEX), w);
-                if (hasTruthNonIntXY && (back_metTruthNonIntX != 0.0 || back_metTruthNonIntY != 0.0)) {
-                    double phi_truth = std::atan2(back_metTruthNonIntY, back_metTruthNonIntX);
+                if (hasTruthCaloXY && (back_metTruthCaloX != 0.0 || back_metTruthCaloY != 0.0)) {
+                    double phi_truth = std::atan2(back_metTruthCaloY, back_metTruthCaloX);
                     back_sel_dPhi_GEP_truth[iSel]->Fill(absDeltaPhi(phi_GEP, phi_truth), w);
                     bool hasTOBphi = (iSel < 4) || (iSel == 4 && hasJetMetXY) || (iSel == 5 && hasTowerMetXY);
                     /*if (hasTOBphi) {
@@ -5684,9 +5729,9 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         drawComponentOverlay(sig_h_gMETY_NC,  back_h_gMETY_NC,  "gFEX MET_{y} (NoiseCut)", "gFEX MET_{y} (NoiseCut) [GeV]", fDir + "gFEX_METY_NoiseCut.pdf");
         //drawComponentOverlay(sig_h_gMETX_Rms, back_h_gMETX_Rms, "gFEX MET_{x} (Rms)",      "gFEX MET_{x} (rms) [GeV]", fDir + "gFEX_METX_Rms.pdf");
         //drawComponentOverlay(sig_h_gMETY_Rms, back_h_gMETY_Rms, "gFEX MET_{y} (Rms)",      "gFEX MET_{y} (rms) [GeV]", fDir + "gFEX_METY_Rms.pdf");
-        if (hasTruthNonIntXY) {
-            drawComponentOverlay(sig_h_metTruthNonIntX, back_h_metTruthNonIntX, "Truth MET_{x} (NonInt)", "Truth MET_{x} (NonInt) [GeV]", fDir + "TruthMET_NonIntX.pdf");
-            drawComponentOverlay(sig_h_metTruthNonIntY, back_h_metTruthNonIntY, "Truth MET_{y} (NonInt)", "Truth MET_{y} (NonInt) [GeV]", fDir + "TruthMET_NonIntY.pdf");
+        if (hasTruthCaloXY) {
+            drawComponentOverlay(sig_h_metTruthCaloX, back_h_metTruthCaloX, "Truth MET_{x} (Calo)", "Truth MET_{x} (Calo) [GeV]", fDir + "TruthMET_CaloX.pdf");
+            drawComponentOverlay(sig_h_metTruthCaloY, back_h_metTruthCaloY, "Truth MET_{y} (Calo)", "Truth MET_{y} (Calo) [GeV]", fDir + "TruthMET_CaloY.pdf");
         }
         if (hasJetMetXY) {
             drawComponentOverlay(sig_h_JetMetX, back_h_JetMetX, "GEP Jet MET_{x}", "GEP Jet MET_{x} [GeV]", fDir + "JetMETx.pdf");
@@ -5756,19 +5801,19 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // drawOverlay(sig_h_coreEMPFlow_PVSoftTrk_MET, back_h_coreEMPFlow_PVSoftTrk_MET, "Core EMPFlow PVSoftTrk MET", "Core EMPFlow PVSoftTrk MET [GeV]", fDir + "CoreEMPFlow_PVSoftTrk_MET.pdf");
 
         // --- Multi-MET comparison: all types on one canvas, signal ---
-        drawMultiDist({sig_h_TotalMET, sig_h_gMET, sig_h_metTruthNonInt},
+        drawMultiDist({sig_h_TotalMET, sig_h_gMET, sig_h_metTruthInt},
                     // sig_h_coreEMTopo_SoftClus_MET, sig_h_coreEMTopo_PVSoftTrk_MET, sig_h_coreEMTopo_SoftClusEM_MET,
                     // sig_h_coreEMPFlow_SoftClus_MET, sig_h_coreEMPFlow_PVSoftTrk_MET},
-                      {"GEP TotalMET", "gFEX MET", "Truth NonInt"},
+                      {"GEP TotalMET", "gFEX MET", "Truth Calo"},
                     // "EMTopo SoftClus", "EMTopo PVSoftTrk", "EMTopo SoftClusEM",
                     // "EMPFlow SoftClus", "EMPFlow PVSoftTrk"},
                       "MET comparison — signal", "MET [GeV]", fDir + "METComparison_sig.pdf");
 
         // --- Multi-MET comparison: all types on one canvas, background ---
-        drawMultiDist({back_h_TotalMET, back_h_gMET, back_h_metTruthNonInt},
+        drawMultiDist({back_h_TotalMET, back_h_gMET, back_h_metTruthInt},
                     // back_h_coreEMTopo_SoftClus_MET, back_h_coreEMTopo_PVSoftTrk_MET, back_h_coreEMTopo_SoftClusEM_MET,
                     // back_h_coreEMPFlow_SoftClus_MET, back_h_coreEMPFlow_PVSoftTrk_MET},
-                      {"GEP TotalMET", "gFEX MET", "Truth NonInt"},
+                      {"GEP TotalMET", "gFEX MET", "Truth Calo"},
                     // "EMTopo SoftClus", "EMTopo PVSoftTrk", "EMTopo SoftClusEM",
                     // "EMPFlow SoftClus", "EMPFlow PVSoftTrk"},
                       "MET comparison — background", "MET [GeV]", fDir + "METComparison_bkg.pdf");
@@ -5787,13 +5832,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             };
             auto toVec = [nSel80](TH1F** a) { return std::vector<TH1F*>(a, a + nSel80); };
             // Signal — shape comparison across selections
-            drawMultiDist(toVec(sig_sel_truthMET),       selLegLabels, "Truth MET_{NonInt} — signal at 80 kHz sel.",                    "Truth MET_{NonInt} [GeV]",                                           selDir + "sig_sel_truthMET.pdf");
+            drawMultiDist(toVec(sig_sel_truthMET),       selLegLabels, "Truth Calo MET — signal at 80 kHz sel.",                    "Truth Calo MET [GeV]",                                           selDir + "sig_sel_truthMET.pdf");
             drawMultiDist(toVec(sig_sel_SumET),          selLegLabels, "GEP TOB #Sigma E_{T} — signal at 80 kHz sel.",                  "GEP TOB #Sigma E_{T} [GeV]",                                         selDir + "sig_sel_SumET.pdf");
             drawMultiDist(toVec(sig_sel_gSumET),         selLegLabels, "gFEX TOB #Sigma E_{T} — signal at 80 kHz sel.",                 "gFEX TOB #Sigma E_{T} [GeV]",                                        selDir + "sig_sel_gSumET.pdf");
             drawMultiDist(toVec(sig_sel_METsig),         selLegLabels, "GEP MET significance — signal at 80 kHz sel.",                  "GEP MET / #sqrt{GEP TOB #Sigma E_{T}} [#sqrt{GeV}]",                 selDir + "sig_sel_METsig.pdf",         true,  "#sqrt{GeV}");
             drawMultiDist(toVec(sig_sel_gMETsig),        selLegLabels, "gFEX MET significance — signal at 80 kHz sel.",                 "gFEX MET / #sqrt{gFEX TOB #Sigma E_{T}} [#sqrt{GeV}]",               selDir + "sig_sel_gMETsig.pdf",        true,  "#sqrt{GeV}");
             //drawMultiDist(toVec(sig_sel_dPhi_GEP_gFEX), selLegLabels, "#Delta#phi(GEP MET, gFEX MET) — signal at 80 kHz sel.",         "|#Delta#phi(GEP MET, gFEX MET)| [rad]",                              selDir + "sig_sel_dPhi_GEP_gFEX.pdf",  false, "rad");
-            if (hasTruthNonIntXY) {
+            if (hasTruthCaloXY) {
                 drawMultiDist(toVec(sig_sel_dPhi_GEP_truth), selLegLabels, "#Delta#phi(GEP MET, truth MET) — signal at 80 kHz sel.",    "|#Delta#phi(GEP MET, truth MET)| [rad]",                             selDir + "sig_sel_dPhi_GEP_truth.pdf",  false, "rad");
                 drawMultiDist(toVec(sig_sel_dPhi_truth_TOB), selLegLabels, "#Delta#phi(truth MET, TOB MET) — signal at 80 kHz sel.",    "|#Delta#phi(truth MET, TOB MET)| [rad]",                             selDir + "sig_sel_dPhi_truth_TOB.pdf",  false, "rad");
                 for (int iSel = 0; iSel < nSel80; iSel++) {
@@ -5818,13 +5863,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             }
             // Background — fake-trigger topology
             BkgProcLabel bkgProcSel;   // everything below this point in the block is background
-            drawMultiDist(toVec(back_sel_truthMET),      selLegLabels, "Truth MET_{NonInt} — bkg at 80 kHz sel.",                       "Truth MET_{NonInt} [GeV]",                                           selDir + "back_sel_truthMET.pdf");
+            drawMultiDist(toVec(back_sel_truthMET),      selLegLabels, "Truth Calo MET — bkg at 80 kHz sel.",                       "Truth Calo MET [GeV]",                                           selDir + "back_sel_truthMET.pdf");
             drawMultiDist(toVec(back_sel_SumET),         selLegLabels, "GEP TOB #Sigma E_{T} — bkg at 80 kHz sel.",                     "GEP TOB #Sigma E_{T} [GeV]",                                         selDir + "back_sel_SumET.pdf");
             drawMultiDist(toVec(back_sel_gSumET),        selLegLabels, "gFEX TOB #Sigma E_{T} — bkg at 80 kHz sel.",                    "gFEX TOB #Sigma E_{T} [GeV]",                                        selDir + "back_sel_gSumET.pdf");
             drawMultiDist(toVec(back_sel_METsig),        selLegLabels, "GEP MET significance — bkg at 80 kHz sel.",                     "GEP MET / #sqrt{GEP TOB #Sigma E_{T}} [#sqrt{GeV}]",                 selDir + "back_sel_METsig.pdf",        true,  "#sqrt{GeV}");
             drawMultiDist(toVec(back_sel_gMETsig),       selLegLabels, "gFEX MET significance — bkg at 80 kHz sel.",                    "gFEX MET / #sqrt{gFEX TOB #Sigma E_{T}} [#sqrt{GeV}]",               selDir + "back_sel_gMETsig.pdf",       true,  "#sqrt{GeV}");
             //drawMultiDist(toVec(back_sel_dPhi_GEP_gFEX),selLegLabels, "#Delta#phi(GEP MET, gFEX MET) — bkg at 80 kHz sel.",            "|#Delta#phi(GEP MET, gFEX MET)| [rad]",                              selDir + "back_sel_dPhi_GEP_gFEX.pdf", false, "rad");
-            if (hasTruthNonIntXY) {
+            if (hasTruthCaloXY) {
                 drawMultiDist(toVec(back_sel_dPhi_GEP_truth), selLegLabels, "#Delta#phi(GEP MET, truth MET) — bkg at 80 kHz sel.",      "|#Delta#phi(GEP MET, truth MET)| [rad]",                             selDir + "back_sel_dPhi_GEP_truth.pdf", false, "rad");
                 drawMultiDist(toVec(back_sel_dPhi_truth_TOB), selLegLabels, "#Delta#phi(truth MET, TOB MET) — bkg at 80 kHz sel.",      "|#Delta#phi(truth MET, TOB MET)| [rad]",                             selDir + "back_sel_dPhi_truth_TOB.pdf", false, "rad");
                 for (int iSel = 0; iSel < nSel80; iSel++) {
@@ -6332,19 +6377,19 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             }
         }
 
-        // --- TOB MET vs truth NonInt MET calibration and resolution (signal and background) ---
+        // --- TOB MET vs truth Calo MET calibration and resolution (signal and background) ---
         {
             std::string calDir = fDir + "Calibration/";
             gSystem->mkdir(calDir.c_str(), true);
 
-            // 2D correlation: x = truth NonInt MET, y = TOB MET
+            // 2D correlation: x = truth Calo MET, y = TOB MET
             // zmin: colour scale minimum; xmax_cap: x-axis display cap (0 = use histogram range)
             auto drawTOBvsTruth = [&](TH2F* h, const std::string& path, const std::string& tobLabel,
                                       double zmin = 1e-5, double xmax_cap = 0.0) {
                 if (h->Integral() <= 0) return;
                 h->Scale(1.0 / h->Integral());
                 h->SetMinimum(zmin);
-                h->GetXaxis()->SetTitle("Truth MET_{NonInt} [GeV]");
+                h->GetXaxis()->SetTitle("Truth Calo MET [GeV]");
                 h->GetYaxis()->SetTitle((tobLabel + " MET [GeV]").c_str());
                 if (xmax_cap > 0) h->GetXaxis()->SetRangeUser(0, xmax_cap);
                 TCanvas cTmp(("cCalCorr_"+std::string(h->GetName())).c_str(), "", 700, 600);
@@ -6473,7 +6518,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             // 1D residual distributions, individual and overlaid
             // xLbl: x-axis label; yUnit: appended to y-axis bin-size string (e.g., "" or "GeV")
             auto drawRelResidual1D = [&](TH1F* h, const std::string& path, const std::string& tobLabel,
-                                         const std::string& xLbl = "(Truth - TOB) / Truth MET_{NonInt}",
+                                         const std::string& xLbl = "(Truth - TOB) / Truth Calo MET",
                                          const std::string& yUnit = "") {
                 if (h->Integral() <= 0) return;
                 h->Scale(1.0 / h->Integral());
@@ -6493,7 +6538,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             };
             // Helper to draw the 5-algorithm overlay for a given set of residual histograms
             auto drawRelResidualOverlay = [&](std::vector<TH1F*> resH, const std::string& path,
-                                              const std::string& xLbl = "(Truth - TOB) / Truth MET_{NonInt}",
+                                              const std::string& xLbl = "(Truth - TOB) / Truth Calo MET",
                                               const std::string& yUnit = "") {
                 int rcols[] = {kBlack, kP10Red, kP10Orange, kP10Blue, kP10Green, kP10Violet};
                 std::vector<std::string> resL = {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms",
@@ -6570,7 +6615,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             // yLbl: y-axis label (defaults to relative residual label)
             auto drawRelResidual2D = [&](TH2F* h, const std::string& path, const std::string& xLabel,
                                          double zmin = 1e-5, double xmax_cap = 0.0,
-                                         const std::string& yLbl = "(Truth - TOB) / Truth MET_{NonInt}") {
+                                         const std::string& yLbl = "(Truth - TOB) / Truth Calo MET") {
                 if (h->Integral() <= 0) return;
                 h->Scale(1.0 / h->Integral());
                 h->SetMinimum(zmin);
@@ -6602,13 +6647,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 delete prof;
             };
             const std::string absYLbl = "Truth - TOB MET [GeV]";
-            // Signal: relative residual vs truth NonInt MET
-            drawRelResidual2D(sig_h2_gJwoJ_relResidual_vs_truthMET,    calDir + "sig_gFEX_JwoJ_relResidual_vs_truthMET.pdf",    "Truth MET_{NonInt} [GeV]");
-            drawRelResidual2D(sig_h2_gNC_relResidual_vs_truthMET,      calDir + "sig_gFEX_NoiseCut_relResidual_vs_truthMET.pdf","Truth MET_{NonInt} [GeV]");
-            drawRelResidual2D(sig_h2_gRms_relResidual_vs_truthMET,     calDir + "sig_gFEX_Rms_relResidual_vs_truthMET.pdf",     "Truth MET_{NonInt} [GeV]");
-            drawRelResidual2D(sig_h2_JetMET_relResidual_vs_truthMET,   calDir + "sig_GEP_JetMET_relResidual_vs_truthMET.pdf",   "Truth MET_{NonInt} [GeV]");
-            drawRelResidual2D(sig_h2_TowerMET_relResidual_vs_truthMET, calDir + "sig_GEP_TowerMET_relResidual_vs_truthMET.pdf", "Truth MET_{NonInt} [GeV]");
-            drawRelResidual2D(sig_h2_TotalMET_relResidual_vs_truthMET, calDir + "sig_GEP_TotalMET_relResidual_vs_truthMET.pdf", "Truth MET_{NonInt} [GeV]");
+            // Signal: relative residual vs truth Calo MET
+            drawRelResidual2D(sig_h2_gJwoJ_relResidual_vs_truthMET,    calDir + "sig_gFEX_JwoJ_relResidual_vs_truthMET.pdf",    "Truth Calo MET [GeV]");
+            drawRelResidual2D(sig_h2_gNC_relResidual_vs_truthMET,      calDir + "sig_gFEX_NoiseCut_relResidual_vs_truthMET.pdf","Truth Calo MET [GeV]");
+            drawRelResidual2D(sig_h2_gRms_relResidual_vs_truthMET,     calDir + "sig_gFEX_Rms_relResidual_vs_truthMET.pdf",     "Truth Calo MET [GeV]");
+            drawRelResidual2D(sig_h2_JetMET_relResidual_vs_truthMET,   calDir + "sig_GEP_JetMET_relResidual_vs_truthMET.pdf",   "Truth Calo MET [GeV]");
+            drawRelResidual2D(sig_h2_TowerMET_relResidual_vs_truthMET, calDir + "sig_GEP_TowerMET_relResidual_vs_truthMET.pdf", "Truth Calo MET [GeV]");
+            drawRelResidual2D(sig_h2_TotalMET_relResidual_vs_truthMET, calDir + "sig_GEP_TotalMET_relResidual_vs_truthMET.pdf", "Truth Calo MET [GeV]");
             // Signal: relative residual vs TOB SumET
             drawRelResidual2D(sig_h2_gJwoJ_relResidual_vs_sumET,    calDir + "sig_gFEX_JwoJ_relResidual_vs_sumET.pdf",    "gFEX JwoJ #Sigma E_{T} [GeV]");
             drawRelResidual2D(sig_h2_gNC_relResidual_vs_sumET,      calDir + "sig_gFEX_NoiseCut_relResidual_vs_sumET.pdf","gFEX NoiseCut #Sigma E_{T} [GeV]");
@@ -6616,13 +6661,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawRelResidual2D(sig_h2_JetMET_relResidual_vs_sumET,   calDir + "sig_GEP_JetMET_relResidual_vs_sumET.pdf",   "GEP #Sigma E_{T} [GeV]");
             drawRelResidual2D(sig_h2_TowerMET_relResidual_vs_sumET, calDir + "sig_GEP_TowerMET_relResidual_vs_sumET.pdf", "GEP #Sigma E_{T} [GeV]");
             drawRelResidual2D(sig_h2_TotalMET_relResidual_vs_sumET, calDir + "sig_GEP_TotalMET_relResidual_vs_sumET.pdf", "GEP #Sigma E_{T} [GeV]");
-            // Signal: absolute residual vs truth NonInt MET
-            drawRelResidual2D(sig_h2_gJwoJ_absResidual_vs_truthMET,    calDir + "sig_gFEX_JwoJ_absResidual_vs_truthMET.pdf",    "Truth MET_{NonInt} [GeV]", 1e-5, 0.0, absYLbl);
-            drawRelResidual2D(sig_h2_gNC_absResidual_vs_truthMET,      calDir + "sig_gFEX_NoiseCut_absResidual_vs_truthMET.pdf","Truth MET_{NonInt} [GeV]", 1e-5, 0.0, absYLbl);
-            drawRelResidual2D(sig_h2_gRms_absResidual_vs_truthMET,     calDir + "sig_gFEX_Rms_absResidual_vs_truthMET.pdf",     "Truth MET_{NonInt} [GeV]", 1e-5, 0.0, absYLbl);
-            drawRelResidual2D(sig_h2_JetMET_absResidual_vs_truthMET,   calDir + "sig_GEP_JetMET_absResidual_vs_truthMET.pdf",   "Truth MET_{NonInt} [GeV]", 1e-5, 0.0, absYLbl);
-            drawRelResidual2D(sig_h2_TowerMET_absResidual_vs_truthMET, calDir + "sig_GEP_TowerMET_absResidual_vs_truthMET.pdf", "Truth MET_{NonInt} [GeV]", 1e-5, 0.0, absYLbl);
-            drawRelResidual2D(sig_h2_TotalMET_absResidual_vs_truthMET, calDir + "sig_GEP_TotalMET_absResidual_vs_truthMET.pdf", "Truth MET_{NonInt} [GeV]", 1e-5, 0.0, absYLbl);
+            // Signal: absolute residual vs truth Calo MET
+            drawRelResidual2D(sig_h2_gJwoJ_absResidual_vs_truthMET,    calDir + "sig_gFEX_JwoJ_absResidual_vs_truthMET.pdf",    "Truth Calo MET [GeV]", 1e-5, 0.0, absYLbl);
+            drawRelResidual2D(sig_h2_gNC_absResidual_vs_truthMET,      calDir + "sig_gFEX_NoiseCut_absResidual_vs_truthMET.pdf","Truth Calo MET [GeV]", 1e-5, 0.0, absYLbl);
+            drawRelResidual2D(sig_h2_gRms_absResidual_vs_truthMET,     calDir + "sig_gFEX_Rms_absResidual_vs_truthMET.pdf",     "Truth Calo MET [GeV]", 1e-5, 0.0, absYLbl);
+            drawRelResidual2D(sig_h2_JetMET_absResidual_vs_truthMET,   calDir + "sig_GEP_JetMET_absResidual_vs_truthMET.pdf",   "Truth Calo MET [GeV]", 1e-5, 0.0, absYLbl);
+            drawRelResidual2D(sig_h2_TowerMET_absResidual_vs_truthMET, calDir + "sig_GEP_TowerMET_absResidual_vs_truthMET.pdf", "Truth Calo MET [GeV]", 1e-5, 0.0, absYLbl);
+            drawRelResidual2D(sig_h2_TotalMET_absResidual_vs_truthMET, calDir + "sig_GEP_TotalMET_absResidual_vs_truthMET.pdf", "Truth Calo MET [GeV]", 1e-5, 0.0, absYLbl);
             // Signal: absolute residual vs TOB SumET
             drawRelResidual2D(sig_h2_gJwoJ_absResidual_vs_sumET,    calDir + "sig_gFEX_JwoJ_absResidual_vs_sumET.pdf",    "gFEX JwoJ #Sigma E_{T} [GeV]",    1e-5, 0.0, absYLbl);
             drawRelResidual2D(sig_h2_gNC_absResidual_vs_sumET,      calDir + "sig_gFEX_NoiseCut_absResidual_vs_sumET.pdf","gFEX NoiseCut #Sigma E_{T} [GeV]", 1e-5, 0.0, absYLbl);
@@ -6630,14 +6675,14 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawRelResidual2D(sig_h2_JetMET_absResidual_vs_sumET,   calDir + "sig_GEP_JetMET_absResidual_vs_sumET.pdf",   "GEP #Sigma E_{T} [GeV]",          1e-5, 0.0, absYLbl);
             drawRelResidual2D(sig_h2_TowerMET_absResidual_vs_sumET, calDir + "sig_GEP_TowerMET_absResidual_vs_sumET.pdf", "GEP #Sigma E_{T} [GeV]",          1e-5, 0.0, absYLbl);
             drawRelResidual2D(sig_h2_TotalMET_absResidual_vs_sumET, calDir + "sig_GEP_TotalMET_absResidual_vs_sumET.pdf", "GEP #Sigma E_{T} [GeV]",          1e-5, 0.0, absYLbl);
-            // Background: relative residual vs truth NonInt MET (lower z-floor; x capped at 300 GeV)
+            // Background: relative residual vs truth Calo MET (lower z-floor; x capped at 300 GeV)
             BkgProcLabel bkgProcRes;   // everything below here in this block is background
-            drawRelResidual2D(back_h2_gJwoJ_relResidual_vs_truthMET,    calDir + "back_gFEX_JwoJ_relResidual_vs_truthMET.pdf",    "Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
-            drawRelResidual2D(back_h2_gNC_relResidual_vs_truthMET,      calDir + "back_gFEX_NoiseCut_relResidual_vs_truthMET.pdf","Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
-            drawRelResidual2D(back_h2_gRms_relResidual_vs_truthMET,     calDir + "back_gFEX_Rms_relResidual_vs_truthMET.pdf",     "Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
-            drawRelResidual2D(back_h2_JetMET_relResidual_vs_truthMET,   calDir + "back_GEP_JetMET_relResidual_vs_truthMET.pdf",   "Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
-            drawRelResidual2D(back_h2_TowerMET_relResidual_vs_truthMET, calDir + "back_GEP_TowerMET_relResidual_vs_truthMET.pdf", "Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
-            drawRelResidual2D(back_h2_TotalMET_relResidual_vs_truthMET, calDir + "back_GEP_TotalMET_relResidual_vs_truthMET.pdf", "Truth MET_{NonInt} [GeV]", 1e-14, 300.0);
+            drawRelResidual2D(back_h2_gJwoJ_relResidual_vs_truthMET,    calDir + "back_gFEX_JwoJ_relResidual_vs_truthMET.pdf",    "Truth Calo MET [GeV]", 1e-14, 300.0);
+            drawRelResidual2D(back_h2_gNC_relResidual_vs_truthMET,      calDir + "back_gFEX_NoiseCut_relResidual_vs_truthMET.pdf","Truth Calo MET [GeV]", 1e-14, 300.0);
+            drawRelResidual2D(back_h2_gRms_relResidual_vs_truthMET,     calDir + "back_gFEX_Rms_relResidual_vs_truthMET.pdf",     "Truth Calo MET [GeV]", 1e-14, 300.0);
+            drawRelResidual2D(back_h2_JetMET_relResidual_vs_truthMET,   calDir + "back_GEP_JetMET_relResidual_vs_truthMET.pdf",   "Truth Calo MET [GeV]", 1e-14, 300.0);
+            drawRelResidual2D(back_h2_TowerMET_relResidual_vs_truthMET, calDir + "back_GEP_TowerMET_relResidual_vs_truthMET.pdf", "Truth Calo MET [GeV]", 1e-14, 300.0);
+            drawRelResidual2D(back_h2_TotalMET_relResidual_vs_truthMET, calDir + "back_GEP_TotalMET_relResidual_vs_truthMET.pdf", "Truth Calo MET [GeV]", 1e-14, 300.0);
             // Background: relative residual vs TOB SumET (lower z-floor; full SumET range)
             drawRelResidual2D(back_h2_gJwoJ_relResidual_vs_sumET,    calDir + "back_gFEX_JwoJ_relResidual_vs_sumET.pdf",    "gFEX JwoJ #Sigma E_{T} [GeV]",    1e-14);
             drawRelResidual2D(back_h2_gNC_relResidual_vs_sumET,      calDir + "back_gFEX_NoiseCut_relResidual_vs_sumET.pdf","gFEX NoiseCut #Sigma E_{T} [GeV]", 1e-14);
@@ -6645,13 +6690,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             drawRelResidual2D(back_h2_JetMET_relResidual_vs_sumET,   calDir + "back_GEP_JetMET_relResidual_vs_sumET.pdf",   "GEP #Sigma E_{T} [GeV]",          1e-14);
             drawRelResidual2D(back_h2_TowerMET_relResidual_vs_sumET, calDir + "back_GEP_TowerMET_relResidual_vs_sumET.pdf", "GEP #Sigma E_{T} [GeV]",          1e-14);
             drawRelResidual2D(back_h2_TotalMET_relResidual_vs_sumET, calDir + "back_GEP_TotalMET_relResidual_vs_sumET.pdf", "GEP #Sigma E_{T} [GeV]",          1e-14);
-            // Background: absolute residual vs truth NonInt MET (lower z-floor; x capped at 300 GeV)
-            drawRelResidual2D(back_h2_gJwoJ_absResidual_vs_truthMET,    calDir + "back_gFEX_JwoJ_absResidual_vs_truthMET.pdf",    "Truth MET_{NonInt} [GeV]", 1e-14, 300.0, absYLbl);
-            drawRelResidual2D(back_h2_gNC_absResidual_vs_truthMET,      calDir + "back_gFEX_NoiseCut_absResidual_vs_truthMET.pdf","Truth MET_{NonInt} [GeV]", 1e-14, 300.0, absYLbl);
-            drawRelResidual2D(back_h2_gRms_absResidual_vs_truthMET,     calDir + "back_gFEX_Rms_absResidual_vs_truthMET.pdf",     "Truth MET_{NonInt} [GeV]", 1e-14, 300.0, absYLbl);
-            drawRelResidual2D(back_h2_JetMET_absResidual_vs_truthMET,   calDir + "back_GEP_JetMET_absResidual_vs_truthMET.pdf",   "Truth MET_{NonInt} [GeV]", 1e-14, 300.0, absYLbl);
-            drawRelResidual2D(back_h2_TowerMET_absResidual_vs_truthMET, calDir + "back_GEP_TowerMET_absResidual_vs_truthMET.pdf", "Truth MET_{NonInt} [GeV]", 1e-14, 300.0, absYLbl);
-            drawRelResidual2D(back_h2_TotalMET_absResidual_vs_truthMET, calDir + "back_GEP_TotalMET_absResidual_vs_truthMET.pdf", "Truth MET_{NonInt} [GeV]", 1e-14, 300.0, absYLbl);
+            // Background: absolute residual vs truth Calo MET (lower z-floor; x capped at 300 GeV)
+            drawRelResidual2D(back_h2_gJwoJ_absResidual_vs_truthMET,    calDir + "back_gFEX_JwoJ_absResidual_vs_truthMET.pdf",    "Truth Calo MET [GeV]", 1e-14, 300.0, absYLbl);
+            drawRelResidual2D(back_h2_gNC_absResidual_vs_truthMET,      calDir + "back_gFEX_NoiseCut_absResidual_vs_truthMET.pdf","Truth Calo MET [GeV]", 1e-14, 300.0, absYLbl);
+            drawRelResidual2D(back_h2_gRms_absResidual_vs_truthMET,     calDir + "back_gFEX_Rms_absResidual_vs_truthMET.pdf",     "Truth Calo MET [GeV]", 1e-14, 300.0, absYLbl);
+            drawRelResidual2D(back_h2_JetMET_absResidual_vs_truthMET,   calDir + "back_GEP_JetMET_absResidual_vs_truthMET.pdf",   "Truth Calo MET [GeV]", 1e-14, 300.0, absYLbl);
+            drawRelResidual2D(back_h2_TowerMET_absResidual_vs_truthMET, calDir + "back_GEP_TowerMET_absResidual_vs_truthMET.pdf", "Truth Calo MET [GeV]", 1e-14, 300.0, absYLbl);
+            drawRelResidual2D(back_h2_TotalMET_absResidual_vs_truthMET, calDir + "back_GEP_TotalMET_absResidual_vs_truthMET.pdf", "Truth Calo MET [GeV]", 1e-14, 300.0, absYLbl);
             // Background: absolute residual vs TOB SumET (lower z-floor; full SumET range)
             drawRelResidual2D(back_h2_gJwoJ_absResidual_vs_sumET,    calDir + "back_gFEX_JwoJ_absResidual_vs_sumET.pdf",    "gFEX JwoJ #Sigma E_{T} [GeV]",    1e-14, 0.0, absYLbl);
             drawRelResidual2D(back_h2_gNC_absResidual_vs_sumET,      calDir + "back_gFEX_NoiseCut_absResidual_vs_sumET.pdf","gFEX NoiseCut #Sigma E_{T} [GeV]", 1e-14, 0.0, absYLbl);
@@ -6743,50 +6788,50 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             allTOLabels,
             "Turn-on at 20 kHz", fDir + "TurnOn_20kHz.pdf",
             allTOThrs(thr_gMET_20kHz, thr_gMET_NC_20kHz, thr_gMET_Rms_20kHz, thr_jMET_20kHz, thr_JetMET_20kHz, thr_TowerMET_20kHz, thr_TotalMET_20kHz, thr_GEPJwoJMET_20kHz),
-            "Rate = 20 kHz", sig_h_metTruthNonInt_coarse);
+            "Rate = 20 kHz", sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             allTOEffs(eff_gMET_40kHz, eff_gMET_NC_40kHz, eff_gMET_Rms_40kHz, eff_jMET_40kHz, eff_JetMET_40kHz, eff_TowerMET_40kHz, eff_TotalMET_40kHz, eff_GEPJwoJMET_40kHz),
             allTOLabels,
             "Turn-on at 40 kHz", fDir + "TurnOn_40kHz.pdf",
             allTOThrs(thr_gMET_40kHz, thr_gMET_NC_40kHz, thr_gMET_Rms_40kHz, thr_jMET_40kHz, thr_JetMET_40kHz, thr_TowerMET_40kHz, thr_TotalMET_40kHz, thr_GEPJwoJMET_40kHz),
-            "Rate = 40 kHz", sig_h_metTruthNonInt_coarse);
+            "Rate = 40 kHz", sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             allTOEffs(eff_gMET_80kHz, eff_gMET_NC_80kHz, eff_gMET_Rms_80kHz, eff_jMET_80kHz, eff_JetMET_80kHz, eff_TowerMET_80kHz, eff_TotalMET_80kHz, eff_GEPJwoJMET_80kHz),
             allTOLabels,
             "Turn-on at 80 kHz", fDir + "TurnOn_80kHz.pdf",
             allTOThrs(thr_gMET_80kHz, thr_gMET_NC_80kHz, thr_gMET_Rms_80kHz, thr_jMET_80kHz, thr_JetMET_80kHz, thr_TowerMET_80kHz, thr_TotalMET_80kHz, thr_GEPJwoJMET_80kHz),
-            "Rate = 80 kHz", sig_h_metTruthNonInt_coarse, 0.52);
+            "Rate = 80 kHz", sig_h_metTruthCalo_coarse, 0.52);
         drawTurnOnOverlay(
             allTOEffs(eff_gMET_60kHz, eff_gMET_NC_60kHz, eff_gMET_Rms_60kHz, eff_jMET_60kHz, eff_JetMET_60kHz, eff_TowerMET_60kHz, eff_TotalMET_60kHz, eff_GEPJwoJMET_60kHz),
             allTOLabels,
             "Turn-on at 60 kHz", fDir + "TurnOn_60kHz.pdf",
             allTOThrs(thr_gMET_60kHz, thr_gMET_NC_60kHz, thr_gMET_Rms_60kHz, thr_jMET_60kHz, thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz, thr_GEPJwoJMET_60kHz),
-            "Rate = 60 kHz", sig_h_metTruthNonInt_coarse, 0.52);
+            "Rate = 60 kHz", sig_h_metTruthCalo_coarse, 0.52);
         // gFEX-only algorithm comparison turn-ons
         drawTurnOnOverlay(
             {eff_gMET_20kHz, eff_gMET_NC_20kHz, eff_gMET_Rms_20kHz},
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms"},
             "gFEX algorithm comparison — Turn-on at 20 kHz", fDir + "TurnOn_gFEX_AlgoComparison_20kHz.pdf",
             {thr_gMET_20kHz, thr_gMET_NC_20kHz, thr_gMET_Rms_20kHz}, "Rate = 20 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             {eff_gMET_40kHz, eff_gMET_NC_40kHz, eff_gMET_Rms_40kHz},
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms"},
             "gFEX algorithm comparison — Turn-on at 40 kHz", fDir + "TurnOn_gFEX_AlgoComparison_40kHz.pdf",
             {thr_gMET_40kHz, thr_gMET_NC_40kHz, thr_gMET_Rms_40kHz}, "Rate = 40 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             {eff_gMET_80kHz, eff_gMET_NC_80kHz, eff_gMET_Rms_80kHz},
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms"},
             "gFEX algorithm comparison — Turn-on at 80 kHz", fDir + "TurnOn_gFEX_AlgoComparison_80kHz.pdf",
             {thr_gMET_80kHz, thr_gMET_NC_80kHz, thr_gMET_Rms_80kHz}, "Rate = 80 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             {eff_gMET_60kHz, eff_gMET_NC_60kHz, eff_gMET_Rms_60kHz},
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms"},
             "gFEX algorithm comparison — Turn-on at 60 kHz", fDir + "TurnOn_gFEX_AlgoComparison_60kHz.pdf",
             {thr_gMET_60kHz, thr_gMET_NC_60kHz, thr_gMET_Rms_60kHz}, "Rate = 60 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         // GEP-only algorithm comparison turn-ons
         std::vector<std::string> gepTOLabels = hasOverlapRemoval
             ? std::vector<std::string>{"GEP Jet MET", "GEP Total MET"}
@@ -6811,35 +6856,35 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 20 kHz", fDir + "TurnOn_GEP_AlgoComparison_20kHz.pdf",
             gepTOThrs(thr_JetMET_20kHz, thr_TowerMET_20kHz, thr_TotalMET_20kHz, thr_GEPJwoJMET_20kHz), "Rate = 20 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             gepTOEffs(eff_JetMET_40kHz, eff_TowerMET_40kHz, eff_TotalMET_40kHz, eff_GEPJwoJMET_40kHz),
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 40 kHz", fDir + "TurnOn_GEP_AlgoComparison_40kHz.pdf",
             gepTOThrs(thr_JetMET_40kHz, thr_TowerMET_40kHz, thr_TotalMET_40kHz, thr_GEPJwoJMET_40kHz), "Rate = 40 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             gepTOEffs(eff_JetMET_80kHz, eff_TowerMET_80kHz, eff_TotalMET_80kHz, eff_GEPJwoJMET_80kHz),
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 80 kHz", fDir + "TurnOn_GEP_AlgoComparison_80kHz.pdf",
             gepTOThrs(thr_JetMET_80kHz, thr_TowerMET_80kHz, thr_TotalMET_80kHz, thr_GEPJwoJMET_80kHz), "Rate = 80 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             gepTOEffs(eff_JetMET_60kHz, eff_TowerMET_60kHz, eff_TotalMET_60kHz, eff_GEPJwoJMET_60kHz),
             gepTOLabels,
             "GEP algorithm comparison — Turn-on at 60 kHz", fDir + "TurnOn_GEP_AlgoComparison_60kHz.pdf",
             gepTOThrs(thr_JetMET_60kHz, thr_TowerMET_60kHz, thr_TotalMET_60kHz, thr_GEPJwoJMET_60kHz), "Rate = 60 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         // jFEX-only turn-ons: a single clean curve per rate point, for when jFEX is the reference
         // being quoted on its own rather than read off one of the comparison canvases.
         drawTurnOnOverlay(
             {eff_jMET_80kHz}, {"jFEX"},
             "jFEX MET turn-on at 80 kHz", fDir + "TurnOn_jFEX_80kHz.pdf",
-            {thr_jMET_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+            {thr_jMET_80kHz}, "Rate = 80 kHz", sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             {eff_jMET_60kHz}, {"jFEX"},
             "jFEX MET turn-on at 60 kHz", fDir + "TurnOn_jFEX_60kHz.pdf",
-            {thr_jMET_60kHz}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse);
+            {thr_jMET_60kHz}, "Rate = 60 kHz", sig_h_metTruthCalo_coarse);
         // L1Calo algorithm comparison: the three gFEX algorithms and jFEX on one canvas, i.e.
         // every FEX MET the trigger actually has today. Same four rate points as the gFEX-only
         // comparison above so the two can be read against each other.
@@ -6848,25 +6893,25 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX"},
             "L1Calo algorithm comparison — Turn-on at 20 kHz", fDir + "TurnOn_L1Calo_AlgoComparison_20kHz.pdf",
             {thr_gMET_20kHz, thr_gMET_NC_20kHz, thr_gMET_Rms_20kHz, thr_jMET_20kHz}, "Rate = 20 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             {eff_gMET_40kHz, eff_gMET_NC_40kHz, eff_gMET_Rms_40kHz, eff_jMET_40kHz},
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX"},
             "L1Calo algorithm comparison — Turn-on at 40 kHz", fDir + "TurnOn_L1Calo_AlgoComparison_40kHz.pdf",
             {thr_gMET_40kHz, thr_gMET_NC_40kHz, thr_gMET_Rms_40kHz, thr_jMET_40kHz}, "Rate = 40 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             {eff_gMET_80kHz, eff_gMET_NC_80kHz, eff_gMET_Rms_80kHz, eff_jMET_80kHz},
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX"},
             "L1Calo algorithm comparison — Turn-on at 80 kHz", fDir + "TurnOn_L1Calo_AlgoComparison_80kHz.pdf",
             {thr_gMET_80kHz, thr_gMET_NC_80kHz, thr_gMET_Rms_80kHz, thr_jMET_80kHz}, "Rate = 80 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
         drawTurnOnOverlay(
             {eff_gMET_60kHz, eff_gMET_NC_60kHz, eff_gMET_Rms_60kHz, eff_jMET_60kHz},
             {"gFEX JwoJ", "gFEX NoiseCut", "gFEX Rms", "jFEX"},
             "L1Calo algorithm comparison — Turn-on at 60 kHz", fDir + "TurnOn_L1Calo_AlgoComparison_60kHz.pdf",
             {thr_gMET_60kHz, thr_gMET_NC_60kHz, thr_gMET_Rms_60kHz, thr_jMET_60kHz}, "Rate = 60 kHz",
-            sig_h_metTruthNonInt_coarse);
+            sig_h_metTruthCalo_coarse);
 
         // --- Z->mumu turn-on curves vs dimuon p_{T}, rate matched to 40 / 60 / 80 kHz ---
         // Per rate point: every MET type on one canvas, a GEP-only canvas, an L1Calo-only canvas
@@ -7126,7 +7171,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("NC+Jet (")  +comboThrLabel(best_NC_Jet_20)+")",
              std::string("Rms+Jet (") +comboThrLabel(best_Rms_Jet_20)+")"},
             "GEP Jet MET + Combined Turn-on at 20 kHz", comboDir + "TurnOn_combined_Jet_20kHz.pdf",
-            {}, "Rate = 20 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+            {}, "Rate = 20 kHz", sig_h_metTruthCalo_coarse, 0.38, 0.15);
         drawTurnOnOverlay(
             {eff_TowerMET_20kHz,
              eff_combo_JwoJ_Tower_20kHz, eff_combo_NC_Tower_20kHz, eff_combo_Rms_Tower_20kHz},
@@ -7135,7 +7180,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("NC+Tower (")  +comboThrLabel(best_NC_Tower_20)+")",
              std::string("Rms+Tower (") +comboThrLabel(best_Rms_Tower_20)+")"},
             "GEP Tower MET + Combined Turn-on at 20 kHz", comboDir + "TurnOn_combined_Tower_20kHz.pdf",
-            {}, "Rate = 20 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+            {}, "Rate = 20 kHz", sig_h_metTruthCalo_coarse, 0.38, 0.15);
         // 40 kHz combined turn-ons
         drawTurnOnOverlay(
             {eff_JetMET_40kHz,
@@ -7145,7 +7190,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("NC+Jet (")  +comboThrLabel(best_NC_Jet_40)+")",
              std::string("Rms+Jet (") +comboThrLabel(best_Rms_Jet_40)+")"},
             "GEP Jet MET + Combined Turn-on at 40 kHz", comboDir + "TurnOn_combined_Jet_40kHz.pdf",
-            {}, "Rate = 40 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+            {}, "Rate = 40 kHz", sig_h_metTruthCalo_coarse, 0.38, 0.15);
         drawTurnOnOverlay(
             {eff_TowerMET_40kHz,
              eff_combo_JwoJ_Tower_40kHz, eff_combo_NC_Tower_40kHz, eff_combo_Rms_Tower_40kHz},
@@ -7154,7 +7199,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("NC+Tower (")  +comboThrLabel(best_NC_Tower_40)+")",
              std::string("Rms+Tower (") +comboThrLabel(best_Rms_Tower_40)+")"},
             "GEP Tower MET + Combined Turn-on at 40 kHz", comboDir + "TurnOn_combined_Tower_40kHz.pdf",
-            {}, "Rate = 40 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+            {}, "Rate = 40 kHz", sig_h_metTruthCalo_coarse, 0.38, 0.15);
         // 80 kHz combined turn-ons
         drawTurnOnOverlay(
             {eff_JetMET_80kHz,
@@ -7164,7 +7209,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("NC+Jet (")  +comboThrLabel(best_NC_Jet_80)+")",
              std::string("Rms+Jet (") +comboThrLabel(best_Rms_Jet_80)+")"},
             "GEP Jet MET + Combined Turn-on at 80 kHz", comboDir + "TurnOn_combined_Jet_80kHz.pdf",
-            {}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+            {}, "Rate = 80 kHz", sig_h_metTruthCalo_coarse, 0.38, 0.15);
         drawTurnOnOverlay(
             {eff_JetMET_60kHz,
              eff_combo_JwoJ_Jet_60kHz, eff_combo_NC_Jet_60kHz, eff_combo_Rms_Jet_60kHz},
@@ -7173,7 +7218,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("NC+Jet (")  +comboThrLabel(best_NC_Jet_60)+")",
              std::string("Rms+Jet (") +comboThrLabel(best_Rms_Jet_60)+")"},
             "GEP Jet MET + Combined Turn-on at 60 kHz", comboDir + "TurnOn_combined_Jet_60kHz.pdf",
-            {}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+            {}, "Rate = 60 kHz", sig_h_metTruthCalo_coarse, 0.38, 0.15);
         drawTurnOnOverlay(
             {eff_TowerMET_80kHz,
              eff_combo_JwoJ_Tower_80kHz, eff_combo_NC_Tower_80kHz, eff_combo_Rms_Tower_80kHz},
@@ -7182,7 +7227,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("NC+Tower (")  +comboThrLabel(best_NC_Tower_80)+")",
              std::string("Rms+Tower (") +comboThrLabel(best_Rms_Tower_80)+")"},
             "GEP Tower MET + Combined Turn-on at 80 kHz", comboDir + "TurnOn_combined_Tower_80kHz.pdf",
-            {}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+            {}, "Rate = 80 kHz", sig_h_metTruthCalo_coarse, 0.38, 0.15);
         drawTurnOnOverlay(
             {eff_TowerMET_60kHz,
              eff_combo_JwoJ_Tower_60kHz, eff_combo_NC_Tower_60kHz, eff_combo_Rms_Tower_60kHz},
@@ -7191,7 +7236,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
              std::string("NC+Tower (")  +comboThrLabel(best_NC_Tower_60)+")",
              std::string("Rms+Tower (") +comboThrLabel(best_Rms_Tower_60)+")"},
             "GEP Tower MET + Combined Turn-on at 60 kHz", comboDir + "TurnOn_combined_Tower_60kHz.pdf",
-            {}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse, 0.38, 0.15);
+            {}, "Rate = 60 kHz", sig_h_metTruthCalo_coarse, 0.38, 0.15);
 
         // --- Rate vs Efficiency curves (background rate vs signal efficiency) ---
         auto out_RateVsEff_gMET     = MakeRateVsEff(sig_h_gMET,     back_hw_gMET);
@@ -7220,13 +7265,20 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         styleRVE(out_RateVsEff_GEPJwoJMET.gRate_vsEff, kP10Brown);
 
         // Individual PDFs
-        auto drawRVEsingle = [&](TGraph* g, const std::string& title, const std::string& path) {
+        auto drawRVEsingle = [&](TGraph* gIn, const std::string& title, const std::string& path) {
+            // Same rate floor as the overlays, on a copy: gIn is reused by the overlays below
+            TGraph* g = (TGraph*)gIn->Clone();
+            for (int p = g->GetN() - 1; p >= 0; --p)
+                if (g->GetPointY(p) < kRateVsEffMinRateHz) g->RemovePoint(p);
+            if (g->GetN() == 0) { delete g; return; }
             TCanvas c("c", "", 700, 600);
             gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14); gPad->SetTicks(1,1);
             gPad->SetLogy();
             g->SetTitle((title+";Signal Efficiency;Estimated Background Rate [Hz]").c_str());
+            g->SetMinimum(kRateVsEffMinRateHz);
             g->Draw("AP");
             c.cd(); DrawATLASLabel(); c.SaveAs(path.c_str());
+            delete g;
         };
         drawRVEsingle(out_RateVsEff_gMET.gRate_vsEff,     "gFEX MET (JwoJ)",    fDir + "RateVsEff_gFEX_MET_JwoJ.pdf");
         drawRVEsingle(out_RateVsEff_gMET_NC.gRate_vsEff,  "gFEX MET (NoiseCut)",fDir + "RateVsEff_gFEX_MET_NoiseCut.pdf");
@@ -7336,32 +7388,32 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 {eff_gMET_80kHz, eff_gMET_JwoJAOD_80kHz},
                 {"gFEX JwoJ (Sim)", "gFEX JwoJ (AOD)"},
                 "gFEX JwoJ Turn-on at 80 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_JwoJ_AOD_vs_Sim_80kHz.pdf",
-                {thr_gMET_80kHz, thr_gMET_JwoJAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_80kHz, thr_gMET_JwoJAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthCalo_coarse);
             drawTurnOnOverlay(
                 {eff_gMET_60kHz, eff_gMET_JwoJAOD_60kHz},
                 {"gFEX JwoJ (Sim)", "gFEX JwoJ (AOD)"},
                 "gFEX JwoJ Turn-on at 60 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_JwoJ_AOD_vs_Sim_60kHz.pdf",
-                {thr_gMET_60kHz, thr_gMET_JwoJAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_60kHz, thr_gMET_JwoJAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthCalo_coarse);
             drawTurnOnOverlay(
                 {eff_gMET_NC_80kHz, eff_gMET_NCAOD_80kHz},
                 {"gFEX NoiseCut (Sim)", "gFEX NoiseCut (AOD)"},
                 "gFEX NoiseCut Turn-on at 80 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_NC_AOD_vs_Sim_80kHz.pdf",
-                {thr_gMET_NC_80kHz, thr_gMET_NCAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_NC_80kHz, thr_gMET_NCAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthCalo_coarse);
             drawTurnOnOverlay(
                 {eff_gMET_NC_60kHz, eff_gMET_NCAOD_60kHz},
                 {"gFEX NoiseCut (Sim)", "gFEX NoiseCut (AOD)"},
                 "gFEX NoiseCut Turn-on at 60 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_NC_AOD_vs_Sim_60kHz.pdf",
-                {thr_gMET_NC_60kHz, thr_gMET_NCAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_NC_60kHz, thr_gMET_NCAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthCalo_coarse);
             drawTurnOnOverlay(
                 {eff_gMET_Rms_80kHz, eff_gMET_RmsAOD_80kHz},
                 {"gFEX Rms (Sim)", "gFEX Rms (AOD)"},
                 "gFEX Rms Turn-on at 80 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_Rms_AOD_vs_Sim_80kHz.pdf",
-                {thr_gMET_Rms_80kHz, thr_gMET_RmsAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_Rms_80kHz, thr_gMET_RmsAOD_80kHz}, "Rate = 80 kHz", sig_h_metTruthCalo_coarse);
             drawTurnOnOverlay(
                 {eff_gMET_Rms_60kHz, eff_gMET_RmsAOD_60kHz},
                 {"gFEX Rms (Sim)", "gFEX Rms (AOD)"},
                 "gFEX Rms Turn-on at 60 kHz (AOD vs Sim)", fDir + "TurnOn_gFEX_Rms_AOD_vs_Sim_60kHz.pdf",
-                {thr_gMET_Rms_60kHz, thr_gMET_RmsAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthNonInt_coarse);
+                {thr_gMET_Rms_60kHz, thr_gMET_RmsAOD_60kHz}, "Rate = 60 kHz", sig_h_metTruthCalo_coarse);
             // Rate vs efficiency: AOD vs Sim
             auto out_RVE_JwoJAOD = MakeRateVsEff(sig_h_gMET_JwoJAOD, back_hw_gMET_JwoJAOD);
             auto out_RVE_NCAOD   = MakeRateVsEff(sig_h_gMET_NCAOD,   back_hw_gMET_NCAOD);
@@ -7491,7 +7543,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         thr_TowerMET_60kHz_vec.push_back(thr_TowerMET_60kHz);
         thr_TotalMET_80kHz_vec.push_back(thr_TotalMET_80kHz);
         thr_TotalMET_60kHz_vec.push_back(thr_TotalMET_60kHz);
-        sig_h_metTruthNonInt_unscaled_vec.push_back(cloneDetached(sig_h_metTruthNonInt_coarse));
+        sig_h_metTruthCalo_unscaled_vec.push_back(cloneDetached(sig_h_metTruthCalo_coarse));
         // Z->mumu turn-ons and the background jet-multiplicity profiles keep their own label
         // vectors: the former only exists for Zmumu inputs, the latter only when at least one
         // truth jet collection was present, so neither is guaranteed parallel to labels.
@@ -7702,8 +7754,8 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
         // The shaded band is file 0's truth MET spectrum. That stands for the whole canvas only
         // when every curve is the same process at a different emulator config; across processes
         // it would be one signal's spectrum drawn under three signals' turn-ons, so drop it.
-        TH1F* truthOverlay = (multipleSignalProcesses || sig_h_metTruthNonInt_unscaled_vec.empty())
-                             ? nullptr : sig_h_metTruthNonInt_unscaled_vec[0];
+        TH1F* truthOverlay = (multipleSignalProcesses || sig_h_metTruthCalo_unscaled_vec.empty())
+                             ? nullptr : sig_h_metTruthCalo_unscaled_vec[0];
         drawTurnOnOverlay(eff_gMET_80kHz_vec,
                           makeConfigLabels("gFEX JwoJ"),
                           "gFEX JwoJ Turn-on at 80 kHz",
@@ -7922,7 +7974,7 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                 const std::string legHdr    = mfSignalName.empty() ? algoLabel
                                                                  : mfSignalName + ", " + algoLabel;
                 drawResidualProfileOverlay(sig_prof_absRes_vs_truthMET_vec[iR], labels,
-                                           "Truth MET_{NonInt} [GeV]", "#LTTruth - TOB MET#GT [GeV]",
+                                           "Truth Calo MET [GeV]", "#LTTruth - TOB MET#GT [GeV]",
                                            calDir + "sig_" + shortName + "_absResidual_vs_truthMET_multi.pdf",
                                            legHdr);
                 drawResidualProfileOverlay(sig_prof_absRes_vs_sumET_vec[iR], labels,
@@ -7930,13 +7982,13 @@ void analyze_files(std::vector<std::pair<std::string, std::string>> signalFiles,
                                            calDir + "sig_" + shortName + "_absResidual_vs_sumET_multi.pdf",
                                            legHdr);
                 drawResidualProfileOverlay(sig_prof_relRes_vs_truthMET_vec[iR], labels,
-                                           "Truth MET_{NonInt} [GeV]",
-                                           "#LT(Truth - TOB) / Truth MET_{NonInt}#GT",
+                                           "Truth Calo MET [GeV]",
+                                           "#LT(Truth - TOB) / Truth Calo MET#GT",
                                            calDir + "sig_" + shortName + "_relResidual_vs_truthMET_multi.pdf",
                                            legHdr);
                 drawResidualProfileOverlay(sig_prof_relRes_vs_sumET_vec[iR], labels,
                                            resSumETLabel[iR],
-                                           "#LT(Truth - TOB) / Truth MET_{NonInt}#GT",
+                                           "#LT(Truth - TOB) / Truth Calo MET#GT",
                                            calDir + "sig_" + shortName + "_relResidual_vs_sumET_multi.pdf",
                                            legHdr);
             }
@@ -8122,12 +8174,16 @@ void metAnalysisAndRates() {
     // The input ntuple is per-process; set the .first of each signalFiles entry to the
     // matching process input below so multiple signal processes can be analysed together.
     const std::string sigInput  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ZvvHbb_v4/mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    const std::string sigInputTtbarAllhad  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_allhad_v4/mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     const std::string sigInputTtbarSemilep = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_semilep_v4/mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     const std::string sigInputTtbarDilep   = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/ttbar_dilep_v4/mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     // Z->mumu: the sample the dimuon-p_{T} turn-ons need. HERNTupler only retrieves TruthMuons
     // (and so only fills dimuonPt) for this sample, and analyze_files keys the dimuon plots off
     // "Zmumu" appearing in the path — so this input must be used, not a copy under another name.
     const std::string sigInputZmumu = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/Zmumu_v4/mc21_14TeV_Zmumu_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    // VBF H->ZZ->4nu (MET75 filter) and stau-stau LLP (500 GeV, 10 ns); PU200 only
+    const std::string sigInputVBFHZZ4nu = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/VBF_H_ZZ4nu_v4/mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
+    const std::string sigInputStauStau  = "/data/larsonma/GEPHadronicEventReconstruction/ntuples/StauStau_v4/mc21_14TeV_StauStauLLP_500_0_10ns_e8557_s4422_r16130_DAOD_NTUPLE_GEP.root";
     // Glob over the ten per-slice ntuples rather than a hadd'd combination: the merged
     // file would exceed ROOT's 100 GB TTree::fgMaxTreeSize and come out truncated.
     // ChainSource turns this into one TChain per tree (see chainSource.h).
@@ -8151,802 +8207,85 @@ void metAnalysisAndRates() {
     // to see the effect of down-weighting the jet contribution. Future: per-eta calibrated SFs.
     std::vector<std::pair<std::string, std::string>> signalFiles = {
 
-        // For new OR studies 08122026
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF0p5.root"   },
-
-        // For new PU studies 08132026
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        // Z->mumu Overlap Removal comparison 08192026: EtaSK, jetEt15 / towerEt2, jet coefficient
-        // 1.0, tower coefficient 0.3 / 0.5 / 1.0, with and without OR. Grouped by OR state so the
-        // legend reads as two blocks of three. Z->mumu so the dimuon-p_{T} turn-ons come out too.
-        /*{ sigInputZmumu, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1.root"   },
-        { sigInputZmumu, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1.root"   },
-        { sigInputZmumu, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"     },
-        { sigInputZmumu, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"     },
-        { sigInputZmumu, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"     },
-        { sigInputZmumu, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"       },*/
-
-        // For "Nominal" aka firmware implemented algorithm. Several signal processes at ONE
-        // emulator config against one shared dijet background — the run the
-        // TruthMET_NonInt_SharedBkg overlay exists for.
+        // ttbar all-hadronic, VBF H->ZZ->4nu and stau-stau LLP, PU 200 (config from the current submit_met_emulation.py grid)
         //
-        // Z->mumu is left out on purpose: its truth MET_NonInt is empty (the muons are Int, not
-        // NonInt), so it would contribute a curve sitting on zero and drag the shared axis with
-        // it. Its own plots come from the dimuon-p_{T} turn-ons, not from truth MET.
-        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        //
+        //
+        { sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"},
+        { sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"},
+        { sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"},
+        { sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"},
+        { sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"},
 
-        //{ sigInputZmumuPU140,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        /*{ sigInputVBFHZZ4nu, emuDir + "mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputVBFHZZ4nu, emuDir + "mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputVBFHZZ4nu, emuDir + "mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputVBFHZZ4nu, emuDir + "mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputVBFHZZ4nu, emuDir + "mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
 
-        // PU suppression comparison studies for nominal configuration [PU 200]:
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
-
-        // JES-calibrated WTACone jets 09262026 - ZvvHbb PU 140, EtaSK, jet coefficient 1:
-        // jet E_T threshold 0 / 15 x tower E_T threshold 0 / 2, each as the OR x tower coefficient
-        // square (NoOR / OR x 1 / 0.4)
-        // Calib vs NoCalib overlay: only configs with an uncalibrated PU140 output in emuDirNoCalib
-        // are active. The full scan is kept below, commented out, for when those exist.
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"     },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"       },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"     },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"     },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"       },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"     },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"    },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"      },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"    },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"    },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"      },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"    },
-        // Calibrated-jet E_T threshold scan 09262026 (PU 140, EtaSK, NoOR, TC1 / JC1, jet E_T
-        // threshold on CALIBRATED E_T): does a higher calibrated threshold recover the uncalibrated
-        // J15 performance? Tower E_T threshold 2 is compared against the NoCalib references below;
-        // tower E_T threshold 0 has no NoCalib reference at PU 140, so it is left for a separate run.
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt20_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt25_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt30_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt35_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt40_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt45_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt55_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt20_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt25_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt30_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt35_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt40_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        // The same two configurations before the calibration (outputs from 2026-09-25)
-        //{ sigInputPU140, emuDirNoCalib + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputPU140, emuDirNoCalib + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-
-        // PU 200 calib + OR studies
-        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-        //{ sigInputPU, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-
-        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },*/
+        /*{ sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"                },
+        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root" },
+        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputTtbarAllhad, emuDir + "mc21_14TeV_ttbar_hdamp258p75_allhad_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputVBFHZZ4nu, emuDir + "mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputStauStau,  emuDir + "mc21_14TeV_StauStauLLP_500_0_10ns_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { sigInputZmumu,  emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
 
 
-        // 2x2 gBlock studies - ZvvHbb PU 200
-        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },*/
 
 
-        // First GEP JwoJ studies - hard Et threshold scan ZvvHbb PU 200
-        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
-
-        /*{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
-
-        // First GEP JwoJ studies - hard Et threshold scan ttbar semilep PU 200
-        /*{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
-
-        // First GEP JwoJ studies - hard Et threshold scan ttbar dilep PU 200
-        /*{ sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInputTtbarDilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
-
-
-        /*{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt15.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt20.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt15.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt20.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt15.root"   },
-        { sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt20.root"   },*/
-
-        // PU suppression comparison studies for nominal configuration [PU 140]:
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        // PU 200 vs. 140 EtaSK rates, nominal: NO jet or tower E_T threshold (jetEt0_towerEt0), so
-        // the pileup dependence is the algorithm's own and not that of a threshold cutting into a
-        // pileup-dependent spectrum. Same config at r16129 and r16130, which is what the
-        // RateVsMu_MET*.pdf matched-pair block keys on.
-        //{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        //{ sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-
-        //{ sigInputZmumu,      emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        //{ sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputTtbarSemilep,      emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputTtbarDilep,      emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        // "Ideal scenario" 08282026 — the algorithm extensions that each helped on their own,
-        // applied together: EtaSK pileup suppression, J15/T2 jet and tower E_T thresholds, jet
-        // overlap removal, and a down-weighted tower coefficient (TC 0.4, JC 1) in the totalMET
-        // sum. One config, PU 200, across the three processes that carry real truth MET_NonInt.
-        // Z->mumu is excluded for the same reason as in the nominal process comparison above: its
-        // truth MET_NonInt is empty, so it would sit on zero and drag the shared axis.
-        // Background is the same dijet file in all three entries, so the shared-background truth
-        // MET overlay is produced as well as the per-file ones.
-        /*{ sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"                },
-        { sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        // Same config and the same three processes at PU 140 (r16129), so the fixed-rate
-        // threshold and efficiency printouts come out for both pileup scenarios in one run.
-        { sigInputPU140,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"                },
-        { sigInputTtbarSemilepPU140, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { sigInputTtbarDilepPU140,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },*/
-
-        // "Nominal" process comparison 08282026 — the counterpart of the ideal-scenario block
-        // above at the firmware-implemented configuration: EtaSK pileup suppression, NO jet or
-        // tower E_T threshold (jetEt0_towerEt0), no overlap removal, unit coefficients
-        // (TC 1, JC 1). Same three processes at both pileup values, so one run yields the
-        // nominal fixed-rate thresholds and efficiencies for the PU 140 / PU 200 tables.
-        // Z->mumu is excluded for the same reason as above: its truth MET_NonInt is empty.
-        //{ sigInput,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"                },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
-        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ sigInputPU140,             emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"                },
         //{ sigInputTtbarSemilepPU140, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
         //{ sigInputTtbarDilepPU140,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
 
-        // Overlap removal x tower coefficient at J0/T0, 08282026 — the full 2x2 square with NO
-        // jet or tower E_T threshold on the input objects, so neither effect is confounded by a
-        // threshold cutting into a pileup-dependent spectrum. This is what the jetEt0_towerEt0
-        // TC0.4 production was run for: the extended-algorithm result mixes thresholds, OR and
-        // the coefficient together, and these four points separate the last two.
-        //   entry 0 = nominal (NoOR, TC 1)          entry 2 = NoOR, TC 0.4
-        //   entry 1 = OR, TC 1                      entry 3 = OR,   TC 0.4
-        // ZvvHbb at PU 200 only: OR_twrSF1 exists at r16130 but NOT at r16129, so the square is
-        // complete at PU 200 alone. Shared dijet background across all four, so the
-        // shared-background truth MET overlay is produced too.
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"     },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root" },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-
-        // Rate vs pileup (mu) study 08212026 — the RateVsMu_MET*.pdf plots.
-        // Those plots pair r16129 with r16130 on the emulator config string and skip any config
-        // that appears at only one pileup, so the entries have to come in PU140 / PU200 pairs of
-        // the SAME configuration. Two pairs here, NoSK and EtaSK, which also shows what the
-        // pileup suppression buys as mu rises. Uncomment together with the matching background
-        // entries, labels, and overlayDir below.
-        /*{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        { sigInput,      emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },*/
-
-        // PU 200 + varying tower coefficient studies 08182026
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-
-        // PU 200 + varying tower coefficient studies 08182026 - ttbar semileptonic decay
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-
-        // PU 200 + varying tower coefficient studies 08182026 - ttbar dileptonic decay
-        /*{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
-        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
-        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
-        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
-        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
-        { sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },*/
-
-        // PU 200 + varying tower coefficient studies 08182026 - Z->mumu (dimuon-p_{T} turn-ons)
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
-        //{ sigInputZmumu,        emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-
-        // PU 140 + varying tower coefficient studies 08182026
-        /*{ sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
-        { sigInputPU140, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },*/
-
-        // Z->mumu, same four configs as the PU study above (PU140/PU200 x NoSK/EtaSK). This is
-        // the sample the dimuon-p_{T} turn-ons come from — they are only produced for inputs
-        // with "Zmumu" in the path, since HERNTupler only fills dimuonPt for this sample.
-        // Uncomment these (and the matching labels / signalName / signalNames below) to run it.
-        //{ sigInputZmumuPU140, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputZmumuPU140, emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ sigInputZmumu,      emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ sigInputZmumu,      emuDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root" },
-        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ sigInputTtbarSemilep, emuDir + "mc21_14TeV_ttbar_hdamp258p75_semilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        //{ sigInputTtbarDilep,   emuDir + "mc21_14TeV_ttbar_hdamp258p75_dilep_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-
-
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_OR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_OR_twrSF1_jetSF1.root"   },
-        ///{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_OR_twrSF1_jetSF1.root"   },
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_OR_twrSF1_jetSF1.root"   },
-
-        //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF0p4_jetSF1.root"   },
-       //{ sigInput, emuDir + "mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF1_jetSF1.root"   },
     };
 
     std::vector<std::pair<std::string, std::string>> backgroundFiles = {
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },*/
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-
-       // { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt10_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt20_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        // For new OR studies 08122026
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF0p5.root"   },
-
-        // For new PU studies 08132026
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        // The Z->mumu block above pairs with these same four background entries — the emulator
-        // configs and the pileup scenarios line up one for one, so nothing changes on this side.
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        // Z->mumu Overlap Removal comparison 08192026 — the dijet background at the matching
-        // emulator config, one entry per signal entry above and in the same order.
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1.root"     },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"     },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"     },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"     },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"       },*/
-
-        // For "Nominal" aka firmware implemented algorithm. One entry per signal entry above —
-        // the same dijet emulation repeated, since the background does not depend on the process.
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },   // Z->mumu, dropped
-
-
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-        // PU suppression comparison studies for nominal configuration [PU 200]:
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-
-        // JES-calibrated WTACone jets 09262026 - PU 140, parallel to the ZvvHbb block in signalFiles
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"     },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"       },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"     },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"     },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"       },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"     },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"    },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"      },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"    },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"    },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"      },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"    },
-        // Calibrated-jet E_T threshold scan 09262026 (PU 140, EtaSK, NoOR, TC1 / JC1, jet E_T
-        // threshold on CALIBRATED E_T): does a higher calibrated threshold recover the uncalibrated
-        // J15 performance? Tower E_T threshold 2 is compared against the NoCalib references below;
-        // tower E_T threshold 0 has no NoCalib reference at PU 140, so it is left for a separate run.
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt20_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt25_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt30_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt35_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt40_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt45_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt55_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt20_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt25_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt30_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt35_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt40_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        // The same two configurations before the calibration (outputs from 2026-09-25)
-        //{ backInputPU140, emuDirNoCalib + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInputPU140, emuDirNoCalib + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-
-        // PU 200 calib + OR studies
-
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"  },*/
-
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"  },
-
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"  },
-
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"  },*/
-
-        // 2x2 gBlock studies - PU 200
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p35_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt10_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt12.5_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt15_blk2x2.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p45_jetSF1_GEPJwoJ_hardEt17.5_blk2x2.root"   },*/
-
-        // First GEP JwoJ studies - hard Et threshold scan - PU 200
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
-
-        // First GEP JwoJ studies - hard Et threshold scan - PU 140
-        /*{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt12.5.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt5.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt7.5.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt12.5.root"   },*/
-
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt15.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p3_jetSF1_GEPJwoJ_hardEt20.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt15.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt20.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt10.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt15.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p5_jetSF1_GEPJwoJ_hardEt20.root"   },*/
-
-
-        // PU suppression comparison studies for nominal configuration [PU 140]:
-       //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_SK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_SK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
-
-        // PU 200 vs. 140 EtaSK rates, nominal (jetEt0_towerEt0) — one entry per signal entry above.
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1.root"   },
-        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-
         // PU 200 signal comparison
-        //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt40_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt45_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt55_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt60_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+
+
+        /*{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
+        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt50_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },*/
 
         //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
         //{ backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
 
-        // "Ideal scenario" 08282026 — matches the six signal entries above. The same dijet
-        // background file within each pileup scenario, so the shared-background overlay is
-        // produced; r16129 backgrounds pair with the r16129 signals (never cross the two).
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root" },*/
-
-        // "Nominal" process comparison 08282026 — matches the six nominal signal entries above.
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
-        //{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root" },
-
-        // Overlap removal x tower coefficient at J0/T0, 08282026 — matches the four signal
-        // entries above. Same dijet background file in all four, so the thresholds are set by
-        // one and the same background at each configuration's own MET scale.
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"     },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_NoOR_twrSF0p4_jetSF1.root" },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt0_EtaSK_OR_twrSF0p4_jetSF1.root"   },*/
-
-        // Rate vs pileup (mu) study 08212026 — one entry per signal entry above, in the same
-        // order. The rate-vs-mu curves are built entirely from these background files; the
-        // signal side only supplies the config string the pairing keys on.
-        /*{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_NoOR_twrSF1_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },
-        { backInput,      emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"  },*/
-
-        // PU 200 + varying tower coefficient studies 08182026
-        /*{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
-        { backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },*/
-
-        // PU 140 + varying tower coefficient studies 08182026
-        /*{ backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p2_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p3_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p5_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p6_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p7_jetSF1.root"   },
-        { backInputPU140, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16129_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF1_jetSF1.root"   },*/
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        // ttbar semileptonic — same dijet background (process-independent), matching emu config
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-        // ttbar dileptonic — same dijet background (process-independent), matching emu config
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_NoOR_twrSF1_jetSF1.root"   },
-
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        // ttbar semileptonic — same dijet background (process-independent), matching emu config
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-        // ttbar dileptonic — same dijet background (process-independent), matching emu config
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_EtaSK_OR_twrSF0p4_jetSF1.root"   },
-
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_NoSK_OR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_EtaSK_OR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_SK_OR_twrSF1_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt0_NoSK_OR_twrSF1_jetSF1.root"   },
-
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF0p4_jetSF1.root"   },
-        //{ backInput, emuDir + "mc21_14TeV_jj_JZ_e8557_s4422_r16130_N_Towers_4096_jetEt15_towerEt2_SK_OR_twrSF1_jetSF1.root"   },
     };
 
     // Label for each file pair — shown in legend for multi-file overlays - NEEDS TO BE UPDATED AND THE SAME SIZE AS THE FILES BEING PROCESSED!
     std::vector<std::string> labels = {
-        /*"J10_T2_EtaSK_OR_TC1_JC1",
-        "J10_T2_EtaSK_OR_TC0.4_JC1",
-        "J15_T2_EtaSK_OR_TC1_JC1",
-        "J15_T2_EtaSK_OR_TC0.4_JC1",
-        "J20_T2_EtaSK_OR_TC1_JC1",
-        "J20_T2_EtaSK_OR_TC0.4_JC1",*/
-        //"NoOR_TC1_JC1",
-        //"OR_TC1_JC1",
-        //"NoOR_TC1_JC0.5",
-
-        //"J15_T1_NoSK_NoOR_PU140",
-        //"J15_T1_EtaSK_NoOR_PU140",
-        //"J15_T1_NoSK_NoOR_PU200",
-        //"J15_T1_EtaSK_NoOR_PU200",
-
-        /*"OR_TC0.2_JC1",
-        "OR_TC0.3_JC1",
-        "OR_TC0.4_JC1",
-        "OR_TC0.5_JC1",
-        "OR_TC0.6_JC1",
-        "OR_TC0.7_JC1",
-        "OR_TC1_JC1"*/
-
-        // Labels for the commented-out Z->mumu block above (same four configs).
-        //"Zmumu_J15_T1_NoSK_NoOR_PU140",
-        //"Zmumu_J15_T1_EtaSK_NoOR_PU140",
-        //"Zmumu_J15_T1_NoSK_NoOR_PU200",
-        //"Zmumu_J15_T1_EtaSK_NoOR_PU200",
-
-        // Labels for the commented-out "Nominal" block above — one config, four signal processes,
-        // so the label distinguishes the process rather than the emulator settings.
-        //"Nominal_ZvvHbb",
-        //"Nominal_tt_1lep",
-        //"Nominal_tt_2lep",
-        //"Nominal_Zmumu",   // no truth MET_NonInt — see the signal block above
-        //"J10_EtaSK",
-        //"J15_EtaSK",
-        //"J20_EtaSK",
-
-
-        /*"J0_T0_NoSK",
-        "J0_T0_SK",
-        "J0_T0_EtaSK",
-        "J15_T0_NoSK",
-        "J15_T0_SK",
-        "J15_T0_EtaSK",
-        "J0_T2_NoSK",
-        "J0_T2_SK",
-        "J0_T2_EtaSK",
-        "J15_T2_NoSK",
-        "J15_T2_SK",
-        "J15_T2_EtaSK",*/
-
-        // PU 200 vs. 140 at nominal (no jet/tower threshold), EtaSK both. The rate-vs-mu output
-        // names are these labels with the _PU140 / _PU200 marker stripped, so the pair MUST differ
-        // only in that marker or the two halves will not collapse onto one file name.
-        //"J0_T0_EtaSK_PU140",
-        //"J0_T0_EtaSK_PU200"
-
-        // "Ideal scenario" / "Nominal" process-comparison blocks above: one emulator config
-        // across three processes at two pileup values, so the legend distinguishes process and
-        // #LTPU#GT, not the configuration. The two blocks share these labels — swap which
-        // signal/background block is uncommented, not these.
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}, #LTPU#GT = 200",
-        //"t#bar{t} semileptonic decay, #LTPU#GT = 200",
-        //"t#bar{t} dileptonic decay, #LTPU#GT = 200",
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}, #LTPU#GT = 140",
-        //"t#bar{t} semileptonic decay, #LTPU#GT = 140",
-        //"t#bar{t} dileptonic decay, #LTPU#GT = 140"
-
-        // OR x tower coefficient square at J0/T0, in the signal-entry order above.
-        //"NoOR_TC1_JC1",
-        //"OR_TC1_JC1",
-        //"NoOR_TC0.4_JC1",
-        //"OR_TC0.4_JC1"
-
-        // Rate vs pileup (mu) study 08212026 — parallel to the file block above. The rate-vs-mu
-        // output file names come from these labels with the _PU140 / _PU200 marker stripped, so
-        // the two halves of a pair MUST differ only in that marker or they will not collapse
-        // onto one name (they are still paired on the file paths, not on the label).
-        /*"J15_T2_NoSK_PU140",
-        "J15_T2_NoSK_PU200",
-        "J15_T2_EtaSK_PU140",
-        "J15_T2_EtaSK_PU200",*/
+    
 
 
         //"PU140",
         //"PU200"
 
-        //"Nominal_Zmumu_PU200",
+        "J40_T2_EtaSK",
+        "J45_T2_EtaSK",
+        "J50_T2_EtaSK",
+        "J55_T2_EtaSK",
+        "J60_T2_EtaSK",
 
-        //"Nominal_ZvvHbb_PU200",
-        //"Nominal_ttsemilep_PU200",
-        //"Nominal_ttdilep_PU200",
-        //"Nominal_ZvvHbb_PU200",
-        //"Nominal_ZvvHbb_PU200_T2_J15_TC0.4",
-        //"Nominal_ZvvHbb_PU200_T2_J15",
-        /*"T2_TC0.3_HTH15",
-        "T2_TC0.3_HTH20",
-        "T2_TC0.3_HTH25",
-        "T2_TC0.3_HTH30",
-        "T2_TC0.4_HTH15",
-        "T2_TC0.4_HTH20",
-        "T2_TC0.4_HTH25",
-        "T2_TC0.4_HTH30",
-        "T2_TC0.5_HTH15",
-        "T2_TC0.5_HTH20",
-        "T2_TC0.5_HTH25",
-        "T2_TC0.5_HTH30",*/
+        
 
-        // JES-calibrated WTACone jets 09262026, ZvvHbb PU 140 — parallel to the signal block above
-        //"J0_T0_NoOR_TC1",
-        //"J0_T0_OR_TC1",
-        //"J0_T0_NoOR_TC0.4",
-        //"J0_T0_OR_TC0.4",
-        //"J0_T2_NoOR_TC1_Calib",
-        //"J0_T2_OR_TC1",
-        //"J0_T2_NoOR_TC0.4",
-        //"J0_T2_OR_TC0.4",
-        //"J15_T0_NoOR_TC1",
-        //"J15_T0_OR_TC1",
-        //"J15_T0_NoOR_TC0.4",
-        //"J15_T0_OR_TC0.4",
-        //"J15_T2_NoOR_TC1_Calib",
-        //"J15_T2_OR_TC1",
-        //"J15_T2_NoOR_TC0.4",
-        //"J15_T2_OR_TC0.4",
-        // Calibrated-jet E_T threshold scan 09262026 — parallel to the signal block above
-        //"J20_T2_NoOR_TC1_Calib",
-        //"J25_T2_NoOR_TC1_Calib",
-        //"J30_T2_NoOR_TC1_Calib",
-        //"J35_T2_NoOR_TC1_Calib",
-        //"J40_T2_NoOR_TC1_Calib",
-        //"J45_T2_NoOR_TC1_Calib",
-        //"J50_T2_NoOR_TC1_Calib",
-        //"J55_T2_NoOR_TC1_Calib",
-        //"J60_T2_NoOR_TC1_Calib",
-        //"J20_T0_NoOR_TC1_Calib",
-        //"J25_T0_NoOR_TC1_Calib",
-        //"J30_T0_NoOR_TC1_Calib",
-        //"J35_T0_NoOR_TC1_Calib",
-        //"J40_T0_NoOR_TC1_Calib",
-        // The same two configurations before the calibration
-        //"J0_T2_NoOR_TC1_NoCalib",
-        //"J15_T2_NoOR_TC1_NoCalib",
+        /*"Nominal_ZvvHbb",
+        "Nominal_ttsemilep",
+        "Nominal_ttdilep",
+        "Nominal_tthad",
+        "Nominal_HZZ4nu",
+        "Nominal_StauStau",
+        "Nominal_Zmumu",*/
 
         /*"J40_T2_OR_TC0.3_Calib",
         "J45_T2_OR_TC0.3_Calib",
@@ -8954,7 +8293,7 @@ void metAnalysisAndRates() {
         "J55_T2_OR_TC0.3_Calib",
         "J60_T2_OR_TC0.3_Calib",*/
 
-        "J60_T2_NoOR_Calib",
+        //"J60_T2_NoOR_Calib",
 
         //"J40_T2_OR_TC0.4_Calib",
         /*"J45_T2_OR_TC0.4_Calib",
@@ -9025,54 +8364,20 @@ void metAnalysisAndRates() {
     //std::string signalName = "Z #rightarrow mumu";        // Z->mumu OR comparison block above
     //std::string signalName = "t#bar{t} semileptonic decay";   // ttbar semilep coefficient block above
     //std::string signalName = "t#bar{t} dileptonic decay";     // ttbar dilep coefficient block above
-    // The "Nominal" block above runs four processes at once, so no single name applies to the
-    // multi-file overlays — leave it empty there and let signalNames label the per-file plots.
-    //std::string signalName = "";                              // "Nominal" block above
+    //std::string signalName = "t#bar{t} all-hadronic decay";                       // ttbar allhad
+    //std::string signalName = "VBF H #rightarrow ZZ #rightarrow 4#nu";            // VBF H->ZZ->4nu
+    //std::string signalName = "#tilde{#tau}#tilde{#tau} LLP, 500 GeV, 10 ns";     // stau-stau LLP
+
     // Per-file legend header (parallel to signalFiles/labels) so each signal process gets
     // its own label on per-file plots. Falls back to signalName for any unset entry.
     std::vector<std::string> signalNames = {
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
-        //"Z #rightarrow " + kMuMu,
-        //"t#bar{t} semileptonic decay",
-        //"t#bar{t} semileptonic decay",
-
-        // Per-file headers for the commented-out "Nominal" block above, in its file order.
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
-
-        // Z->mumu OR comparison block above: one process at six emulator configs, so the single
-        // entry covers every file via the fallback to signalName.
-        //"Z #rightarrow " + kMuMu,
-        //"t#bar{t} semileptonic decay",
-        //"t#bar{t} dileptonic decay",
-        //"Z #rightarrow mumu",
-        // Nominal PU-suppression block above: one process at three SK settings, so the single
-        // entry covers every file via the fallback to signalName.
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
-
-        // Nominal process-comparison block above, in its file order. signalName is empty for that
-        // run — no one name applies to the multi-file overlays — so these carry the per-file plots.
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
-        //"t#bar{t} semileptonic decay",
-        //"t#bar{t} dileptonic decay",
-
-        // PU140 vs PU200 nominal block above: one process at two pileups, so the single entry
-        // covers both files via the fallback to signalName.
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
-
-        // "Ideal scenario" block above, in its file order. signalName is empty for this run —
-        // no one process name applies to the multi-file overlays — so these carry the per-file
-        // plots' top-right process label. The PU 140 half repeats the same three names; the
-        // pileup itself is drawn separately by the ATLAS label.
         "Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
-        //"t#bar{t} semileptonic decay",
-        //"t#bar{t} dileptonic decay",
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
-        //"t#bar{t} semileptonic decay",
-        //"t#bar{t} dileptonic decay",
-
-        // OR x coefficient block above: ONE process at four configurations, so the single
-        // entry covers every file via the fallback to signalName.
-        //"Z #rightarrow #nu#bar{#nu}, H #rightarrow b#bar{b}",
+        "t#bar{t} semileptonic decay",
+        "t#bar{t} dileptonic decay",
+        "t#bar{t} all-hadronic decay",
+        "VBF H #rightarrow ZZ #rightarrow 4#nu",
+        "#tilde{#tau}#tilde{#tau} LLP, 500 GeV, 10 ns",
+        "Z #rightarrow mumu",
     };
     std::string outputDir  = "metAnalysisPlots/";
     //std::string overlayDir = "multiFileOverlay_MET_CoeffComparison_ZvvHbb_PU140/";
@@ -9092,7 +8397,7 @@ void metAnalysisAndRates() {
     //std::string overlayDir = "multiFileOverlay_MET_GEPJwoJ_HardThresholdScan_ZvvHbb_PU200_Scan2/";
     //std::string overlayDir = "multiFileOverlay_MET_CalibJets_J0J15_T0T2_ORxCoeff_ZvvHbb_PU140/";   // JES-calibrated jets full scan
     //std::string overlayDir = "multiFileOverlay_MET_CalibVsNoCalib_J0T2_J15T2_NoOR_TC1_ZvvHbb_PU140/";   // Calib vs NoCalib block above
-    std::string overlayDir = "multiFileOverlay_MET_CalibJetEtScan_vsNoCalib_OR_ZvvHbb_PU200/";   // calibrated jet E_T threshold scan above
+    std::string overlayDir = "multiFileOverlay_MET_NewSamples_Nominal_PU200/";   // calibrated jet E_T threshold scan above
 
     //mc21_14TeV_ZvvH125_bb_e8557_s4422_r16130_N_Towers_4096_jetEt0_towerEt2_EtaSK_NoOR_twrSF0p4_jetSF1_GEPJwoJ_hardEt10.root
     //std::string overlayDir = "multiFileOverlay_MET_RateVsPileup_ZmumuPUComparison/";   // rate vs mu study above
@@ -9115,6 +8420,16 @@ void metAnalysisAndRates() {
         };
         outputDir  = withJZ01Suffix(outputDir);
         overlayDir = withJZ01Suffix(overlayDir);
+    }
+
+    // Same for JZ0-only rates (use_jz0_only_rates_).
+    if (use_jz0_only_rates_) {
+        auto withJZ0Suffix = [](const std::string& dir) {
+            const std::string stem = (!dir.empty() && dir.back() == '/') ? dir.substr(0, dir.size() - 1) : dir;
+            return stem + "_JZ0/";
+        };
+        outputDir  = withJZ0Suffix(outputDir);
+        overlayDir = withJZ0Suffix(overlayDir);
     }
 
     gSystem->mkdir(outputDir.c_str(), true);

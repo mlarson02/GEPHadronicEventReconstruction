@@ -49,9 +49,19 @@ base_constants = {
     "eta_min_": -4.85,
     "eta_max_": -4.85 + 98 * 0.1,
     "phi_granularity_": math.pi / 32,
-    "phi_min_": -math.pi + math.pi / 64,
-    "phi_max_": -math.pi + math.pi / 64 + 64 * (math.pi / 32),
+    "phi_min_": math.pi / 64, # phi index 0 = [0, pi/32)
+    "phi_max_": math.pi / 64 + 64 * (math.pi / 32),
     "pi_digitized_in_phi_": 32, # phi_range_ / 2
+    # Jet eta: 10b two's complement, LSB 0.0125, code k covers [k, k+1) * 0.0125. Output jets carry it; input
+    # jets do when input_jets_use_jet_tob_encoding_. deltaR runs on the tower grid above either way
+    "jet_eta_bit_length_": 10,
+    "jet_eta_granularity_": 0.0125,
+    "jet_to_tower_eta_shift_": 3, # 8 jet codes per 0.1 tower
+    # Jet phi: 9b, LSB 2pi/512 from phi = 0; a tower-grid phi index i is code i << 3
+    "jet_phi_bit_length_": 9,
+    "jet_to_tower_phi_shift_": 3, # 8 jet codes per pi/32 tower
+    # Input jets: false = tower-grid indices, true = jet TOB eta/phi codes. Output jets always carry the codes
+    "input_jets_use_jet_tob_encoding_": "false",
     "deltaR2_granularity_": 0.1 * 0.1,
     "et_min_": 0,
     "et_max_": 2048,
@@ -339,13 +349,15 @@ constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + et_bit_lengt
 typedef ap_uint<total_bits_input_> input; // need 32b input, 64b output!
 typedef ap_uint<total_bits_output_> output;
 
-// The eta/phi codes span eta_range_ / phi_range_, which need 7 and 6 bits; the TOB fields
-// they are packed into are 3 bits wider, and those high bits are always zero. Read/pack via
-// the full field, but size all arithmetic from (bit_length_ - bits_padding_).
+// Tower-grid eta/phi indices span eta_range_ / phi_range_ (7 / 6 bits) in TOB fields 3 bits wider.
+// Input jets carry those padded indices, or full jet TOB codes if input_jets_use_jet_tob_encoding_;
+// either way they are reduced to tower-grid indices before any arithmetic. Output jets carry the codes.
 constexpr unsigned int eta_bits_padding_ = 3;
 constexpr unsigned int phi_bits_padding_ = 3;
+static_assert(jet_eta_bit_length_ == eta_bit_length_, "jet eta code must fill the TOB eta field");
+static_assert(jet_phi_bit_length_ == phi_bit_length_, "jet phi code must fill the TOB phi field");
 
-// Widths of the eta/phi codes themselves, as opposed to the padded TOB fields they ship in.
+// Widths of the tower-grid eta index and the phi code, as opposed to the TOB fields they ship in.
 // Size ALL arithmetic from these, never from *_bit_length_: the padding carries no information
 // and only inflates the multipliers, adders and comparators downstream.
 constexpr unsigned int eta_code_bits_ = eta_bit_length_ - eta_bits_padding_; // spans eta_range_

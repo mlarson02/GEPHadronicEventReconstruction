@@ -134,6 +134,20 @@ submit Zmumu \
     --gep-dir  "$(find_container $GEP_BASE/Zmumu  EXT0 .Zmumu.)" \
     --output-dir $OUT_BASE/Zmumu_v$ALGO
 
+# --- Signal: VBF H -> ZZ -> 4nu ---
+submit VBF_H_ZZ4nu \
+    --signal VBF_H_ZZ4nu --algo $ALGO \
+    --daod-dir "$(find_container $DAOD_BASE/VBF_H_ZZ4nu EXT1 .VBF_H_ZZ4nu.)" \
+    --gep-dir  "$(find_container $GEP_BASE/VBF_H_ZZ4nu  EXT0 .VBF_H_ZZ4nu.)" \
+    --output-dir $OUT_BASE/VBF_H_ZZ4nu_v$ALGO
+
+# --- Signal: Stau-Stau LLP (500 GeV, 10 ns) ---
+submit StauStau \
+    --signal StauStauLLP_500_0_10ns --algo $ALGO \
+    --daod-dir "$(find_container $DAOD_BASE/StauStau EXT1 .StauStauLLP_500_0_10ns.)" \
+    --gep-dir  "$(find_container $GEP_BASE/StauStau  EXT0 .StauStauLLP_500_0_10ns.)" \
+    --output-dir $OUT_BASE/StauStau_v$ALGO
+
 # --- Background: QCD Dijet JZ0-JZ9 ---
 for JZ in $(seq 0 9); do
     submit QCD_Dijet_JZ${JZ} \

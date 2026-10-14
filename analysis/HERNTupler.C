@@ -16,6 +16,10 @@
 #include "TH2F.h"
 #include "analysisHelperFunctions.h"
 
+// Jet memory prints can carry the jet TOB codes in the eta_bit_length_ / phi_bit_length_ fields
+static_assert(jet_eta_bit_length_ == eta_bit_length_, "jet eta code must fill the TOB eta field");
+static_assert(jet_phi_bit_length_ == phi_bit_length_, "jet phi code must fill the TOB phi field");
+
 // Satisfies the declaration in analysisHelperFunctions.h, which that header's rate-vs-threshold
 // helpers call but leave for each including macro to define. The ntupler draws no ATLAS-labelled
 // plots, so this is a no-op stub; the real implementations live in largeRJetAnalysisAndRates.C
@@ -186,6 +190,7 @@ inline OutputFiles makeMemPrintFilenames(std::string signalString, bool signalBo
         else if (signalString == "emerging_jets") tag = "mc21_14TeV_Zprime2EJs_Ld20_rho40_pi10_Zp1500_l50";
         else if (signalString == "Zmumu") tag = "mc21_14TeV_Zmumu";
         else if (signalString == "StauStauLLP_500_0_10ns") tag = "mc21_14TeV_StauStauLLP_500_0_10ns";
+        else if (signalString == "VBF_H_ZZ4nu") tag = "mc21_14TeV_VBFH125_ZZ4nu";
     } else {
         // generic: works for all slices 0..9 etc
         tag = "mc21_14TeV_jj_JZ" + std::to_string(jzSlice);
@@ -223,6 +228,7 @@ std::string makeFileDir(std::string signalString, bool signalBool, int jzSlice) 
         else if (signalString == "emerging_jets") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/emerging_jets";
         else if (signalString == "Zmumu") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/Zmumu";
         else if (signalString == "StauStauLLP_500_0_10ns") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/StauStauLLP_500_0_10ns";
+        else if (signalString == "VBF_H_ZZ4nu") return "/data/larsonma/GEPHadronicEventReconstruction/JETM42_DAODs/VBF_H_ZZ4nu";
     }
 
     // background path
@@ -260,6 +266,7 @@ TString makeOutputFileNamePU200(std::string signalString, bool signalBool, int j
         else if (signalString == "emerging_jets") return outDir + "mc21_14TeV_Zprime2EJs_Ld20_rho40_pi10_Zp1500_l50_e8532_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
         else if (signalString == "Zmumu") return outDir + "mc21_14TeV_Zmumu_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
         else if (signalString == "StauStauLLP_500_0_10ns") return outDir + "mc21_14TeV_StauStauLLP_500_0_10ns_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
+        else if (signalString == "VBF_H_ZZ4nu") return outDir + "mc21_14TeV_VBFH125_ZZ4nu_e8557_s4422_r16130_DAOD_NTUPLE_GEP" + suffix + ".root";
         else return "";
     }
     else {
@@ -310,6 +317,14 @@ unsigned int digitize(double value, int bit_length, double min_val, double max_v
     }
     if (verbose) std::cout << "returning: " << static_cast<unsigned int>(std::round((value - min_val) * scale)) << "\n";
     return static_cast<unsigned int>(std::round((value - min_val) * scale));
+}
+
+// Input-jet memory print eta / phi: jet TOB codes or tower-grid indices, per input_jets_use_jet_tob_encoding_
+inline int digitizeInputJetEta(double eta, unsigned int etaAltRange) {
+    return input_jets_use_jet_tob_encoding_ ? digitize_jet_eta(eta) : digitize(eta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
+}
+inline int digitizeInputJetPhi(double phi) {
+    return input_jets_use_jet_tob_encoding_ ? digitize_jet_phi(phi) : digitize_phi(phi);
 }
 
 // Define phi wrapping
@@ -2014,10 +2029,10 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         gt->SetBranchStatus("L1_gFexSRJetRoISim_phi", 1);
 
         // gFEX / jFEX emulated towers (present only in newer GEP ntuples)
-        if (gt->GetBranch("L1_gFexEmulatedTowers_et")) {
-            gt->SetBranchStatus("L1_gFexEmulatedTowers_et",  1);
-            gt->SetBranchStatus("L1_gFexEmulatedTowers_eta", 1);
-            gt->SetBranchStatus("L1_gFexEmulatedTowers_phi", 1);
+        if (gt->GetBranch("L1_gFexEmulatedTowers200_et")) {
+            gt->SetBranchStatus("L1_gFexEmulatedTowers200_et",  1);
+            gt->SetBranchStatus("L1_gFexEmulatedTowers200_eta", 1);
+            gt->SetBranchStatus("L1_gFexEmulatedTowers200_phi", 1);
         }
         if (gt->GetBranch("L1_jFexEmulatedTowers_et")) {
             gt->SetBranchStatus("L1_jFexEmulatedTowers_et",  1);
@@ -2359,10 +2374,10 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         std::vector<float>* gepIn_jFexEmulatedTowersEt  = nullptr;
         std::vector<float>* gepIn_jFexEmulatedTowersEta = nullptr;
         std::vector<float>* gepIn_jFexEmulatedTowersPhi = nullptr;
-        if (gt->GetBranch("L1_gFexEmulatedTowers_et")) {
-            gt->SetBranchAddress("L1_gFexEmulatedTowers_et",  &gepIn_gFexEmulatedTowersEt);
-            gt->SetBranchAddress("L1_gFexEmulatedTowers_eta", &gepIn_gFexEmulatedTowersEta);
-            gt->SetBranchAddress("L1_gFexEmulatedTowers_phi", &gepIn_gFexEmulatedTowersPhi);
+        if (gt->GetBranch("L1_gFexEmulatedTowers200_et")) {
+            gt->SetBranchAddress("L1_gFexEmulatedTowers200_et",  &gepIn_gFexEmulatedTowersEt);
+            gt->SetBranchAddress("L1_gFexEmulatedTowers200_eta", &gepIn_gFexEmulatedTowersEta);
+            gt->SetBranchAddress("L1_gFexEmulatedTowers200_phi", &gepIn_gFexEmulatedTowersPhi);
         }
         if (gt->GetBranch("L1_jFexEmulatedTowers_et")) {
             gt->SetBranchAddress("L1_jFexEmulatedTowers_et",  &gepIn_jFexEmulatedTowersEt);
@@ -2387,6 +2402,12 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
         if (!isZmumuSample)
             std::cout << "  TruthMuons not requested (dimuon branches stay at their defaults)\n";
 
+        // PU0 samples have no InTime/OutOfTime pileup truth jets; requesting them skipped every event.
+        // Not requested at PU0, so their trees fill with empty vectors.
+        const bool hasPileupTruthJets = (pileup != 0);
+        if (!hasPileupTruthJets)
+            std::cout << "  PU0: InTime/OutOfTime AntiKt4 truth jets not requested (trees stay empty)\n";
+
         unsigned int passedEventsCounter = 0;
         Long64_t nEventsToProcess = event.getEntries();
         if (trigGepPerfValidation) nEventsToProcess = std::min(nEventsToProcess, (Long64_t)gt->GetEntries()); // GEP file has only the events the Athena job produced
@@ -2410,13 +2431,13 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             }
 
             const xAOD::JetContainer* InTimeAntiKt4TruthJets = nullptr;
-            if (!event.retrieve(InTimeAntiKt4TruthJets, "InTimeAntiKt4TruthJets").isSuccess()) {
+            if (hasPileupTruthJets && !event.retrieve(InTimeAntiKt4TruthJets, "InTimeAntiKt4TruthJets").isSuccess()) {
                 std::cout << "Failed to retrieve in time PU Truth jets" << endl;
                 continue;
             }
 
             const xAOD::JetContainer* OutOfTimeAntiKt4TruthJets = nullptr;
-            if (!event.retrieve(OutOfTimeAntiKt4TruthJets, "OutOfTimeAntiKt4TruthJets").isSuccess()) {
+            if (hasPileupTruthJets && !event.retrieve(OutOfTimeAntiKt4TruthJets, "OutOfTimeAntiKt4TruthJets").isSuccess()) {
                 std::cout << "Failed to retrieve out of time PU Truth jets" << endl;
                 continue;
             }
@@ -3328,8 +3349,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                     if (WTAConeCellsTowersJetspT <= 0) continue;
 
-                    int phi_bin = digitize_phi(WTAConeCellsTowersJetsPhi);
-                    int eta_bin = digitize(WTAConeCellsTowersJetsEta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
+                    int phi_bin = digitizeInputJetPhi(WTAConeCellsTowersJetsPhi);
+                    int eta_bin = digitizeInputJetEta(WTAConeCellsTowersJetsEta, etaAltRange);
                     int pt_bin  = digitize(WTAConeCellsTowersJetspT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
                     //std::cout << "WTA pT [GeV]: " << WTAConeCellsTowersJetspT << "\n";
@@ -3552,8 +3573,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 if (et <= 0) continue; // FIXME
 
                 // Digitize each variable
-                int phi_bin = digitize_phi(jet->phi());
-                int eta_bin = digitize(jet->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
+                int phi_bin = digitizeInputJetPhi(jet->phi());
+                int eta_bin = digitizeInputJetEta(jet->eta(), etaAltRange);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
                                         
@@ -3668,8 +3689,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
                 if (et <= 0) continue;
 
                 // Digitize each variable
-                int phi_bin = digitize_phi(jet->phi());
-                int eta_bin = digitize(jet->eta(), eta_bit_length_, eta_min_, eta_max_, etaAltRange);
+                int phi_bin = digitizeInputJetPhi(jet->phi());
+                int eta_bin = digitizeInputJetEta(jet->eta(), etaAltRange);
                 int et_bin  = digitize(et, et_bit_length_,
                               static_cast<double>(et_min_), static_cast<double>(et_max_));
                                         
@@ -3867,8 +3888,8 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
                     if (etaskct_pT <= 0) continue; // don't store to digitized memories
 
-                    int phi_bin = digitize_phi(etaskct_phi);
-                    int eta_bin = digitize(etaskct_eta, eta_bit_length_, eta_min_, eta_max_, etaAltRange);
+                    int phi_bin = digitizeInputJetPhi(etaskct_phi);
+                    int eta_bin = digitizeInputJetEta(etaskct_eta, etaAltRange);
                     int pt_bin  = digitize(etaskct_pT,  et_bit_length_, // digitize the pT the same as E_T would be digitized
                                         static_cast<double>(et_min_), static_cast<double>(et_max_));
 
@@ -4210,7 +4231,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
             // Temporary vector to hold (index, Et) for sorting
             std::vector<std::pair<size_t, double>> truthJetEtWithIndex;
 
-            for (size_t i = 0; i < InTimeAntiKt4TruthJets->size(); ++i) {
+            for (size_t i = 0; InTimeAntiKt4TruthJets && i < InTimeAntiKt4TruthJets->size(); ++i) {
                 const auto& jet = (*InTimeAntiKt4TruthJets)[i];
                 double et = jet->e() / (1000.0 * cosh(jet->eta()));
                 truthJetEtWithIndex.emplace_back(i, et);  // Store original index and Et
@@ -4249,7 +4270,7 @@ void nTupler(bool signalBool, std::string signalString, unsigned int etaAltRange
 
             // --- Loop over OutOfTimeAntiKt4TruthJets ---
             std::vector<std::pair<size_t, double>> outOfTimeTruthJetEtWithIndex;
-            for (size_t i = 0; i < OutOfTimeAntiKt4TruthJets->size(); ++i) {
+            for (size_t i = 0; OutOfTimeAntiKt4TruthJets && i < OutOfTimeAntiKt4TruthJets->size(); ++i) {
                 const auto& jet = (*OutOfTimeAntiKt4TruthJets)[i];
                 double et = jet->e() / (1000.0 * cosh(jet->eta()));
                 outOfTimeTruthJetEtWithIndex.emplace_back(i, et);
@@ -4737,7 +4758,7 @@ void HERNTupler(){
     // (paths overridden inside nTupler), then feed its output to the emulation
     // (jetTaggerConfigLocal.sh with trigGepPerfValidation=true).
     const bool trigGepPerfValidation = true;
-    const unsigned int trigGepPerfValidationAlgoVersion = 3; // 2 = basic sample, 3 = advanced sample
+    const unsigned int trigGepPerfValidationAlgoVersion = 2; // 2 = basic sample, 3 = advanced sample
     if (trigGepPerfValidation) {
         const unsigned int etaAltRange = eta_range_; // 98 for both versions, see analysisHelperFunctions.h
         nTupler(/*signalBool=*/true, /*signalString=*/"ggF_hh_bbbb", etaAltRange, trigGepPerfValidationAlgoVersion,

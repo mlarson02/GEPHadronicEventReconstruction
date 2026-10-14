@@ -22,14 +22,15 @@ constexpr unsigned int total_bits_output_ = padded_zeroes_length_ + et_bit_lengt
 // granularity come from the code counts eta_range_ / phi_range_, not from the
 // field widths. eta_min_ / phi_min_ are the first tower *centre*, so a tower
 // digitizes to an integer code instead of landing on a round-half tie halfway
-// between two, and *_max_ is one LSB past the last centre.
+// between two, and *_max_ is one LSB past the last centre. Phi codes count from
+// phi = 0: index 0 = [0, pi/32).
 constexpr unsigned int eta_range_ = 98;
 constexpr unsigned int phi_range_ = 64;
 constexpr double eta_granularity_ = 0.1;
 constexpr double eta_min_ = -4.85;
 constexpr double eta_max_ = eta_min_ + eta_range_ * eta_granularity_;
 constexpr double phi_granularity_ = (2 * M_PI) / double(phi_range_); // pi/32
-constexpr double phi_min_ = -M_PI + phi_granularity_ / 2;
+constexpr double phi_min_ = phi_granularity_ / 2;
 constexpr double phi_max_ = phi_min_ + phi_range_ * phi_granularity_;
 constexpr unsigned int pi_digitized_in_phi_          =  phi_range_ / 2;      // 32
 constexpr unsigned int half_pi_digitized_in_phi_     =  pi_digitized_in_phi_/2; // 16, exactly pi/2
@@ -61,16 +62,17 @@ constexpr unsigned int sumET_high_  = sumET_low_ + et_bit_length_ - 1;
 // rather than landing on them. pi/2 is exactly half_pi_digitized_in_phi_ = 16
 // codes, so cos(phi) is this same table read 16 codes along.
 //
-// This table now AGREES BIT-FOR-BIT with the firmware trig module (MET_B_Trig in
-// trig.v) on all 64 codes -- verified entry by entry against its quarter-wave
-// magnitude table. Two divergences were recorded here previously and are both
-// closed; they are written out because the note is easy to reintroduce by
-// misreading the firmware:
+// This table AGREED BIT-FOR-BIT with the firmware trig module (MET_B_Trig in
+// trig.v) on all 64 codes while the phi origin was -pi. Since the move of the phi
+// codes to the [0, 2pi) origin it is the same table rotated by pi_digitized_in_phi_
+// codes, and trig.v needs the same rotation to match again. Two divergences were
+// recorded here previously and are both closed; they are written out because the
+// note is easy to reintroduce by misreading the firmware:
 //
-//  1. Index origin. trig.v was said to read the 6-bit code as signed, putting code
-//     0 at phi = +pi/64. It does not: its sign comes from phi[5], so codes 0..31
-//     are the negative-sine half-plane and code 0 is phi = -pi + pi/64, which is
-//     exactly phi_min_ here. No index flip is needed.
+//  1. Index origin. trig.v takes its sign from phi[5], so codes 0..31 are the
+//     negative-sine half-plane and its code 0 is phi = -pi + pi/64 -- the OLD
+//     phi_min_. With phi_min_ = +pi/64 codes 0..31 are the positive-sine
+//     half-plane, i.e. trig.v must invert phi[5] (a 32-code rotation).
 //  2. Amplitude. The table was said to sit ~0.042% low, at an effective amplitude
 //     of ~4094.3, as if from an uncompensated CORDIC gain. It does not: it is
 //     round(4096 * sin) exactly. Its maximum entry is 4091 rather than 4096 only

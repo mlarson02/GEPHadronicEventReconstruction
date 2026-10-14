@@ -52,17 +52,17 @@ WRAPPER = Path(__file__).parent / "run_met_emulation_job.sh"
 # to SIGNAL_STRINGS if the dimuon-p_T turn-ons are wanted at this configuration too.
 SIGNALS        = [True, False]        # True -> the signal processes below, False -> JZ dijet background
 #SIGNAL_STRINGS = ["ZvvHbb"]
-SIGNAL_STRINGS = ["ZvvHbb", "ttbar_semilep", "ttbar_dilep", "Zmumu"]
+SIGNAL_STRINGS = ["ZvvHbb", "ttbar_allhad", "ttbar_semilep", "ttbar_dilep", "Zmumu", "VBF_H_ZZ4nu", "StauStauLLP_500_0_10ns"]
 #SIGNAL_STRINGS = ["Zmumu"]
 # EtaSK is selected by ETA_SK_OBJECTS=True; PU_SUPPRESSION must be True alongside it, since the
 # output tag is EtaSK either way and running both values would give two jobs writing the same
 # filename.
 PU_SUPPRESSION           = [True]
 ETA_SK_OBJECTS           = [True]     # EtaSK
-JET_ET_THRESHOLDS        = [50.0]      # no jet E_T threshold
-TOWER_ET_THRESHOLDS      = [1.0]      # no tower E_T threshold
-DO_JET_TOWER_OR          = [True, False]   # OR and the corresponding NoOR
-SCALE_FACTOR_PAIRS       = [(0.4, 1.0), (0.5, 1.0), (0.6, 1.0), (1.0, 1.0)]    # twrSF0p4_jetSF1
+JET_ET_THRESHOLDS        = [55.0]      # no jet E_T threshold
+TOWER_ET_THRESHOLDS      = [2.0]      # no tower E_T threshold
+DO_JET_TOWER_OR          = [False]   # OR and the corresponding NoOR
+SCALE_FACTOR_PAIRS       = [(1.0, 1.0)]    # twrSF0p4_jetSF1
 #SCALE_FACTOR_PAIRS       = [(0.3, 1.0), (1.0, 1.0)]
 #SCALE_FACTOR_PAIRS       = [()(1.0, 1.0)] 
 # --- GEP JwoJ MET ----------------------------------------------------------------------------
@@ -142,9 +142,12 @@ _NTUPLE_BASE_BY_PU = {
 PILEUP = 200
 INPUT_DIRS = {
     "ZvvHbb":        f"{_NTUPLE_BASE}/ZvvHbb_v4/",
+    "ttbar_allhad":  f"{_NTUPLE_BASE}/ttbar_allhad_v4/",
     "ttbar_semilep": f"{_NTUPLE_BASE}/ttbar_semilep_v4/",
     "ttbar_dilep":   f"{_NTUPLE_BASE}/ttbar_dilep_v4/",
     "Zmumu":         f"{_NTUPLE_BASE}/Zmumu_v4/",
+    "VBF_H_ZZ4nu":   f"{_NTUPLE_BASE}/VBF_H_ZZ4nu_v4/",
+    "StauStauLLP_500_0_10ns": f"{_NTUPLE_BASE}/StauStau_v4/",
     "BACKGROUND": [
         f"{_NTUPLE_BASE}/QCD_Dijet_JZ0_v4/",
         f"{_NTUPLE_BASE}/QCD_Dijet_JZ1_v4/",
