@@ -82,12 +82,21 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
     #pragma HLS ARRAY_PARTITION variable=orCand complete
     for(unsigned int iSeedOR = nSeedsOutput_; iSeedOR < nTotalSeeds_; iSeedOR++){
         #pragma HLS unroll
-        // Emptiness from the jet eta code: with jet TOB inputs an all-zero seed word decodes to a non-zero tower index
-        bool nonEmpty = !(seedValues[iSeedOR].range(et_high_, et_low_) == 0 && seedJetEta[iSeedOR] == 0 && seedValues[iSeedOR].range(phi_high_ - phi_bits_padding_, phi_low_) == 0);
-        orCand[iSeedOR] = nonEmpty && !passesTwoRCut(
+        // Emptiness matches the emulation's guard (jetTaggerEmulation.cc): Et, tower-grid eta and phi all
+        // zero means no jet. Read the seed word's index fields directly, NOT seedJetEta -- routing this
+        // through the pre-pass output both diverges from the emulation (seedJetEta is 0 exactly when
+        // Et == 0, since towerIndexToJetEta never returns 0, so the eta term silently dropped out) and
+        // cost the parallel schedule below. Note that with jet TOB inputs an all-zero word decodes to a
+        // non-zero tower index, so such a seed reads as non-empty here -- same as the emulation.
+        bool nonEmpty = !(seedValues[iSeedOR].range(et_high_, et_low_) == 0 && seedValues[iSeedOR].range(eta_high_ - eta_bits_padding_, eta_low_) == 0 && seedValues[iSeedOR].range(phi_high_ - phi_bits_padding_, phi_low_) == 0);
+        // Evaluate the 2R check unconditionally and combine with & (not &&): `&&` short-circuits, and when
+        // HLS declines to if-convert that guard it keeps a real branch per candidate, putting each
+        // candidate's 3-cycle deltaR2 DSP in its own basic block and serializing the 8 checks (+24 cycles).
+        bool separated = !passesTwoRCut(
             seedValues[0].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[0].range(phi_high_ - phi_bits_padding_, phi_low_),
             seedValues[iSeedOR].range(eta_high_ - eta_bits_padding_, eta_low_), seedValues[iSeedOR].range(phi_high_ - phi_bits_padding_, phi_low_)
         );
+        orCand[iSeedOR] = nonEmpty & separated;
     }
 
     // Priority-select the lowest-index qualifying candidate (matches the original's first-match + break).
@@ -138,7 +147,15 @@ void jet_tag_adv(input seedValues[nTotalSeeds_], input inputObjectValues[maxObje
 
     bool indicesofProtoSeeds[nSeedsOutput_][nSeedsDeltaR_] = {false};
     ap_int<4> indices[2] = {-1, -1};
-    #pragma HLS bind_storage variable=indicesofProtoSeeds type=RAM_1P impl=lutram
+    // Fully partitioned into individual registers rather than bound to a RAM. This still satisfies the
+    // "no BRAM anywhere in this algorithm" requirement -- more strongly than binding to LUTRAM did, since
+    // complete partitioning leaves no memory object for HLS to infer BRAM from in the first place (same
+    // reasoning as the lut_/lutR_ partitioning at the top of this function).
+    // It is only nSeedsOutput_ * nSeedsDeltaR_ (2 x 4 = 8) bits, and the previous RAM_1P binding forced
+    // the "= {false}" init into a sequential one-write-per-cycle sub-loop (synthesized as
+    // jet_tag_adv_Pipeline_1: 8 iterations, 10 cycles of pure overhead) and serialized every read below
+    // behind the single port.
+    #pragma HLS ARRAY_PARTITION variable=indicesofProtoSeeds complete dim=0
     //std::cout << "Seed 1 Eta, Phi: " << seedValues[0].range(eta_high_ - eta_bits_padding_, eta_low_) << " , " << seedValues[0].range(phi_high_ - phi_bits_padding_, phi_low_) << "\n";
     //std::cout << "Seed 2 Eta, Phi: " << seedValues[1].range(eta_high_ - eta_bits_padding_, eta_low_) << " , " << seedValues[1].range(phi_high_ - phi_bits_padding_, phi_low_) << "\n";
     //std::cout << " ----------------- SEED POS OPT -----------------" << "\n";

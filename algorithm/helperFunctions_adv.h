@@ -84,12 +84,20 @@ inline ap_uint<deltaR2_bits_> calcDeltaR2(
     ap_uint<eta_code_bits_> uDEta;
     ap_uint<phi_code_bits_> corrDPhi;
     calcDeltaEtaPhi(eta1, phi1, eta2, phi2, uDEta, corrDPhi);
+    // Both squares map to fabric. These are tiny multiplies -- eta_code_bits_ x eta_code_bits_ (7x7) and
+    // phi_code_bits_ x phi_code_bits_ (6x6) -- so a DSP48 each is wasteful of the scarcest resource here
+    // (DSP was 15% of the SLR vs 9% for LUT). More importantly the DSP48 binding carries a 3-cycle
+    // latency, with the rawSum add fused into the same DSP, and every deltaR predicate pays it: the
+    // schedule has three sequential deltaR stages (overlap removal -> seed-position search -> jet
+    // building + subjet counting, the last two in parallel), which was 9 of the 18 total cycles.
+    // Bit-exact either way -- same arithmetic, different resource.
+    // Headroom is thin (est. 2.941 ns against 4.17 - 1.12 = 3.05 ns), so if fabric costs timing,
+    // uncomment the impl=dsp lines below to go back.
     ap_uint<2*eta_code_bits_>     etaSq    = uDEta * uDEta;
-    #pragma HLS bind_op variable=etaSq op=mul impl=dsp
-    // The phi square is only a 5-bit x 5-bit multiply -- a whole DSP48 per call is wasteful, and there's
-    // ample LUT headroom, so map it to fabric. Halves DSP usage (one DSP per calcDeltaR2 instead of two)
-    // while keeping the eta square on a genuine DSP. Bit-exact -- same arithmetic, different resource.
+    //#pragma HLS bind_op variable=etaSq op=mul impl=dsp
+    #pragma HLS bind_op variable=etaSq op=mul impl=fabric
     ap_uint<2*phi_code_bits_>     phiSq    = corrDPhi * corrDPhi;
+    //#pragma HLS bind_op variable=phiSq op=mul impl=dsp
     #pragma HLS bind_op variable=phiSq op=mul impl=fabric
     ap_uint<2*eta_code_bits_+1>   rawSum   = ap_uint<2*eta_code_bits_+1>(etaSq) + phiSq;
     return rawSum > ap_uint<deltaR2_bits_>((1 << deltaR2_bits_) - 1)

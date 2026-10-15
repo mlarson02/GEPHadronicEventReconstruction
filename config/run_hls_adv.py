@@ -449,7 +449,7 @@ if __name__ == "__main__":
                                 f"maxObj{maxObjectsConsidered}_"
                                 f"rMerge{rMergeCut_str}_"
                                 f"{signal_str}"
-                                "_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL_CSIM"
+                                "_WTAConeJetsCellsTowers_Adv_ValidateEmulation_FINAL_dEtaFabric"
                             )
                             print(f"Launching HLS with project name: {file_suffix}")
 

@@ -75,7 +75,11 @@ inline ap_uint<2*eta_code_bits_ + 1> calcDeltaR2(
     ap_uint<2*eta_code_bits_> etaSq    = uDEta * uDEta;
     #pragma HLS bind_op variable=etaSq op=mul impl=dsp
     ap_uint<2*phi_code_bits_> phiSq    = corrDPhi * corrDPhi;
-    #pragma HLS bind_op variable=phiSq op=mul impl=dsp
+    // The phi square is only a phi_code_bits_ x phi_code_bits_ (6x6) multiply -- a whole DSP48 per call
+    // is wasteful, and there's ample LUT headroom, so map it to fabric. Halves DSP usage (one DSP per
+    // calcDeltaR2 instead of two) while keeping the eta square on a genuine DSP. Bit-exact -- same
+    // arithmetic, different resource. Matches helperFunctions_adv.h.
+    #pragma HLS bind_op variable=phiSq op=mul impl=fabric
     return ap_uint<2*eta_code_bits_ + 1>(etaSq) + phiSq;
 }
 
