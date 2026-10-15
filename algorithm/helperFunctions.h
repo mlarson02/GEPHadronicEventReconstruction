@@ -73,7 +73,7 @@ inline ap_uint<2*eta_code_bits_ + 1> calcDeltaR2(
     // bug that was in jet_tag_adv.cc -- 32 truncated to 0, so back-to-back objects read as coincident.
     ap_uint<phi_code_bits_>   corrDPhi = uDPhi;
     ap_uint<2*eta_code_bits_> etaSq    = uDEta * uDEta;
-    #pragma HLS bind_op variable=etaSq op=mul impl=dsp
+    #pragma HLS bind_op variable=etaSq op=mul impl=fabric
     ap_uint<2*phi_code_bits_> phiSq    = corrDPhi * corrDPhi;
     // The phi square is only a phi_code_bits_ x phi_code_bits_ (6x6) multiply -- a whole DSP48 per call
     // is wasteful, and there's ample LUT headroom, so map it to fabric. Halves DSP usage (one DSP per
